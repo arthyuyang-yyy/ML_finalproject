@@ -26,7 +26,7 @@
 | `preprocessing.py` | 验证输入音频并分段 |
 | `overlap_detector.py` | 估计重叠分数并返回重叠区域 |
 | `dual_path_router.py` | 选择低重叠或高重叠路径 |
-| `asr.py` | 提供 ASR 接口，暂不加载模型 |
+| `asr.py` | 可插拔 ASR 适配器（mock/Whisper/Paraformer），带校准置信度 |
 | `diarization.py` | 提供说话人标注接口 |
 | `speech_separation.py` | 提供高重叠语音分离接口 |
 | `candidate_generator.py` | 表示多个高重叠候选解释 |

@@ -26,7 +26,7 @@ Audio
 | `preprocessing.py` | Validate and segment input audio |
 | `overlap_detector.py` | Score overlap and return overlap regions |
 | `dual_path_router.py` | Choose the low- or high-overlap path |
-| `asr.py` | Provide ASR interface without loading a model yet |
+| `asr.py` | Pluggable ASR adapters (mock/Whisper/Paraformer) with calibrated confidence |
 | `diarization.py` | Provide speaker-labeling interface |
 | `speech_separation.py` | Provide high-overlap separation interface |
 | `candidate_generator.py` | Represent multiple high-overlap interpretations |
