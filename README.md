@@ -1,3 +1,40 @@
+📢 【重要】机器学习大作业 GitHub 协作规范与工作要求
+各位组员，为了保证我们项目（ML_finalproject）的代码质量，防止覆盖彼此的代码，也为了让大家更好地分工，我们已经开通了 GitHub 的自动化分支保护机制与代码审查流程。
+
+以下是后续开发中所有人必须严格遵守的工作要求：
+
+1. 🛑 绝对禁止直接 Push 到 main 分支
+现在 main 分支已经完全锁死。任何人都无法（也禁止尝试）直接把代码推送到 main 分支。所有的日常开发和新功能编写，都必须在自己的本地分支上进行。
+
+2. 💻 标准开发流程（每次写代码请遵循这 4 步）：
+第一步：同步主分支
+在本地切换到 main 分支并拉取最新代码，确保你的基础代码是最新的：
+git checkout main ➡️ git pull origin main
+
+第二步：切出自己的功能分支
+根据你负责的模块，切出一个独立的特性分支（分支名用小写，可以用下划线或连字符，如 dev_data_preprocessing 或 feature_model_training）：
+git checkout -b 你的分支名
+
+第三步：在自己的分支上开发并提交
+在这个分支上写代码，完成后提交并推送到 GitHub：
+git add . ➡️ git commit -m "增加了XX模块/修复了XX问题" ➡️ git push origin 你的分支名
+
+第四步：在 GitHub 网页端发起 Pull Request (PR)
+登录 GitHub 网页，点击 Compare & pull request，请求将你的分支合并到 main 分支。
+
+3. 🛡️ 代码终审权（PR 审批规则）
+为了严格把关代码质量，系统已经配置了 Code Owners（代码所有者） 自动化机制：
+
+任何组员提交 PR 之后，系统会自动指定 @arthuyuyang-yyy 以及另外两位负责人作为核心评审人（Reviewers）。
+
+核心硬性规则：一个 PR 必须在 3 位负责人中拿到至少 2 个 Approve（通过），绿色的合并按钮才会解锁，代码才能合入 main。
+
+修改意见处理：负责人在 Code Review（代码审查）时如果对某行代码提出了修改意见，会在 PR 里留下一个讨论（Conversation）。在作者修改完代码并点击 “Resolve conversation” 之前，该 PR 将被系统强制锁死，无法合并。
+
+4. 📝 良好的 Commit 习惯
+请不要在 commit 信息里写 “111”、“update” 这种模糊的字眼。请用简短的一句话说清楚你这次改了什么，方便大家以后回滚代码和写大作业的最终报告。
+
+请大家务必按照这个规范来提交代码，第一次走流程如果遇到 git 报错或者网络问题，随时在群里呼叫负责人协助，大家加油！🚀
 # Overlap-aware Dual-path ASR with Episodic Memory for Multi-speaker Meeting Understanding
 
 [English](#project-title) | [中文完整翻译](#中文完整翻译) | [独立中文版](README.zh-CN.md)
