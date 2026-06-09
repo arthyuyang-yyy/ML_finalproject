@@ -130,28 +130,49 @@ Episodes support:
 
 ## Planned Experiments
 
-1. Compare predicted overlap routes with manual labels.
-2. Compare high-overlap candidate generation with forced single-output transcription.
-3. Compare plain-text, speaker-aware, and full-metadata LLM post-processing.
-4. Compare summary QA, transcript RAG, and speaker-aware Episodic Memory QA.
-5. Measure hallucination rate and timestamped evidence hit rate.
+| Experiment | Goal | Status |
+| --- | --- | --- |
+| 1. Overlap routing | Compare predicted overlap routes with manual labels | Infrastructure ready; baseline detector and experiment run pending |
+| 2. High-overlap candidates | Compare candidate generation with forced single-output transcription | Candidate interface defined; implementation and experiment pending |
+| 3. Metadata-aware LLM | Compare plain-text, speaker-aware, and full-metadata LLM post-processing | Prompt constraints defined; LLM integration and ablation pending |
+| 4. Episodic Memory QA | Compare summary QA, transcript RAG, and speaker-aware memory QA | Interfaces defined; storage, retrieval, and experiment pending |
+| 5. Hallucination and evidence | Measure hallucination rate and timestamped evidence hit rate | Metric contract and experiment pending |
 
 Full details are in [docs/experiment_plan.md](docs/experiment_plan.md).
 
 ## Current Status
 
-The repository currently contains the first-stage research design, annotation schema, and clean module interfaces. Heavy models such as Whisper, pyannote, and speech separation models are intentionally not loaded yet.
+The project is currently in the **baseline infrastructure stage**. Formal experiment results have not been produced yet.
+
+Completed:
+
+- bilingual research design, architecture, experiment plan, and module interfaces;
+- shared evidence-packet metadata schema, validation rules, and sample meeting fixture;
+- audio loading interface, mono conversion, linear resampling, peak normalization, and energy-based VAD segmentation;
+- controlled two-speaker overlap synthesis with SNR control and ground-truth overlap annotations;
+- objective WER, CER, overlap-routing, and best-mapping speaker-attribution metrics;
+- 46 unit tests covering the implemented baseline infrastructure.
+
+Pending before formal experiments:
+
+- calibrated overlap detector and routing-threshold study;
+- ASR, speaker diarization/clustering, and high-overlap candidate-generation baselines;
+- uncertainty-aware LLM integration and metadata-input ablations;
+- persistent Episodic Memory, retrieval, and evidence-backed QA;
+- manually annotated evaluation split and finalized evidence/hallucination metrics.
+
+Current verification note: 25 dependency-free tests pass in the present environment. The remaining 21 NumPy-based preprocessing and data-synthesis tests require installing the dependencies in `requirements.txt`. Heavy models such as Whisper, pyannote, and speech separation models remain intentionally unloaded.
 
 ## How to Run
 
-The current code is an interface-only scaffold:
+Install the lightweight baseline dependencies and run the infrastructure tests:
 
 ```bash
-python main.py
-python app.py
+python -m pip install -r requirements.txt
+python -m unittest discover -s tests -v
 ```
 
-Implement the TODOs in `src/` before running real audio experiments. Keep large audio files, model weights, and generated outputs outside Git.
+`main.py` and `app.py` remain placeholders because the end-to-end ASR, memory, and QA pipeline is not implemented yet. Keep large audio files, model weights, and generated outputs outside Git.
 
 ---
 
@@ -248,25 +269,46 @@ Episode 支持：
 
 ## 实验计划
 
-1. 将预测的重叠路由与人工标注进行比较。
-2. 比较高重叠候选生成与强制单一转写。
-3. 比较纯文本、带说话人信息和完整元信息三种 LLM 后处理方式。
-4. 比较摘要问答、纯转写 RAG 和说话人感知的 Episodic Memory 问答。
-5. 测量幻觉率和带时间戳的证据命中率。
+| 实验 | 目标 | 当前状态 |
+| --- | --- | --- |
+| 1. 重叠路由 | 将预测的重叠路由与人工标注比较 | 实验基础设施已完成；基础检测器和正式实验待完成 |
+| 2. 高重叠候选 | 比较候选生成与强制单一转写 | 候选接口已定义；实现和正式实验待完成 |
+| 3. 元信息感知 LLM | 比较纯文本、说话人感知和完整元信息 LLM 后处理 | 提示词约束已定义；LLM 集成和消融实验待完成 |
+| 4. Episodic Memory 问答 | 比较摘要问答、纯转写 RAG 和说话人感知记忆问答 | 接口已定义；存储、检索和正式实验待完成 |
+| 5. 幻觉与证据 | 测量幻觉率和带时间戳的证据命中率 | 指标定义和正式实验待完成 |
 
 完整实验计划见 [docs/experiment_plan.zh-CN.md](docs/experiment_plan.zh-CN.md)。
 
 ## 当前进度
 
-仓库目前包含第一阶段研究设计、标注 Schema 和清晰的模块接口。Whisper、pyannote 和语音分离模型等重模型暂未加载。
+项目目前处于**基础设施与基线准备阶段**，尚未产生正式实验结果。
+
+已完成：
+
+- 双语研究设计、系统架构、实验计划和模块接口；
+- 统一的 evidence-packet 元信息 Schema、校验规则和示例会议 fixture；
+- 音频加载接口、单声道转换、线性重采样、峰值归一化和基于能量的 VAD 分段；
+- 支持 SNR 控制和重叠真值标注的双说话人可控重叠语音合成；
+- WER、CER、重叠路由和最优映射说话人归属等客观评估指标；
+- 覆盖已实现基础设施的 46 项单元测试。
+
+正式实验前仍需完成：
+
+- 校准后的重叠检测器和路由阈值实验；
+- ASR、说话人日志/聚类和高重叠候选生成基线；
+- 不确定性感知 LLM 集成和元信息输入消融实验；
+- 持久化 Episodic Memory、检索和基于证据的问答；
+- 人工标注评估集，以及最终的证据与幻觉指标定义。
+
+当前验证说明：现有环境中不依赖 NumPy 的 25 项测试已通过；其余 21 项预处理和数据合成测试需要先安装 `requirements.txt` 中的依赖。Whisper、pyannote 和语音分离模型等重模型仍按计划保持未加载状态。
 
 ## 运行方式
 
-当前代码仅为接口骨架：
+安装轻量级基线依赖并运行基础设施测试：
 
 ```bash
-python main.py
-python app.py
+python -m pip install -r requirements.txt
+python -m unittest discover -s tests -v
 ```
 
-在进行真实音频实验之前，需要先实现 `src/` 中的 TODO。大型音频文件、模型权重和生成结果不应提交到 Git。
+`main.py` 和 `app.py` 仍为占位入口，因为端到端 ASR、记忆与问答流程尚未实现。大型音频文件、模型权重和生成结果不应提交到 Git。
