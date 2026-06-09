@@ -6,3 +6,8 @@ numpy>=1.26,<3
 # Optional audio backend used by preprocessing.load_audio / segment_audio.
 # Not required for the unit tests, which run on synthetic NumPy signals.
 # soundfile>=0.12
+
+# Optional ASR backends used by src.asr adapters (loaded lazily). Not required
+# for the unit tests, which use the dependency-free MockASRAdapter.
+# openai-whisper>=20231117   # WhisperAdapter (multilingual / English)
+# funasr>=1.0                # FunASRAdapter / Paraformer (strong for Chinese)
