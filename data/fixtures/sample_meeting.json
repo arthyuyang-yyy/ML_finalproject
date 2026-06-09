@@ -1,0 +1,57 @@
+[
+  {
+    "meeting_id": "demo-001",
+    "segment_id": "demo-001-0001",
+    "speaker": "SPEAKER_00",
+    "start_time": 0.0,
+    "end_time": 3.2,
+    "text": "Let us start with the quarterly budget review.",
+    "processing_path": "low_overlap_cluster",
+    "overlap_score": 0.04,
+    "asr_confidence": 0.95,
+    "speaker_confidence": 0.91,
+    "candidates": [],
+    "uncertainty_note": ""
+  },
+  {
+    "meeting_id": "demo-001",
+    "segment_id": "demo-001-0002",
+    "speaker": "SPEAKER_01",
+    "start_time": 3.2,
+    "end_time": 6.8,
+    "text": "I disagree, marketing should keep the current allocation.",
+    "processing_path": "low_overlap_cluster",
+    "overlap_score": 0.09,
+    "asr_confidence": 0.92,
+    "speaker_confidence": 0.88,
+    "candidates": [],
+    "uncertainty_note": ""
+  },
+  {
+    "meeting_id": "demo-001",
+    "segment_id": "demo-001-0003",
+    "speaker": "SPEAKER_00",
+    "start_time": 6.8,
+    "end_time": 8.5,
+    "text": "No, we have to cut it.",
+    "processing_path": "high_overlap_candidate",
+    "overlap_score": 0.74,
+    "asr_confidence": 0.61,
+    "speaker_confidence": 0.52,
+    "candidates": [
+      {
+        "transcript": "No, we have to cut it.",
+        "speaker_hypothesis": "SPEAKER_00",
+        "confidence": 0.52,
+        "uncertainty_note": "Overlapping speech; attribution to SPEAKER_00 is tentative."
+      },
+      {
+        "transcript": "No, we have to keep it.",
+        "speaker_hypothesis": "SPEAKER_01",
+        "confidence": 0.41,
+        "uncertainty_note": "Separated stream B yields an opposite stance; not resolved acoustically."
+      }
+    ],
+    "uncertainty_note": "Two plausible interpretations with opposite stances; preserved for LLM reasoning."
+  }
+]

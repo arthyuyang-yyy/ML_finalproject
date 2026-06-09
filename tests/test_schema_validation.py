@@ -1,0 +1,111 @@
+"""Tests for metadata (evidence-packet) schema validation.
+
+Run with the standard library only::
+
+    python -m unittest tests.test_schema_validation
+"""
+
+import json
+import unittest
+from pathlib import Path
+
+from src.metadata_builder import build_metadata_segment
+from src.schema_validation import (
+    validate_candidate,
+    validate_meeting,
+    validate_metadata_segment,
+)
+
+FIXTURE = Path(__file__).resolve().parent.parent / "data" / "fixtures" / "sample_meeting.json"
+
+
+def _valid_low_overlap() -> dict:
+    return build_metadata_segment(
+        meeting_id="m1",
+        segment_id="m1-1",
+        speaker="SPEAKER_00",
+        start_time=0.0,
+        end_time=1.5,
+        text="hello",
+        processing_path="low_overlap_cluster",
+        overlap_score=0.05,
+        asr_confidence=0.9,
+        speaker_confidence=0.85,
+    )
+
+
+class SampleMeetingFixtureTests(unittest.TestCase):
+    def test_fixture_passes_validation(self) -> None:
+        segments = json.loads(FIXTURE.read_text(encoding="utf-8"))
+        validated = validate_meeting(segments)
+        self.assertEqual(len(validated), 3)
+
+    def test_fixture_has_a_high_overlap_segment_with_candidates(self) -> None:
+        segments = json.loads(FIXTURE.read_text(encoding="utf-8"))
+        high = [s for s in segments if s["processing_path"] == "high_overlap_candidate"]
+        self.assertTrue(high)
+        self.assertGreaterEqual(len(high[0]["candidates"]), 1)
+
+
+class SegmentValidationTests(unittest.TestCase):
+    def test_builder_output_is_valid(self) -> None:
+        self.assertIs(validate_metadata_segment(_valid_low_overlap()).__class__, dict)
+
+    def test_missing_field_raises(self) -> None:
+        record = _valid_low_overlap()
+        del record["speaker"]
+        with self.assertRaisesRegex(ValueError, "speaker"):
+            validate_metadata_segment(record)
+
+    def test_score_out_of_range_raises(self) -> None:
+        record = _valid_low_overlap()
+        record["overlap_score"] = 1.4
+        with self.assertRaisesRegex(ValueError, "overlap_score"):
+            validate_metadata_segment(record)
+
+    def test_reversed_time_raises(self) -> None:
+        record = _valid_low_overlap()
+        record["start_time"], record["end_time"] = 2.0, 1.0
+        with self.assertRaisesRegex(ValueError, "end_time"):
+            validate_metadata_segment(record)
+
+    def test_unknown_processing_path_raises(self) -> None:
+        record = _valid_low_overlap()
+        record["processing_path"] = "magic_path"
+        with self.assertRaisesRegex(ValueError, "processing_path"):
+            validate_metadata_segment(record)
+
+    def test_bool_is_not_accepted_as_number(self) -> None:
+        record = _valid_low_overlap()
+        record["asr_confidence"] = True
+        with self.assertRaisesRegex(ValueError, "asr_confidence"):
+            validate_metadata_segment(record)
+
+    def test_high_overlap_without_candidates_raises(self) -> None:
+        record = _valid_low_overlap()
+        record["processing_path"] = "high_overlap_candidate"
+        with self.assertRaisesRegex(ValueError, "at least one candidate"):
+            validate_metadata_segment(record)
+
+
+class CandidateValidationTests(unittest.TestCase):
+    def test_valid_candidate_passes(self) -> None:
+        candidate = {
+            "transcript": "keep it",
+            "speaker_hypothesis": "SPEAKER_01",
+            "confidence": 0.4,
+            "uncertainty_note": "stream B",
+        }
+        self.assertEqual(validate_candidate(candidate), candidate)
+
+    def test_candidate_missing_field_raises(self) -> None:
+        with self.assertRaisesRegex(ValueError, "uncertainty_note"):
+            validate_candidate({
+                "transcript": "keep it",
+                "speaker_hypothesis": "SPEAKER_01",
+                "confidence": 0.4,
+            })
+
+
+if __name__ == "__main__":
+    unittest.main()
