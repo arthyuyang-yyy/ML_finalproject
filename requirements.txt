@@ -1,0 +1,2 @@
+# The initial scaffold uses only the Python standard library.
+# Add lightweight, pinned dependencies as baseline implementations are introduced.
