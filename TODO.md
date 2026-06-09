@@ -9,7 +9,7 @@
 
 ## Phase 2: Baselines
 
-- [ ] Implement audio preprocessing and VAD segmentation.
+- [x] Implement audio preprocessing and VAD segmentation.
 - [ ] Add baseline overlap detector and threshold calibration.
 - [ ] Add ASR and speaker-diarization adapters.
 - [ ] Implement high-overlap candidate generation baseline.

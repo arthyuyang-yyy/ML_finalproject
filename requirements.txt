@@ -1,2 +1,8 @@
-# The initial scaffold uses only the Python standard library.
-# Add lightweight, pinned dependencies as baseline implementations are introduced.
+# Lightweight, pinned dependencies added as baseline implementations are introduced.
+
+# Core numerics for audio preprocessing and the energy-based VAD baseline.
+numpy>=1.26,<3
+
+# Optional audio backend used by preprocessing.load_audio / segment_audio.
+# Not required for the unit tests, which run on synthetic NumPy signals.
+# soundfile>=0.12

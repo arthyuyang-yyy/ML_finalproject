@@ -1,0 +1,102 @@
+"""Tests for audio preprocessing and the energy-based VAD baseline.
+
+Run with::
+
+    python -m unittest tests.test_preprocessing
+"""
+
+import unittest
+
+import numpy as np
+
+from src.preprocessing import (
+    energy_vad,
+    peak_normalize,
+    resample_linear,
+    segment_waveform,
+    to_mono,
+)
+
+SAMPLE_RATE = 16000
+
+
+def _tone(duration_s: float, freq: float = 220.0, amplitude: float = 0.5) -> np.ndarray:
+    t = np.arange(int(duration_s * SAMPLE_RATE)) / SAMPLE_RATE
+    return (amplitude * np.sin(2 * np.pi * freq * t)).astype(np.float32)
+
+
+def _silence(duration_s: float) -> np.ndarray:
+    return np.zeros(int(duration_s * SAMPLE_RATE), dtype=np.float32)
+
+
+def _two_burst_signal() -> np.ndarray:
+    # 0.5s silence | 1.0s speech | 1.0s silence | 1.0s speech | 0.5s silence
+    return np.concatenate([
+        _silence(0.5),
+        _tone(1.0),
+        _silence(1.0),
+        _tone(1.0),
+        _silence(0.5),
+    ])
+
+
+class HelperTests(unittest.TestCase):
+    def test_to_mono_averages_channels(self) -> None:
+        stereo = np.array([[1.0, 3.0], [2.0, 4.0]], dtype=np.float32)
+        np.testing.assert_allclose(to_mono(stereo), [2.0, 3.0])
+
+    def test_peak_normalize_scales_to_target(self) -> None:
+        out = peak_normalize(np.array([0.1, -0.2, 0.05], dtype=np.float32), target_peak=0.8)
+        self.assertAlmostEqual(float(np.max(np.abs(out))), 0.8, places=5)
+
+    def test_peak_normalize_handles_silence(self) -> None:
+        out = peak_normalize(np.zeros(10, dtype=np.float32))
+        self.assertTrue(np.all(out == 0.0))
+
+    def test_resample_changes_length_proportionally(self) -> None:
+        signal = _tone(1.0)
+        out = resample_linear(signal, SAMPLE_RATE, SAMPLE_RATE // 2)
+        self.assertEqual(out.size, SAMPLE_RATE // 2)
+
+
+class EnergyVadTests(unittest.TestCase):
+    def test_detects_two_speech_regions(self) -> None:
+        regions = energy_vad(_two_burst_signal(), SAMPLE_RATE)
+        self.assertEqual(len(regions), 2)
+
+    def test_regions_align_with_bursts(self) -> None:
+        regions = energy_vad(_two_burst_signal(), SAMPLE_RATE)
+        (s1, e1), (s2, e2) = regions
+        # First burst spans ~0.5-1.5s, second ~2.5-3.5s (with small padding).
+        self.assertAlmostEqual(s1, 0.5, delta=0.1)
+        self.assertAlmostEqual(e1, 1.5, delta=0.1)
+        self.assertAlmostEqual(s2, 2.5, delta=0.1)
+        self.assertAlmostEqual(e2, 3.5, delta=0.1)
+
+    def test_silence_yields_no_regions(self) -> None:
+        self.assertEqual(energy_vad(_silence(2.0), SAMPLE_RATE), [])
+
+    def test_empty_signal_yields_no_regions(self) -> None:
+        self.assertEqual(energy_vad(np.zeros(0, dtype=np.float32), SAMPLE_RATE), [])
+
+    def test_regions_are_ordered_and_non_overlapping(self) -> None:
+        regions = energy_vad(_two_burst_signal(), SAMPLE_RATE)
+        for (s, e) in regions:
+            self.assertLess(s, e)
+        for earlier, later in zip(regions, regions[1:]):
+            self.assertLessEqual(earlier[1], later[0])
+
+
+class SegmentWaveformTests(unittest.TestCase):
+    def test_returns_schema_compatible_segments(self) -> None:
+        segments = segment_waveform(_two_burst_signal(), SAMPLE_RATE, meeting_id="demo")
+        self.assertEqual(len(segments), 2)
+        first = segments[0]
+        self.assertEqual(set(first), {"meeting_id", "segment_id", "start_time", "end_time"})
+        self.assertEqual(first["meeting_id"], "demo")
+        self.assertEqual(first["segment_id"], "demo-0000")
+        self.assertLess(first["start_time"], first["end_time"])
+
+
+if __name__ == "__main__":
+    unittest.main()
