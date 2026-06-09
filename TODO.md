@@ -5,7 +5,7 @@
 - [x] Define bilingual research positioning and system architecture.
 - [x] Define segment metadata and annotation schemas.
 - [x] Create module interfaces without loading heavy models.
-- [ ] Add schema validation and small fixture datasets.
+- [x] Add schema validation and small fixture datasets.
 
 ## Phase 2: Baselines
 
