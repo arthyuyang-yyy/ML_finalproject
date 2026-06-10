@@ -38,6 +38,11 @@ W_IMPORTANCE = 0.15
 W_RECENCY = 0.10
 W_OVERLAP_PENALTY = 0.20
 
+# Minimum query relevance an episode must clear to be returned at all. Importance
+# and recency only reorder episodes that are already relevant; they must not pull
+# an unrelated episode above this gate, or QA would treat noise as evidence.
+MIN_RELEVANCE = 0.0
+
 # Cached embedding model; ``False`` marks "tried and unavailable" so we only pay
 # the import/load cost once per process.
 _EMBEDDER: Any = None
@@ -178,10 +183,13 @@ def search_episodes(
     """Return the most relevant episodes for a query.
 
     Episodes are first filtered by ``meeting_id`` / ``speaker`` / ``time_range``
-    (any of which may be ``None`` to skip that filter), then ranked. Ranking uses
-    semantic similarity when an embedding backend is available and a lexical
-    overlap score otherwise. Each returned episode carries ``retrieval_score`` and
-    ``retrieval_method`` so the ranking stays auditable.
+    (any of which may be ``None`` to skip that filter). Each remaining episode is
+    then scored for query relevance (semantic when an embedding backend is
+    available, otherwise lexical). Only episodes that clear ``MIN_RELEVANCE`` are
+    kept; importance, recency, and the overlap penalty merely reorder those
+    relevant episodes, so an unrelated query returns an empty list rather than
+    surfacing high-importance noise. Each returned episode carries
+    ``retrieval_score`` and ``retrieval_method`` so the ranking stays auditable.
     """
     memory_path = Path(path)
     if not memory_path.exists():
@@ -195,18 +203,15 @@ def search_episodes(
     if not candidates:
         return []
 
-    scores, method = _score_candidates(query, candidates)
+    scored, method = _score_candidates(query, candidates)
 
-    ranked = sorted(
-        (
-            {**episode, "retrieval_score": round(float(score), 4), "retrieval_method": method}
-            for episode, score in zip(candidates, scores)
-        ),
-        key=lambda episode: episode["retrieval_score"],
-        reverse=True,
-    )
-    matched = [episode for episode in ranked if episode["retrieval_score"] > 0]
-    return (matched or ranked)[:top_k]
+    relevant = [
+        {**episode, "retrieval_score": round(float(final), 4), "retrieval_method": method}
+        for episode, (final, relevance) in zip(candidates, scored)
+        if relevance > MIN_RELEVANCE
+    ]
+    relevant.sort(key=lambda episode: episode["retrieval_score"], reverse=True)
+    return relevant[:top_k]
 
 
 def _episodes_by_time_gap(
@@ -265,14 +270,16 @@ def _searchable_text(episode: dict) -> str:
     )
 
 
-def _score_candidates(query: str, candidates: list[dict]) -> tuple[list[float], str]:
-    """Blend relevance, importance, recency, and an overlap penalty per episode.
+def _score_candidates(query: str, candidates: list[dict]) -> tuple[list[tuple[float, float]], str]:
+    """Score each episode, returning ``(final_score, relevance)`` pairs.
 
     ``final = relevance + W_IMPORTANCE * importance + W_RECENCY * recency
     - W_OVERLAP_PENALTY * overlap_score``. Relevance combines semantic and
     lexical signals when embeddings are available, otherwise the full relevance
-    weight falls on the lexical signal. Returns the scores and the relevance
-    method used ("semantic" or "lexical").
+    weight falls on the lexical signal. The relevance term is returned alongside
+    the final score so the caller can gate on relevance before letting
+    importance/recency reorder results. Also returns the relevance method used
+    ("semantic" or "lexical").
     """
     documents = [_searchable_text(episode) for episode in candidates]
     semantic = _semantic_similarities(query, documents)
@@ -280,7 +287,7 @@ def _score_candidates(query: str, candidates: list[dict]) -> tuple[list[float], 
     recency = _recency_scores(candidates)
     method = "semantic" if semantic is not None else "lexical"
 
-    scores: list[float] = []
+    results: list[tuple[float, float]] = []
     for index, episode in enumerate(candidates):
         if semantic is not None:
             relevance = W_SEMANTIC * semantic[index] + W_LEXICAL * lexical[index]
@@ -292,12 +299,17 @@ def _score_candidates(query: str, candidates: list[dict]) -> tuple[list[float], 
             + W_RECENCY * recency[index]
             - W_OVERLAP_PENALTY * _clamp_unit(episode.get("overlap_score", 0.0))
         )
-        scores.append(max(0.0, final))
-    return scores, method
+        results.append((max(0.0, final), relevance))
+    return results, method
 
 
 def _semantic_similarities(query: str, documents: list[str]) -> list[float] | None:
-    """Return per-document cosine similarities in [0, 1], or None if unavailable."""
+    """Return per-document cosine similarities in [0, 1], or None if unavailable.
+
+    Negative cosines (unrelated/opposite) are clamped to 0 so an unrelated query
+    yields ~0 relevance and is filtered out by the relevance gate, rather than
+    the ``(cos+1)/2`` mapping that would score unrelated text near 0.5.
+    """
     embedder = _get_embedder()
     if embedder is None:
         return None
@@ -307,8 +319,7 @@ def _semantic_similarities(query: str, documents: list[str]) -> list[float] | No
     query_vector = np.asarray(vectors[0])
     document_vectors = np.asarray(vectors[1:])
     similarities = document_vectors @ query_vector
-    # Map cosine similarity from [-1, 1] into [0, 1] for a stable score.
-    return [float((value + 1.0) / 2.0) for value in similarities]
+    return [max(0.0, float(value)) for value in similarities]
 
 
 def _recency_scores(candidates: list[dict]) -> list[float]:

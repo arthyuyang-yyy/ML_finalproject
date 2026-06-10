@@ -172,6 +172,21 @@ class RetrievalTests(unittest.TestCase):
         results = search_episodes("budget schedule", path=self.path, time_range=(0.0, 10.0))
         self.assertEqual({ep["episode_id"] for ep in results}, {"m1_event_0001"})
 
+    def test_unrelated_query_returns_empty(self) -> None:
+        # Regression: a high-importance episode must not be returned for a query
+        # with no lexical/semantic relevance. Importance/recency only reorder
+        # relevant episodes; they cannot pull noise above the relevance gate.
+        path = Path(self._tmp.name) / "important.jsonl"
+        episode = create_episode_from_segments(
+            [_segment("m3-1", "SPEAKER_00", 0.0, 1.0, "budget")],
+            episode_id="m3_event_0001",
+            importance=0.9,
+        )
+        store_episodes([episode], path)
+        self.assertEqual(search_episodes("completely unrelated", path=path), [])
+        # Sanity check: a relevant query still finds it.
+        self.assertTrue(search_episodes("budget", path=path))
+
     def test_high_overlap_episode_is_penalized(self) -> None:
         # Two episodes match the query equally; the high-overlap one should rank
         # lower because uncertain memories are penalized.

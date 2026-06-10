@@ -46,7 +46,7 @@ Each meeting episode stores:
 
 This supports meeting QA, historical and cross-meeting recall, action-item retrieval, speaker-specific search, and traceable timestamped evidence.
 
-**Implementation status**: Episodes are now grouped per meeting event (inheriting the event ID, topic, `event_type`, and `importance`, and recording a mean `overlap_score`), with a time-gap fallback for segments not covered by any event. Retrieval ranking blends relevance (semantic + lexical), importance, and recency, and penalizes high-overlap episodes so uncertain memories do not outrank clean evidence; semantic search is enabled when `sentence-transformers` is installed and falls back to CJK-aware lexical matching, with filtering by meeting ID, speaker, and time range. Every result carries a `retrieval_score` and `retrieval_method` so the ranking stays traceable.
+**Implementation status**: Episodes are now grouped per meeting event (inheriting the event ID, topic, `event_type`, and `importance`, and recording a mean `overlap_score`), with a time-gap fallback for segments not covered by any event. Retrieval first applies a minimum relevance gate (semantic / lexical) so only relevant episodes are kept — an unrelated query returns nothing rather than surfacing high-importance noise — then uses importance and recency to reorder those relevant episodes and penalizes high-overlap episodes so uncertain memories do not outrank clean evidence. Semantic search is enabled when `sentence-transformers` is installed and falls back to CJK-aware lexical matching, with filtering by meeting ID, speaker, and time range. Every result carries a `retrieval_score` and `retrieval_method` so the ranking stays traceable.
 
 ## 5. Evaluation Beyond WER and DER
 
