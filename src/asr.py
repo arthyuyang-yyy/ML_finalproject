@@ -7,10 +7,11 @@ better served by Paraformer/FunASR while Whisper is stronger for multilingual or
 English audio, and disagreement between two engines is itself a useful
 uncertainty signal (see :mod:`src.candidate_generator`).
 
-Heavy backends (``whisper``, ``funasr``) are imported lazily inside each adapter
-so this module stays importable, and the unit tests run, without any model
-download or GPU. :class:`MockASRAdapter` provides a dependency-free recogniser
-for wiring and testing the rest of the pipeline before real models are present.
+Heavy backends (``whisper``, ``whisperx``, ``funasr``) are imported lazily inside
+each adapter so this module stays importable, and the unit tests run, without
+any model download or GPU. :class:`MockASRAdapter` provides a dependency-free
+recogniser for wiring and testing the rest of the pipeline before real models
+are present.
 
 The transcript-level result has the shape::
 
@@ -136,6 +137,45 @@ class WhisperAdapter(ASRAdapter):
         return _from_whisper_result(result, self.name)
 
 
+class WhisperXAdapter(ASRAdapter):
+    """WhisperX recogniser (lazy ``whisperx`` import), recommended for low-overlap paths."""
+
+    name = "whisperx"
+
+    def __init__(
+        self,
+        model_size: str = "large-v3",
+        device: str = "cpu",
+        compute_type: str = "int8",
+        language: str | None = None,
+        default_confidence: float = 0.75,
+    ) -> None:
+        self.model_size = model_size
+        self.device = device
+        self.compute_type = compute_type
+        self.language = language
+        self.default_confidence = validate_score(default_confidence, "default_confidence")
+        self._model: Any = None
+
+    def _ensure_model(self) -> Any:
+        if self._model is None:
+            import whisperx  # lazy: heavy, optional
+
+            self._model = whisperx.load_model(
+                self.model_size,
+                self.device,
+                compute_type=self.compute_type,
+                language=self.language,
+            )
+        return self._model
+
+    def transcribe_array(self, samples: np.ndarray, sample_rate: int = TARGET_SAMPLE_RATE) -> dict[str, Any]:
+        samples = _ensure_sample_rate(samples, sample_rate)
+        model = self._ensure_model()
+        result = model.transcribe(samples, batch_size=16, language=self.language)
+        return _from_whisperx_result(result, self.name, self.default_confidence, len(samples) / TARGET_SAMPLE_RATE)
+
+
 class FunASRAdapter(ASRAdapter):
     """FunASR Paraformer recogniser (lazy ``funasr`` import), strong for Chinese.
 
@@ -184,13 +224,14 @@ class FunASRAdapter(ASRAdapter):
 _ADAPTERS: dict[str, type[ASRAdapter]] = {
     "mock": MockASRAdapter,
     "whisper": WhisperAdapter,
+    "whisperx": WhisperXAdapter,
     "funasr": FunASRAdapter,
     "paraformer": FunASRAdapter,
 }
 
 
 def get_adapter(name: str = "mock", **kwargs: Any) -> ASRAdapter:
-    """Build an ASR adapter by name (``mock``, ``whisper``, ``funasr``)."""
+    """Build an ASR adapter by name (``mock``, ``whisperx``, ``whisper``, ``funasr``)."""
     key = name.lower()
     if key not in _ADAPTERS:
         raise ValueError(f"unknown ASR adapter '{name}'; choose from {sorted(_ADAPTERS)}")
@@ -292,6 +333,64 @@ def _from_funasr_result(
         "asr_confidence": _aggregate_confidence(segments),
         "segments": segments,
     }
+
+
+def _from_whisperx_result(
+    result: dict[str, Any],
+    model_name: str,
+    default_confidence: float,
+    duration: float,
+) -> dict[str, Any]:
+    """Normalize a raw WhisperX result into the shared transcript shape."""
+    segments: list[dict[str, Any]] = []
+    for seg in result.get("segments", []):
+        confidence = _segment_confidence(seg, default_confidence)
+        segments.append({
+            "start_time": round(float(seg.get("start", 0.0)), 3),
+            "end_time": round(float(seg.get("end", 0.0)), 3),
+            "text": str(seg.get("text", "")).strip(),
+            "asr_confidence": confidence,
+        })
+
+    text = str(result.get("text", "")).strip()
+    if not text:
+        text = " ".join(segment["text"] for segment in segments).strip()
+    if not segments:
+        segments.append({
+            "start_time": 0.0,
+            "end_time": round(duration, 3),
+            "text": text,
+            "asr_confidence": default_confidence,
+        })
+    return {
+        "text": text,
+        "language": str(result.get("language", "und")),
+        "model": model_name,
+        "asr_confidence": _aggregate_confidence(segments),
+        "segments": segments,
+    }
+
+
+def _segment_confidence(segment: dict[str, Any], default_confidence: float) -> float:
+    """Best-effort confidence extraction for WhisperX-style segments."""
+    if "asr_confidence" in segment:
+        return _clamp01(float(segment["asr_confidence"]))
+    if "confidence" in segment:
+        return _clamp01(float(segment["confidence"]))
+    if "avg_logprob" in segment:
+        return logprob_to_confidence(
+            float(segment.get("avg_logprob", 0.0)),
+            float(segment.get("no_speech_prob", 0.0)),
+        )
+    if "words" in segment and isinstance(segment["words"], list):
+        scores = [
+            float(word["score"])
+            for word in segment["words"]
+            if isinstance(word, dict) and "score" in word
+        ]
+        if scores:
+            return _clamp01(sum(scores) / len(scores))
+    return default_confidence
 
 
 def _aggregate_confidence(segments: list[dict[str, Any]]) -> float:

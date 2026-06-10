@@ -21,6 +21,7 @@ from src.asr import (
     _aggregate_confidence,
     _from_funasr_result,
     _from_whisper_result,
+    _from_whisperx_result,
 )
 
 SAMPLE_RATE = 16000
@@ -61,10 +62,23 @@ class MockAdapterTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             MockASRAdapter(confidence=1.5)
 
+    def test_negative_confidence_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            MockASRAdapter(confidence=-0.1)
+
+    def test_transcribe_array_with_duration(self) -> None:
+        adapter = MockASRAdapter(confidence=0.8, language="en")
+        self.assertEqual(adapter.language, "en")
+        self.assertEqual(adapter.confidence, 0.8)
+        result = adapter.transcribe_array(_tone(2.5), SAMPLE_RATE)
+        self.assertEqual(result["language"], "en")
+        self.assertGreaterEqual(result["segments"][0]["end_time"], 2.0)
+
 
 class FactoryTests(unittest.TestCase):
     def test_builds_known_adapters(self) -> None:
         self.assertIsInstance(get_adapter("mock"), MockASRAdapter)
+        self.assertEqual(get_adapter("whisperx").name, "whisperx")
         # paraformer is an alias for the FunASR adapter (not instantiated/loaded here)
         self.assertEqual(get_adapter("paraformer").name, "funasr")
 
@@ -127,6 +141,23 @@ class NormalizerTests(unittest.TestCase):
         self.assertEqual(len(out["segments"]), 2)
         self.assertAlmostEqual(out["segments"][1]["start_time"], 1.0, places=5)
         self.assertAlmostEqual(out["segments"][1]["end_time"], 2.0, places=5)
+
+    def test_from_whisperx_result_uses_word_scores(self) -> None:
+        raw = {
+            "language": "en",
+            "segments": [
+                {
+                    "start": 0.0,
+                    "end": 1.5,
+                    "text": "hello",
+                    "words": [{"word": "hello", "score": 0.8}, {"word": "there", "score": 0.6}],
+                }
+            ],
+        }
+        out = _from_whisperx_result(raw, "whisperx", default_confidence=0.5, duration=1.5)
+        self.assertEqual(out["text"], "hello")
+        self.assertEqual(out["language"], "en")
+        self.assertAlmostEqual(out["segments"][0]["asr_confidence"], 0.7, places=5)
 
     def test_aggregate_confidence_is_duration_weighted(self) -> None:
         segments = [
