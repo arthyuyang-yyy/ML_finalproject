@@ -171,6 +171,39 @@ class EvidenceSupportTests(unittest.TestCase):
         self.assertEqual(confident_correct["confidence_brier"], 0.0)
         self.assertEqual(confident_wrong["confidence_brier"], 1.0)
 
+    def test_abstaining_on_answerable_lowers_recall(self) -> None:
+        # Regression: gold evidence of an answerable-but-abstained question must
+        # still count toward recall. Two answerable questions; the first cites
+        # the correct evidence, the second abstains -> recall should be 0.5, not
+        # 1.0 (which the old code returned by skipping the abstained sample).
+        result = evaluate_evidence_support(
+            [
+                {"evidence_ids": ["a"], "confidence": 0.9},
+                {"evidence_ids": [], "confidence": 0.0},
+            ],
+            [
+                {"evidence_ids": ["a"], "answerable": True},
+                {"evidence_ids": ["b"], "answerable": True},
+            ],
+        )
+        self.assertAlmostEqual(result["evidence_recall"], 0.5)
+        self.assertAlmostEqual(result["evidence_precision"], 1.0)
+        self.assertAlmostEqual(result["evidence_hit_rate"], 0.5)
+        self.assertEqual(result["num_claims"], 1)
+        self.assertEqual(result["num_abstentions"], 1)
+
+    def test_explicit_non_abstention_scores_no_evidence_answer_as_claim(self) -> None:
+        # A substantive answer that cites no evidence, flagged abstained=False,
+        # is an unsupported claim (hallucination), not an abstention.
+        result = evaluate_evidence_support(
+            [{"answer": "It was Bob.", "evidence_ids": [], "abstained": False, "confidence": 0.8}],
+            [{"evidence_ids": ["a"], "answerable": True}],
+        )
+        self.assertEqual(result["num_claims"], 1)
+        self.assertEqual(result["num_abstentions"], 0)
+        self.assertEqual(result["hallucination_rate"], 1.0)
+        self.assertAlmostEqual(result["evidence_recall"], 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

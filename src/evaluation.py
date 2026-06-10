@@ -150,15 +150,18 @@ def evaluate_evidence_support(predictions: list[dict], references: list[dict]) -
     """Evaluate evidence grounding: hit rate, hallucination, and calibration.
 
     Scoring follows the system's traceability contract: every genuine answer
-    must cite timestamped evidence, so a prediction that cites no evidence is
-    read as an *abstention* ("I don't know") rather than a claim.
+    must cite timestamped evidence, so by default a prediction that cites no
+    evidence is read as an *abstention* ("I don't know") rather than a claim.
 
     Each ``prediction`` is a QA result (e.g. from
     :func:`src.rag_qa.answer_question_with_evidence`) and is read for:
 
-    - ``evidence_ids`` -- the evidence the answer is grounded on (empty ==
-      abstention);
-    - ``confidence`` -- the answer's self-reported confidence in ``[0, 1]``.
+    - ``evidence_ids`` -- the evidence the answer is grounded on;
+    - ``confidence`` -- the answer's self-reported confidence in ``[0, 1]``;
+    - ``abstained`` -- optional explicit flag. When absent, abstention is
+      inferred from empty ``evidence_ids``. Set it to ``False`` to score a
+      substantive answer that cites no evidence as an (unsupported) claim rather
+      than an abstention.
 
     Each ``reference`` is the gold annotation for the same question:
 
@@ -168,8 +171,10 @@ def evaluate_evidence_support(predictions: list[dict], references: list[dict]) -
 
     A claim is *supported* when it cites at least one gold evidence id, and a
     *hallucination* when it cites none (including any claim made for an
-    unanswerable question). Returns micro-averaged evidence precision/recall/F1
-    over answerable claims, the evidence hit rate, the hallucination rate, the
+    unanswerable question). Recall is computed over the gold evidence of *all*
+    answerable questions, so abstaining on an answerable question lowers recall
+    rather than being silently excluded. Returns micro-averaged evidence
+    precision/recall/F1, the evidence hit rate, the hallucination rate, the
     correct-abstention rate on unanswerable questions, and a Brier calibration
     score (lower is better).
     """
@@ -194,14 +199,21 @@ def evaluate_evidence_support(predictions: list[dict], references: list[dict]) -
         predicted_ids = _evidence_id_set(prediction.get("evidence_ids"))
         gold_ids = _evidence_id_set(reference.get("evidence_ids"))
         answerable = bool(reference.get("answerable", bool(gold_ids)))
-        claimed = bool(predicted_ids)
+        # A prediction abstains when explicitly flagged, or (by default) when it
+        # cites no evidence. An explicit ``abstained=False`` keeps a no-evidence
+        # answer in the claim path so it is scored as an unsupported claim.
+        abstained = bool(prediction.get("abstained", not predicted_ids))
 
         if answerable:
             answerable_count += 1
+            # Count gold evidence for every answerable question, even when the
+            # system abstains, so abstaining on an answerable question lowers
+            # recall instead of being silently excluded.
+            gold_total += len(gold_ids)
         else:
             unanswerable_count += 1
 
-        if not claimed:
+        if abstained:
             num_abstentions += 1
             if not answerable:
                 correct_abstentions += 1
@@ -219,7 +231,6 @@ def evaluate_evidence_support(predictions: list[dict], references: list[dict]) -
         if answerable:
             intersection_total += len(overlap)
             predicted_total += len(predicted_ids)
-            gold_total += len(gold_ids)
             if supported:
                 hits += 1
 
