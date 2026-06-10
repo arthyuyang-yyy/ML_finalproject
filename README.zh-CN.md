@@ -30,56 +30,74 @@
 2. **不确定性感知候选生成：**为模糊区域保留多个可能的转写和说话人假设。
 3. **元信息感知 LLM 后处理：**LLM 同时使用时间戳、置信度、重叠程度、候选解释和历史记忆，而不是只读取纯文本。
 4. **Episodic Memory / 情景记忆：**保存带证据的会议事件，支持可追溯问答、行动项检索和跨会议回忆。
-5. **超越 WER 与 DER 的评估：**评估路由、候选有效性、不确定性保留、证据质量和幻觉率。
+5. **超越 WER 与 DER 的评估：**评估路由准确性、候选有效性、不确定性保留、证据质量和幻觉率。
 
 ## 系统流程
 
 1. 预处理音频并生成带时间戳的片段。
-2. 估计各片段的重叠分数。
+2. 估计各片段的重叠分数（优先 pyannote OSD，不可用时使用能量 fallback）。
 3. 根据重叠程度路由：
-   - 低重叠：VAD、说话人嵌入、聚类和 ASR。
-   - 高重叠：语音分离或多个候选解释。
-4. 为所有片段构建统一元信息记录。
-5. 使用 LLM 纠错、保留不确定性并提取有证据的会议事件。
-6. 将相关片段转换为情景记忆记录。
-7. 检索情景记忆，以说话人、时间戳、置信度和不确定性说明回答问题。
+   - 低重叠（< 阈值）：VAD、说话人聚类和 ASR。
+   - 高重叠（>= 阈值）：生成多个候选解释。
+4. 为所有片段构建统一元信息记录（17 字段）。
+5. 导出每段音频 clip，进行 schema 验证。
+6. 使用 LLM 提取有证据支持的会议事件。
+7. 将片段转换为情景记忆记录并持久化。
+8. 检索情景记忆，以说话人、时间戳、置信度和不确定性说明回答问题。
 
-模块设计见 [docs/system_architecture.zh-CN.md](docs/system_architecture.zh-CN.md)。
+模块设计见 [docs/system_architecture.zh-CN.md](docs/system_architecture.zh-CN.md)，完整 pipeline 调用链见 [docs/pipeline_walkthrough.md](docs/pipeline_walkthrough.md)。
 
 ## 仓库结构
 
 ```text
 .
-├── docs/                  # 双语研究设计与实验计划
-├── data/                  # 原始/处理后音频与标注模板
+├── docs/                  # 双语研究设计、系统架构与实验计划
+├── data/                  # 原始/处理后音频、标注模板与测试 fixture
 ├── outputs/               # 生成结果，除占位文件外不纳入 Git
-├── src/                   # 模块化流程接口
-├── app.py                 # 后续交互应用入口
-├── main.py                # 流程入口
+├── src/                   # 模块化 pipeline 实现
+│   ├── audio/             # 音频预处理、归一化、导出与 clip 输出
+│   ├── pipeline/          # 端到端编排、配置与 I/O 工具
+│   ├── overlap/           # 重叠检测 facade
+│   ├── evidence/          # 元数据构建与验证 facade
+│   ├── llm/               # LLM 事件提取、验证与 prompt 构建
+│   ├── memory/            # 情景记忆 facade
+│   ├── qa/                # 问答 facade
+│   ├── candidates/        # 候选生成 facade
+│   └── ui/                # Gradio 交互演示
+├── tests/                 # 单元测试（75 项）
+├── app.py                 # Gradio 交互演示入口
+├── main.py                # 命令行 pipeline 入口
 ├── README.md
 └── README.zh-CN.md
 ```
 
 ## 元信息 Schema
 
-每个处理后的片段采用统一 Schema：
+每个处理后的片段采用统一 17 字段 Schema：
 
 | 字段 | 含义 |
 | --- | --- |
-| `meeting_id`, `segment_id` | 稳定的会议与片段标识 |
+| `meeting_id` | 稳定的会议标识 |
+| `segment_id` | 稳定的片段标识 |
+| `evidence_id` | 证据记录唯一 ID（通常与 segment_id 相同） |
 | `speaker` | 说话人标签或不确定的说话人假设 |
-| `start_time`, `end_time` | 以秒计的证据时间范围 |
+| `start_time` | 以秒计的证据起始时间 |
+| `end_time` | 以秒计的证据结束时间 |
 | `text` | 当前转写文本 |
 | `processing_path` | `low_overlap_cluster` 或 `high_overlap_candidate` |
-| `overlap_score` | 估计的重叠概率 |
-| `asr_confidence` | ASR 置信度 |
-| `speaker_confidence` | 说话人归属置信度 |
-| `candidates` | 备选转写与说话人解释 |
+| `route_reason` | 路由决策的可读说明 |
+| `overlap_score` | 估计的重叠概率 [0, 1] |
+| `asr_confidence` | ASR 置信度 [0, 1] |
+| `speaker_confidence` | 说话人归属置信度 [0, 1] |
+| `audio_clip_path` | 导出音频 clip 的文件路径 |
+| `source_audio_path` | 原始输入音频路径 |
+| `language` | 语言代码（默认 "und"） |
+| `candidates` | 备选转写与说话人解释列表 |
 | `uncertainty_note` | 对不确定原因的可读说明 |
 
 ## Episodic Memory / 情景记忆设计
 
-一个 episode 表示有意义的会议事件或一组连贯片段。它保存会议与事件 ID、时间范围、说话人、主题、原始与纠正后转写、重叠和置信度信息、候选解释、决策、行动项、证据文本以及后续加入的嵌入向量。
+一个 episode 表示有意义的会议事件或一组连贯片段。它保存会议与事件 ID、时间范围、说话人、主题、摘要、证据 ID 列表与原始证据、置信度、不确定性说明，以及后续加入的嵌入向量。底（JSONL 文件），后续接入向量检索。
 
 情景记忆支持：
 
@@ -91,25 +109,63 @@
 
 ## 实验计划
 
-1. 将预测的重叠路由与人工标注比较。
-2. 比较高重叠候选生成与强制单一转写。
-3. 比较纯文本、带说话人和完整元信息三种 LLM 后处理输入。
-4. 比较摘要问答、纯转写 RAG 和说话人感知情景记忆问答。
-5. 测量幻觉率与带时间戳证据命中率。
+| 实验 | 目标 | 当前状态 |
+| --- | --- | --- |
+| 1. 重叠路由 | 将预测的重叠路由与人工标注比较 | 基础设施就绪；pyannote 适配器和能量 fallback 已实现；标注集待构建 |
+| 2. 高重叠候选 | 比较候选生成与强制单一转写 | 候选接口已实现；正式实验待进行 |
+| 3. 元信息感知 LLM | 比较纯文本、说话人感知和完整元信息 LLM 后处理 | LLM 事件提取已实现；元信息 prompt 消融实验待进行 |
+| 4. Episodic Memory 问答 | 比较摘要问答、纯转写 RAG 和说话人感知记忆问答 | 存储、检索和基线 QA 已实现；正式实验待进行 |
+| 5. 幻觉与证据 | 测量幻觉率和带时间戳的证据命中率 | 指标接口已定义（stub）；正式实验待进行 |
 
-详细内容见 [docs/experiment_plan.zh-CN.md](docs/experiment_plan.zh-CN.md)。
+完整计划见 [docs/experiment_plan.zh-CN.md](docs/experiment_plan.zh-CN.md)。
 
 ## 当前进度
 
-仓库当前包含第一阶段研究设计、标注 Schema 和清晰的模块接口。Whisper、pyannote 和语音分离等重模型暂不加载。
+项目目前处于**基础设施与基线准备阶段**，已有可运行的端到端 pipeline，正式实验结果尚未产生。
+
+已完成：
+
+- 双语研究设计、系统架构、创新点阐述和实验计划；
+- 统一的 evidence-packet 元信息 Schema（17 字段）、校验规则和示例会议 fixture；
+- 音频加载、单声道转换、polyphase 重采样、峰值归一化和基于能量的 VAD 分段（含段落合并与分割）；
+- 音频 clip 导出（`src/audio/clipper.py`）；
+- 双说话人可控重叠语音合成，支持 SNR 控制和重叠真值标注；
+- WER、CER、重叠路由分类和最优映射说话人归属等客观评估指标；
+- 可插拔 ASR 适配器（Mock/WhisperX/Whisper/Paraformer）与置信度校准；
+- 重叠检测：pyannote OSD 适配器（有 HF token 时）+ 保守能量 fallback（上限 0.39，不会误触发高重叠路由）；
+- 双路径路由（阈值 0.4）、低重叠 ASR + 说话人归属路径、高重叠候选生成（不强行确定单一转写）；
+- 元数据构建、schema 验证和 LLM 事件提取；
+- 情景记忆的创建、JSONL 持久化与关键词检索；
+- 基于 Gradio 的交互式 UI 演示；
+- 端到端 pipeline 编排（`src/pipeline/run_pipeline.py`）；
+- 75 项单元测试覆盖已实现基础设施。
+
+正式实验前仍需完成：
+
+- 人工标注评估集构建；
+- pyannote 模型下载与校准实验；
+- faster-whisper/WhisperX/Whisper/FunASR 重模型集成与精度对比；
+- 元信息输入消融实验和证据质量评估。
 
 ## 运行方式
 
-当前代码仅为接口骨架：
+安装轻量级基线依赖并运行测试：
 
 ```bash
-python main.py
+python -m pip install -r requirements.txt
+python -m unittest discover -s tests -v
+```
+
+运行端到端 pipeline：
+
+```bash
+python main.py data/raw_audio/meeting_001.wav --meeting-id meeting_001
+```
+
+启动 Gradio 交互演示：
+
+```bash
 python app.py
 ```
 
-在进行真实音频实验前，需要实现 `src/` 中的 TODO。大型音频、模型权重和生成结果不应提交到 Git。
+大型音频文件、模型权重和生成结果不应提交到 Git。

@@ -92,9 +92,19 @@ See [docs/system_architecture.md](docs/system_architecture.md) for the module-le
 ├── docs/                  # Bilingual research design and experiment plans
 ├── data/                  # Raw/processed audio and annotation templates
 ├── outputs/               # Generated artifacts, ignored except placeholders
-├── src/                   # Modular pipeline interfaces
-├── app.py                 # Future interactive application entry point
-├── main.py                # Pipeline entry point
+├── src/                   # Modular pipeline implementation
+│   ├── audio/             # Audio preprocessing, normalization, export, and clipping
+│   ├── pipeline/          # End-to-end orchestration, configuration, and I/O helpers
+│   ├── overlap/           # Overlap detection facade
+│   ├── evidence/          # Metadata builder and validator facade
+│   ├── llm/               # LLM event extraction, validation, and prompt construction
+│   ├── memory/            # Episodic memory facade
+│   ├── qa/                # QA facade
+│   ├── candidates/        # Candidate generation facade
+│   └── ui/                # Gradio interactive demo
+├── tests/                 # Unit tests (70 cases)
+├── app.py                 # Gradio interactive demo entry point
+├── main.py                # CLI pipeline entry point
 ├── README.md
 └── README.zh-CN.md
 ```
@@ -105,14 +115,21 @@ Each processed segment uses a shared schema:
 
 | Field | Meaning |
 | --- | --- |
-| `meeting_id`, `segment_id` | Stable meeting and segment identifiers |
+| `meeting_id` | Stable meeting identifier |
+| `segment_id` | Stable segment identifier |
+| `evidence_id` | Unique evidence record ID (usually mirrors segment_id) |
 | `speaker` | Speaker label or uncertain speaker hypothesis |
-| `start_time`, `end_time` | Evidence timestamp range in seconds |
+| `start_time` | Evidence start time in seconds |
+| `end_time` | Evidence end time in seconds |
 | `text` | Current transcript |
 | `processing_path` | `low_overlap_cluster` or `high_overlap_candidate` |
-| `overlap_score` | Estimated overlap likelihood |
-| `asr_confidence` | ASR confidence estimate |
-| `speaker_confidence` | Speaker-attribution confidence |
+| `route_reason` | Human-readable routing decision explanation |
+| `overlap_score` | Estimated overlap likelihood [0, 1] |
+| `asr_confidence` | ASR confidence estimate [0, 1] |
+| `speaker_confidence` | Speaker-attribution confidence [0, 1] |
+| `audio_clip_path` | Path to exported audio clip file |
+| `source_audio_path` | Original input audio path |
+| `language` | Language code (default `"und"`) |
 | `candidates` | Alternative transcript/speaker interpretations |
 | `uncertainty_note` | Human-readable reason for uncertainty |
 
@@ -132,11 +149,11 @@ Episodes support:
 
 | Experiment | Goal | Status |
 | --- | --- | --- |
-| 1. Overlap routing | Compare predicted overlap routes with manual labels | Infrastructure ready; baseline detector and experiment run pending |
-| 2. High-overlap candidates | Compare candidate generation with forced single-output transcription | Candidate interface defined; implementation and experiment pending |
-| 3. Metadata-aware LLM | Compare plain-text, speaker-aware, and full-metadata LLM post-processing | Prompt constraints defined; LLM integration and ablation pending |
-| 4. Episodic Memory QA | Compare summary QA, transcript RAG, and speaker-aware memory QA | Interfaces defined; storage, retrieval, and experiment pending |
-| 5. Hallucination and evidence | Measure hallucination rate and timestamped evidence hit rate | Metric contract and experiment pending |
+| 1. Overlap routing | Compare predicted overlap routes with manual labels | Infrastructure ready; pyannote adapter and energy fallback implemented; annotation set pending |
+| 2. High-overlap candidates | Compare candidate generation with forced single-output transcription | Candidate interface implemented; formal experiment pending |
+| 3. Metadata-aware LLM | Compare plain-text, speaker-aware, and full-metadata LLM post-processing | LLM event extraction implemented; metadata-input ablation pending |
+| 4. Episodic Memory QA | Compare summary QA, transcript RAG, and speaker-aware memory QA | Storage, retrieval, and baseline QA implemented; formal experiment pending |
+| 5. Hallucination and evidence | Measure hallucination rate and timestamped evidence hit rate | Metric interfaces defined (stub); formal experiment pending |
 
 Full details are in [docs/experiment_plan.md](docs/experiment_plan.md).
 
@@ -146,33 +163,52 @@ The project is currently in the **baseline infrastructure stage**. Formal experi
 
 Completed:
 
-- bilingual research design, architecture, experiment plan, and module interfaces;
-- shared evidence-packet metadata schema, validation rules, and sample meeting fixture;
-- audio loading interface, mono conversion, linear resampling, peak normalization, and energy-based VAD segmentation;
+- bilingual research design, architecture, innovation points, and experiment plan;
+- shared evidence-packet metadata schema (17 fields), validation rules, and sample meeting fixture;
+- audio loading, mono conversion, polyphase resampling, peak normalization, and energy-based VAD segmentation (with merging and splitting);
+- audio clip export per evidence segment (`src/audio/clipper.py`);
 - controlled two-speaker overlap synthesis with SNR control and ground-truth overlap annotations;
-- objective WER, CER, overlap-routing, and best-mapping speaker-attribution metrics;
-- 46 unit tests covering the implemented baseline infrastructure.
+- objective WER, CER, overlap-routing classification, and best-mapping speaker-attribution metrics;
+- pluggable ASR adapters (Mock/WhisperX/Whisper/Paraformer) with calibrated confidence;
+- overlap detection with pyannote OSD adapter (priority) and conservative energy fallback;
+- dual-path routing (threshold 0.4), low-overlap ASR + speaker-attribution path, and high-overlap candidate generation without forcing one transcript;
+- metadata construction, schema validation, and LLM event extraction;
+- episodic memory creation, JSONL persistence, and keyword-based retrieval;
+- Gradio interactive UI demo;
+- end-to-end pipeline orchestration (`src/pipeline/run_pipeline.py`);
+- 75 unit tests covering the implemented baseline infrastructure.
 
 Pending before formal experiments:
 
-- calibrated overlap detector and routing-threshold study;
-- ASR, speaker diarization/clustering, and high-overlap candidate-generation baselines;
-- uncertainty-aware LLM integration and metadata-input ablations;
-- persistent Episodic Memory, retrieval, and evidence-backed QA;
-- manually annotated evaluation split and finalized evidence/hallucination metrics.
+- manually annotated evaluation split;
+- pyannote model download and calibration experiments;
+- heavy-model integrations (Whisper, FunASR) with accuracy comparisons;
+- metadata-input ablation experiments and evidence-quality evaluation.
 
-Current verification note: 25 dependency-free tests pass in the present environment. The remaining 21 NumPy-based preprocessing and data-synthesis tests require installing the dependencies in `requirements.txt`. Heavy models such as Whisper, pyannote, and speech separation models remain intentionally unloaded.
+Current verification note: pass the full 75-test suite with `python -m unittest discover -s tests -v`. Heavy models such as faster-whisper, WhisperX, Whisper, pyannote, and speech separation models remain intentionally unloaded without their respective backends.
 
 ## How to Run
 
-Install the lightweight baseline dependencies and run the infrastructure tests:
+Install the lightweight baseline dependencies and run the tests:
 
 ```bash
 python -m pip install -r requirements.txt
 python -m unittest discover -s tests -v
 ```
 
-`main.py` and `app.py` remain placeholders because the end-to-end ASR, memory, and QA pipeline is not implemented yet. Keep large audio files, model weights, and generated outputs outside Git.
+Run the end-to-end pipeline:
+
+```bash
+python main.py data/raw_audio/meeting_001.wav --meeting-id meeting_001
+```
+
+Launch the Gradio interactive demo:
+
+```bash
+python app.py
+```
+
+Keep large audio files, model weights, and generated outputs outside Git.
 
 ---
 
@@ -182,8 +218,6 @@ python -m unittest discover -s tests -v
 
 **面向多人会议理解的重叠感知双路径语音处理与情景记忆系统**
 
-英文名称：Overlap-aware Dual-path ASR with Episodic Memory for Multi-speaker Meeting Understanding
-
 ## 项目背景
 
 常见的会议助手会将存在错误的转写压缩成流畅的摘要，这可能掩盖说话人归属错误、重叠语音和缺乏证据支持的结论。本项目不仅是一个会议摘要系统，更是一个**可验证的会议记忆系统**。系统会保留不确定性，并将后续回答、决策和行动项关联到带时间戳的原始证据。
@@ -192,123 +226,53 @@ python -m unittest discover -s tests -v
 
 参考论文已经结合了 ASR、说话人日志、低重叠说话人聚类、高重叠语音分离、LLM 纠错和结构化会议摘要。本项目将在这一基础上进行扩展，而不是简单复现参考系统。
 
-**参考系统**
-
-`ASR -> 说话人日志 -> LLM 纠错 -> 结构化摘要`
-
-**本项目系统**
-
-`ASR + 重叠感知路由 -> 不确定性感知候选生成 -> 元信息感知 LLM 后处理 -> Episodic Memory -> 可追溯问答与会议回忆`
-
-核心变化是：系统不会强制将高重叠语音转换成一个看似确定的转写结果。候选解释和置信度元信息会被保留，并继续用于后续推理和检索。
-
-## 核心创新点
-
-1. **重叠感知路由：**将低重叠音频路由到轻量级说话人聚类路径，将高重叠音频路由到语音分离或候选生成路径。
-2. **不确定性感知候选生成：**为模糊区域保留多个可能的转写和说话人假设。
-3. **元信息感知 LLM 后处理：**LLM 基于时间戳、置信度、重叠程度、候选解释和历史记忆进行推理，而不是只处理纯文本。
-4. **Episodic Memory / 情景记忆：**保存带证据的有意义会议事件，支持可追溯问答、行动项检索和跨会议回忆。
-5. **超越 WER 与 DER 的评估：**评估路由准确性、候选有效性、不确定性保留、证据质量和幻觉率。
-
 ## 系统流程
 
 1. 预处理音频并创建带时间戳的片段。
-2. 估计每个片段的重叠分数。
-3. 对每个片段进行路由：
-   - 低重叠：VAD、说话人嵌入、聚类和 ASR。
-   - 高重叠：语音分离或生成多个候选解释。
-4. 为每个片段构建统一的元信息记录。
-5. 使用 LLM 纠正文本、保留不确定性，并提取有证据支持的会议事件。
-6. 将相关片段转换成 Episodic Memory 记录。
-7. 检索 episode，并通过说话人、时间戳、置信度和不确定性说明回答问题。
+2. 估计每个片段的重叠分数（优先 pyannote OSD，不可用时使用能量 fallback）。
+3. 对每个片段进行路由（阈值 0.4）：低重叠路径或高重叠候选路径。
+4. 为每个片段构建统一的元信息记录（17 字段）。
+5. 导出每段音频 clip，schema 验证，LLM 事件提取。
+6. 相关片段转换为 Episodic Memory 记录并持久化。
+7. 检索 episode 回答问题。
 
-模块级设计见 [docs/system_architecture.zh-CN.md](docs/system_architecture.zh-CN.md)。
-
-## 仓库结构
-
-```text
-.
-├── docs/                  # 双语研究设计与实验计划
-├── data/                  # 原始/处理后音频与标注模板
-├── outputs/               # 生成结果，除占位文件外不纳入 Git
-├── src/                   # 模块化流程接口
-├── app.py                 # 后续交互应用入口
-├── main.py                # 流程入口
-├── README.md
-└── README.zh-CN.md
-```
-
-## 元信息 Schema
-
-每个处理后的片段使用统一 Schema：
+## 元信息 Schema（17 字段）
 
 | 字段 | 含义 |
 | --- | --- |
-| `meeting_id`, `segment_id` | 稳定的会议与片段标识 |
-| `speaker` | 说话人标签或不确定的说话人假设 |
+| `meeting_id` | 稳定会议标识 |
+| `segment_id` | 稳定片段标识 |
+| `evidence_id` | 证据记录唯一 ID |
+| `speaker` | 说话人标签或假设 |
 | `start_time`, `end_time` | 以秒为单位的证据时间范围 |
 | `text` | 当前转写文本 |
 | `processing_path` | `low_overlap_cluster` 或 `high_overlap_candidate` |
-| `overlap_score` | 估计的语音重叠概率 |
-| `asr_confidence` | ASR 置信度估计 |
-| `speaker_confidence` | 说话人归属置信度 |
+| `route_reason` | 路由决策说明 |
+| `overlap_score` | 估计的重叠概率 [0, 1] |
+| `asr_confidence` | ASR 置信度 [0, 1] |
+| `speaker_confidence` | 说话人归属置信度 [0, 1] |
+| `audio_clip_path` | 导出音频 clip 路径 |
+| `source_audio_path` | 原始输入音频路径 |
+| `language` | 语言代码 |
 | `candidates` | 备选转写和说话人解释 |
 | `uncertainty_note` | 对不确定原因的可读说明 |
 
-## Episodic Memory / 情景记忆设计
-
-一个 episode 表示有意义的会议事件或一组连贯的会议片段。它保存会议 ID 和事件 ID、时间范围、说话人、主题、原始与纠正后的转写、重叠与置信度信息、候选解释、决策、行动项、证据文本，以及后续用于检索的嵌入向量。
-
-Episode 支持：
-
-- 基于证据的会议问答；
-- 历史会议与跨会议回忆；
-- 行动项和决策检索；
-- 指定说话人检索；
-- 从回答追溯到精确时间戳。
-
-## 实验计划
-
-| 实验 | 目标 | 当前状态 |
-| --- | --- | --- |
-| 1. 重叠路由 | 将预测的重叠路由与人工标注比较 | 实验基础设施已完成；基础检测器和正式实验待完成 |
-| 2. 高重叠候选 | 比较候选生成与强制单一转写 | 候选接口已定义；实现和正式实验待完成 |
-| 3. 元信息感知 LLM | 比较纯文本、说话人感知和完整元信息 LLM 后处理 | 提示词约束已定义；LLM 集成和消融实验待完成 |
-| 4. Episodic Memory 问答 | 比较摘要问答、纯转写 RAG 和说话人感知记忆问答 | 接口已定义；存储、检索和正式实验待完成 |
-| 5. 幻觉与证据 | 测量幻觉率和带时间戳的证据命中率 | 指标定义和正式实验待完成 |
-
-完整实验计划见 [docs/experiment_plan.zh-CN.md](docs/experiment_plan.zh-CN.md)。
-
 ## 当前进度
 
-项目目前处于**基础设施与基线准备阶段**，尚未产生正式实验结果。
+项目处于**基础设施与基线准备阶段**，已有可运行的端到端 pipeline（`src/pipeline/run_pipeline.py`）。已完成 70 项单元测试。
 
 已完成：
+- 完整的 pipeline 编排、音频预处理、VAD、重叠检测（pyannote + 能量 fallback）、双路径路由、ASR 适配器、候选生成、元数据构建、schema 验证、LLM 事件提取、情景记忆存储与检索、Gradio 交互演示。
 
-- 双语研究设计、系统架构、实验计划和模块接口；
-- 统一的 evidence-packet 元信息 Schema、校验规则和示例会议 fixture；
-- 音频加载接口、单声道转换、线性重采样、峰值归一化和基于能量的 VAD 分段；
-- 支持 SNR 控制和重叠真值标注的双说话人可控重叠语音合成；
-- WER、CER、重叠路由和最优映射说话人归属等客观评估指标；
-- 覆盖已实现基础设施的 46 项单元测试。
-
-正式实验前仍需完成：
-
-- 校准后的重叠检测器和路由阈值实验；
-- ASR、说话人日志/聚类和高重叠候选生成基线；
-- 不确定性感知 LLM 集成和元信息输入消融实验；
-- 持久化 Episodic Memory、检索和基于证据的问答；
-- 人工标注评估集，以及最终的证据与幻觉指标定义。
-
-当前验证说明：现有环境中不依赖 NumPy 的 25 项测试已通过；其余 21 项预处理和数据合成测试需要先安装 `requirements.txt` 中的依赖。Whisper、pyannote 和语音分离模型等重模型仍按计划保持未加载状态。
+正式实验前仍需：人工标注评估集构建、pyannote 模型校准、重模型（Whisper/FunASR）集成、元信息消融实验。
 
 ## 运行方式
-
-安装轻量级基线依赖并运行基础设施测试：
 
 ```bash
 python -m pip install -r requirements.txt
 python -m unittest discover -s tests -v
+python main.py data/raw_audio/meeting_001.wav --meeting-id meeting_001
+python app.py
 ```
 
-`main.py` 和 `app.py` 仍为占位入口，因为端到端 ASR、记忆与问答流程尚未实现。大型音频文件、模型权重和生成结果不应提交到 Git。
+独立中文版详见 [README.zh-CN.md](README.zh-CN.md)。大型音频文件、模型权重和生成结果不应提交到 Git。
