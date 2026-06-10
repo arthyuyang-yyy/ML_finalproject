@@ -51,3 +51,5 @@ This supports meeting QA, historical and cross-meeting recall, action-item retri
 ## 5. Evaluation Beyond WER and DER
 
 WER and DER remain useful, but they do not measure whether a meeting assistant is trustworthy. The project also evaluates overlap-routing accuracy, candidate usefulness, speaker-attribution accuracy, uncertainty-preservation quality, action-item extraction accuracy, RAG QA accuracy, evidence hit rate, and hallucination rate.
+
+**Implementation status**: The evidence-support metrics are implemented (`evaluate_evidence_support` in `src/evaluation.py`): evidence precision/recall/F1, evidence hit rate, hallucination rate, correct-abstention rate, and confidence calibration (Brier score); overlap-routing, WER/CER, and speaker-attribution metrics were already in place. Candidate-usefulness and uncertainty-preservation metrics remain to be defined.
