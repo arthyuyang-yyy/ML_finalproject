@@ -1,7 +1,9 @@
 """Route segments according to their estimated overlap."""
 
+from .overlap_detector import DEFAULT_OVERLAP_THRESHOLD
 
-def route_segment(overlap_score: float, threshold: float = 0.5) -> str:
+
+def route_segment(overlap_score: float, threshold: float = DEFAULT_OVERLAP_THRESHOLD) -> str:
     """Return the processing path selected by an overlap threshold."""
     if not 0.0 <= overlap_score <= 1.0:
         raise ValueError("overlap_score must be between 0.0 and 1.0")

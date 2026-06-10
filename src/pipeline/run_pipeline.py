@@ -3,13 +3,13 @@
 from pathlib import Path
 from typing import Any
 
-from src.asr import MockASRAdapter, transcribe_segments
+from src.asr import get_adapter
 from src.audio.clipper import write_segment_clips
-from src.candidate_generator import generate_high_overlap_candidates
-from src.diarization import cluster_speakers
 from src.dual_path_router import route_segment
 from src.episodic_memory import create_episode_from_segments
+from src.high_overlap import process_high_overlap_segments
 from src.llm.event_extractor import extract_meeting_events
+from src.low_overlap import process_low_overlap_segments
 from src.metadata_builder import build_metadata_segment
 from src.overlap_detector import estimate_segment_overlap_scores
 from src.audio.preprocess import load_audio, preprocess_audio, segment_waveform
@@ -38,40 +38,52 @@ def run_meeting_pipeline(
     vad_segments = segment_waveform(samples, sample_rate, meeting_id=meeting_id)
     write_json(paths["vad_segments"], vad_segments)
 
-    speaker_segments = cluster_speakers(vad_segments)
-    scored_segments = estimate_segment_overlap_scores(samples, speaker_segments, sample_rate)
+    scored_segments = estimate_segment_overlap_scores(
+        samples,
+        vad_segments,
+        sample_rate,
+        audio_path=str(paths["preprocessed"]),
+    )
     write_json(paths["overlap"], scored_segments)
 
-    transcribed_segments = transcribe_segments(
+    routed_segments = [
+        {
+            **segment,
+            "processing_path": route_segment(float(segment["overlap_score"]), threshold=cfg.overlap_threshold),
+        }
+        for segment in scored_segments
+    ]
+    low_overlap_input = [
+        segment for segment in routed_segments if segment["processing_path"] == "low_overlap_cluster"
+    ]
+    high_overlap_input = [
+        segment for segment in routed_segments if segment["processing_path"] == "high_overlap_candidate"
+    ]
+
+    low_overlap_processed = process_low_overlap_segments(
         samples,
-        scored_segments,
-        adapter=MockASRAdapter(language=cfg.language),
+        low_overlap_input,
+        asr_adapter=get_adapter(cfg.low_overlap_asr_model, **_adapter_kwargs(cfg.low_overlap_asr_model, cfg.language)),
         sample_rate=sample_rate,
     )
+    high_overlap_processed = process_high_overlap_segments(
+        samples,
+        high_overlap_input,
+        sample_rate=sample_rate,
+        language=cfg.language,
+    )
+    transcribed_segments = low_overlap_processed + high_overlap_processed
 
     evidence_segments: list[dict[str, Any]] = []
     low_overlap_segments: list[dict[str, Any]] = []
     high_overlap_segments: list[dict[str, Any]] = []
     for segment in transcribed_segments:
         overlap_score = float(segment["overlap_score"])
-        processing_path = route_segment(overlap_score, threshold=cfg.overlap_threshold)
+        processing_path = str(segment.get("processing_path") or route_segment(overlap_score, threshold=cfg.overlap_threshold))
         route_reason = _route_reason(overlap_score, cfg.overlap_threshold, processing_path)
         evidence_id = str(segment["segment_id"])
-        candidate_source = {
-            **segment,
-            "evidence_id": evidence_id,
-            "processing_path": processing_path,
-        }
-        candidates = (
-            generate_high_overlap_candidates(candidate_source)
-            if processing_path == "high_overlap_candidate"
-            else []
-        )
-        uncertainty_note = (
-            "High-overlap segment; multiple candidate interpretations preserved."
-            if candidates
-            else ""
-        )
+        candidates = list(segment.get("candidates", []))
+        uncertainty_note = str(segment.get("uncertainty_note", ""))
         evidence = build_metadata_segment(
             meeting_id=meeting_id,
             segment_id=str(segment["segment_id"]),
@@ -131,3 +143,15 @@ def run_meeting_pipeline(
 def _route_reason(overlap_score: float, threshold: float, processing_path: str) -> str:
     comparator = ">=" if overlap_score >= threshold else "<"
     return f"overlap_score={overlap_score:.3f} {comparator} threshold={threshold:.3f}; routed to {processing_path}"
+
+
+def _adapter_language(language: str) -> str | None:
+    """Map project-level unknown language labels to adapter-friendly values."""
+    return None if language in {"", "und", "unknown"} else language
+
+
+def _adapter_kwargs(model: str, language: str) -> dict[str, str | None]:
+    """Return ASR adapter kwargs without breaking dependency-free mock runs."""
+    if model.lower() == "mock":
+        return {"language": language}
+    return {"language": _adapter_language(language)}
