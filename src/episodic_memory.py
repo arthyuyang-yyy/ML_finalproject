@@ -27,6 +27,17 @@ DEFAULT_MEMORY_PATH = Path("outputs") / "episodic_memory.jsonl"
 # are treated as distinct episodes when no explicit event grouping is provided.
 DEFAULT_TIME_GAP = 30.0
 
+# Retrieval scoring weights. Relevance dominates; episode importance and recency
+# nudge the ranking, and high speech overlap is penalized so uncertain episodes
+# do not outrank clean evidence. When semantic embeddings are available the
+# relevance term splits across semantic and lexical signals; otherwise the full
+# relevance weight falls on the lexical signal.
+W_SEMANTIC = 0.45
+W_LEXICAL = 0.25
+W_IMPORTANCE = 0.15
+W_RECENCY = 0.10
+W_OVERLAP_PENALTY = 0.20
+
 # Cached embedding model; ``False`` marks "tried and unavailable" so we only pay
 # the import/load cost once per process.
 _EMBEDDER: Any = None
@@ -37,13 +48,17 @@ def create_episode_from_segments(
     *,
     episode_id: str | None = None,
     topic: str | None = None,
+    event_type: str | None = None,
+    importance: float | None = None,
 ) -> dict[str, Any]:
     """Create one coherent episode record from related metadata segments.
 
     The episode aggregates the evidence packets, their combined confidence, and
     every preserved ``uncertainty_note`` so downstream QA stays traceable. Pass
-    ``episode_id`` / ``topic`` to inherit them from an upstream meeting event;
-    otherwise they are derived from the segments themselves.
+    ``episode_id`` / ``topic`` / ``event_type`` / ``importance`` to inherit them
+    from an upstream meeting event; otherwise they are derived from the segments
+    themselves. The episode also records a mean ``overlap_score`` so retrieval
+    can down-weight uncertain, high-overlap memories.
     """
     if not segments:
         raise ValueError("segments must not be empty")
@@ -60,10 +75,14 @@ def create_episode_from_segments(
         for segment in ordered
     ]
     confidence = sum(confidence_values) / len(confidence_values) if confidence_values else 0.0
+    confidence = round(max(0.0, min(1.0, confidence)), 3)
+    overlap_scores = [float(segment.get("overlap_score", 0.0)) for segment in ordered]
+    overlap_score = round(sum(overlap_scores) / len(overlap_scores), 3) if overlap_scores else 0.0
     summary = text or "No transcript available."
     return {
         "meeting_id": meeting_id,
         "episode_id": episode_id or f"{meeting_id}_event_0001",
+        "event_type": event_type or "discussion",
         "start_time": min(float(segment["start_time"]) for segment in ordered),
         "end_time": max(float(segment["end_time"]) for segment in ordered),
         "speakers": speakers,
@@ -71,7 +90,11 @@ def create_episode_from_segments(
         "summary": summary,
         "evidence_ids": evidence_ids,
         "evidence": ordered,
-        "confidence": round(max(0.0, min(1.0, confidence)), 3),
+        "confidence": confidence,
+        "overlap_score": overlap_score,
+        # Default importance proxies evidence reliability until an LLM assigns a
+        # semantic importance; an explicit value (e.g. from an event) overrides it.
+        "importance": round(_clamp_unit(importance), 3) if importance is not None else confidence,
         "uncertainty_note": "; ".join(
             str(segment.get("uncertainty_note", ""))
             for segment in ordered
@@ -119,6 +142,8 @@ def create_episodes_from_segments(
                 grouped,
                 episode_id=event.get("event_id"),
                 topic=event.get("summary"),
+                event_type=event.get("event_type"),
+                importance=event.get("importance"),
             )
         )
 
@@ -170,8 +195,7 @@ def search_episodes(
     if not candidates:
         return []
 
-    documents = [_searchable_text(episode) for episode in candidates]
-    scores, method = _rank(query, documents)
+    scores, method = _score_candidates(query, candidates)
 
     ranked = sorted(
         (
@@ -241,20 +265,65 @@ def _searchable_text(episode: dict) -> str:
     )
 
 
-def _rank(query: str, documents: list[str]) -> tuple[list[float], str]:
-    """Score documents against the query, preferring semantic similarity."""
+def _score_candidates(query: str, candidates: list[dict]) -> tuple[list[float], str]:
+    """Blend relevance, importance, recency, and an overlap penalty per episode.
+
+    ``final = relevance + W_IMPORTANCE * importance + W_RECENCY * recency
+    - W_OVERLAP_PENALTY * overlap_score``. Relevance combines semantic and
+    lexical signals when embeddings are available, otherwise the full relevance
+    weight falls on the lexical signal. Returns the scores and the relevance
+    method used ("semantic" or "lexical").
+    """
+    documents = [_searchable_text(episode) for episode in candidates]
+    semantic = _semantic_similarities(query, documents)
+    lexical = [_lexical_score(query, document) for document in documents]
+    recency = _recency_scores(candidates)
+    method = "semantic" if semantic is not None else "lexical"
+
+    scores: list[float] = []
+    for index, episode in enumerate(candidates):
+        if semantic is not None:
+            relevance = W_SEMANTIC * semantic[index] + W_LEXICAL * lexical[index]
+        else:
+            relevance = (W_SEMANTIC + W_LEXICAL) * lexical[index]
+        final = (
+            relevance
+            + W_IMPORTANCE * _clamp_unit(episode.get("importance", episode.get("confidence", 0.0)))
+            + W_RECENCY * recency[index]
+            - W_OVERLAP_PENALTY * _clamp_unit(episode.get("overlap_score", 0.0))
+        )
+        scores.append(max(0.0, final))
+    return scores, method
+
+
+def _semantic_similarities(query: str, documents: list[str]) -> list[float] | None:
+    """Return per-document cosine similarities in [0, 1], or None if unavailable."""
     embedder = _get_embedder()
-    if embedder is not None:
-        import numpy as np
+    if embedder is None:
+        return None
+    import numpy as np
 
-        vectors = embedder.encode([query, *documents], normalize_embeddings=True)
-        query_vector = np.asarray(vectors[0])
-        document_vectors = np.asarray(vectors[1:])
-        similarities = document_vectors @ query_vector
-        # Map cosine similarity from [-1, 1] into [0, 1] for a stable score.
-        return [float((value + 1.0) / 2.0) for value in similarities], "semantic"
+    vectors = embedder.encode([query, *documents], normalize_embeddings=True)
+    query_vector = np.asarray(vectors[0])
+    document_vectors = np.asarray(vectors[1:])
+    similarities = document_vectors @ query_vector
+    # Map cosine similarity from [-1, 1] into [0, 1] for a stable score.
+    return [float((value + 1.0) / 2.0) for value in similarities]
 
-    return [_lexical_score(query, document) for document in documents], "lexical"
+
+def _recency_scores(candidates: list[dict]) -> list[float]:
+    """Score episodes by how late they end, normalized to [0, 1] within the set.
+
+    Within a single meeting this proxies recency by position on the timeline;
+    when all episodes share an end time (or there is only one), recency is
+    neutral so it never dominates the ranking.
+    """
+    end_times = [float(episode.get("end_time", 0.0)) for episode in candidates]
+    earliest, latest = min(end_times), max(end_times)
+    if latest == earliest:
+        return [0.0 for _ in candidates]
+    span = latest - earliest
+    return [(end_time - earliest) / span for end_time in end_times]
 
 
 def _lexical_score(query: str, document: str) -> float:
@@ -286,6 +355,11 @@ def _derive_topic(summary: str, max_length: int = 40) -> str:
     if len(collapsed) <= max_length:
         return collapsed
     return collapsed[:max_length].rstrip() + "…"
+
+
+def _clamp_unit(value: Any) -> float:
+    """Clamp a score-like value into ``[0.0, 1.0]``."""
+    return max(0.0, min(1.0, float(value)))
 
 
 def _load_episodes(memory_path: Path) -> list[dict]:

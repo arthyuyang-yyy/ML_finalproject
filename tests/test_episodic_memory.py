@@ -52,14 +52,28 @@ class EpisodeCreationTests(unittest.TestCase):
         self.assertEqual(episode["end_time"], 2.0)
         self.assertAlmostEqual(episode["confidence"], round(0.9 * 0.8, 3))
 
-    def test_episode_inherits_event_id_and_topic(self) -> None:
+    def test_episode_inherits_event_metadata(self) -> None:
         episode = create_episode_from_segments(
             [_segment("m1-1", "SPEAKER_00", 0.0, 1.0, "hello")],
             episode_id="m1_event_0042",
             topic="kickoff",
+            event_type="decision",
+            importance=0.9,
         )
         self.assertEqual(episode["episode_id"], "m1_event_0042")
         self.assertEqual(episode["topic"], "kickoff")
+        self.assertEqual(episode["event_type"], "decision")
+        self.assertAlmostEqual(episode["importance"], 0.9)
+
+    def test_episode_default_metadata_fields(self) -> None:
+        episode = create_episode_from_segments(
+            [_segment("m1-1", "SPEAKER_00", 0.0, 1.0, "hello")]
+        )
+        # event_type defaults to discussion; importance proxies confidence;
+        # overlap_score is the mean of the evidence segments' overlap scores.
+        self.assertEqual(episode["event_type"], "discussion")
+        self.assertAlmostEqual(episode["importance"], episode["confidence"])
+        self.assertAlmostEqual(episode["overlap_score"], 0.05)
 
     def test_empty_segments_raise(self) -> None:
         with self.assertRaises(ValueError):
@@ -157,6 +171,33 @@ class RetrievalTests(unittest.TestCase):
     def test_time_range_filter(self) -> None:
         results = search_episodes("budget schedule", path=self.path, time_range=(0.0, 10.0))
         self.assertEqual({ep["episode_id"] for ep in results}, {"m1_event_0001"})
+
+    def test_high_overlap_episode_is_penalized(self) -> None:
+        # Two episodes match the query equally; the high-overlap one should rank
+        # lower because uncertain memories are penalized.
+        path = Path(self._tmp.name) / "overlap.jsonl"
+        clean = build_metadata_segment(
+            meeting_id="m2", segment_id="m2-1", speaker="SPEAKER_00",
+            start_time=0.0, end_time=1.0, text="alpha topic",
+            processing_path="low_overlap_cluster", overlap_score=0.05,
+            asr_confidence=0.9, speaker_confidence=0.9,
+        )
+        noisy = build_metadata_segment(
+            meeting_id="m2", segment_id="m2-2", speaker="SPEAKER_01",
+            start_time=0.0, end_time=1.0, text="alpha topic",
+            processing_path="low_overlap_cluster", overlap_score=0.9,
+            asr_confidence=0.9, speaker_confidence=0.9,
+        )
+        store_episodes(
+            [
+                create_episode_from_segments([clean], episode_id="clean"),
+                create_episode_from_segments([noisy], episode_id="noisy"),
+            ],
+            path,
+        )
+        results = search_episodes("alpha", path=path)
+        self.assertEqual(results[0]["episode_id"], "clean")
+        self.assertGreater(results[0]["retrieval_score"], results[1]["retrieval_score"])
 
 
 if __name__ == "__main__":
