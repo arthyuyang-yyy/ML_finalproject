@@ -8,7 +8,7 @@ from src.audio.clipper import write_segment_clips
 from src.candidate_generator import generate_high_overlap_candidates
 from src.diarization import cluster_speakers
 from src.dual_path_router import route_segment
-from src.episodic_memory import create_episode_from_segments
+from src.episodic_memory import create_episodes_from_segments
 from src.llm.event_extractor import extract_meeting_events
 from src.metadata_builder import build_metadata_segment
 from src.overlap_detector import estimate_segment_overlap_scores
@@ -106,7 +106,7 @@ def run_meeting_pipeline(
     ]
 
     meeting_events = extract_meeting_events(evidence_segments)
-    episodic_memory = [create_episode_from_segments(evidence_segments)] if evidence_segments else []
+    episodic_memory = create_episodes_from_segments(evidence_segments, meeting_events)
 
     write_json(paths["low_overlap_segments"], low_overlap_segments)
     write_json(paths["high_overlap_candidates"], high_overlap_segments)
