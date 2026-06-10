@@ -74,13 +74,13 @@ Compare three QA approaches:
 - Cross-meeting recall
 - Evidence hit rate (does the answer cite correct segments?)
 
-**Memory infrastructure** (implemented in `src/episodic_memory.py` and `src/rag_qa.py`):
+**Memory infrastructure** (implemented in `src/memory/episodic_store.py` and `src/memory/retriever.py`):
 - Episode creation from evidence segments
-- JSONL persistence
-- Keyword-based retrieval baseline
+- atomic JSON persistence with meeting-level replacement
+- BM25 + embedding hybrid retrieval with importance, recency, and overlap-aware scoring
 - QA response format with evidence, speaker, timestamp, confidence
 
-**Status:** Storage, retrieval, and baseline QA implemented. Semantic/vector retrieval and formal QA evaluation pending.
+**Status:** Storage, hybrid retrieval, and baseline QA implemented. Formal QA evaluation and embedding-model comparison remain pending.
 
 ## Experiment 5: Hallucination and Evidence Evaluation
 

@@ -6,7 +6,16 @@ This document compares the three schema structures used across the project, thei
 
 ## 1. Evidence Segment Schema (17 fields)
 
-Defined by `src/metadata_builder.py` — `build_metadata_segment()` and validated by `src/schema_validation.py`. This is the **canonical in-memory schema** used throughout the pipeline.
+Defined by `src/evidence/builder.py` and `src/evidence/schema.py`, then validated by `src/schema_validation.py`. This is the **canonical in-memory schema** used throughout the pipeline. `src/metadata_builder.py` remains only as a backward-compatible import.
+
+The 13 fields in the project task document are the domain-facing core. The implementation deliberately retains four provenance fields required for reliable downstream traceability:
+
+- `evidence_id`
+- `route_reason`
+- `source_audio_path`
+- `language`
+
+`build_evidence_segments()` accepts the low-overlap and high-overlap result lists, normalizes simplified candidate objects, sorts all records by timestamp, rejects duplicate IDs, and emits this complete 17-field representation. `build_evidence_file()` provides the equivalent JSON-file-to-JSON-file workflow.
 
 | # | Field | Type | Description |
 |---|-------|------|-------------|
@@ -43,10 +52,14 @@ Each item in `candidates` list:
 
 ### Validation rules
 
-- `start_time <= end_time`
+- `start_time < end_time`
 - `processing_path` must be `"low_overlap_cluster"` or `"high_overlap_candidate"`
 - All scores (`overlap_score`, `asr_confidence`, `speaker_confidence`, candidate `confidence`) must be in [0, 1]
-- High-overlap segments (`processing_path == "high_overlap_candidate"`) must have at least one candidate
+- IDs must be non-empty and unique within a meeting
+- All records in one evidence file must share one `meeting_id`
+- Low-overlap segments must contain transcript text and must not contain candidates or uncertainty notes
+- High-overlap segments must use `speaker="MIXED"`, keep primary `text` empty, include at least one candidate, and explain uncertainty
+- Simplified candidates containing only `speaker`, `text`, and `confidence` are accepted by the builder; stable `candidate_id` and `uncertainty_note` values are generated before validation
 
 ---
 
@@ -127,52 +140,82 @@ Defined by `src/data_synthesis.py` — `build_annotation()`. This is the **outpu
 
 ## 4. Episodic Memory Record
 
-Defined by `src/episodic_memory.py` — `create_episode_from_segments()`.
+Defined and validated by `src/memory/memory_schema.py`, built from structured meeting events by `src/memory/episodic_store.py`, and stored in `memory/episodic_memory.json`.
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `meeting_id` | `str` | Meeting identifier |
 | `episode_id` | `str` | Unique episode identifier |
+| `event_type` | `str` | Structured event type; high-overlap evidence is forced to `uncertainty` |
+| `topic` | `str` | Concise event topic |
+| `content` | `str` | Event content from the validated meeting event |
 | `start_time` | `float` | Earliest segment start (s) |
 | `end_time` | `float` | Latest segment end (s) |
 | `speakers` | `list[str]` | Unique speakers in this episode |
-| `topic` | `str` | Topic label (default `"meeting discussion"`) |
-| `summary` | `str` | Concatenated transcript text |
 | `evidence_ids` | `list[str]` | Evidence IDs cited |
-| `evidence` | `list[dict]` | Original evidence segments |
-| `confidence` | `float` | Aggregated confidence [0, 1] |
-| `uncertainty_note` | `str` | Aggregated uncertainty notes |
+| `evidence_text` | `str` | Supporting transcript or candidate interpretations |
+| `overlap_score` | `float` | Maximum overlap score among cited evidence |
+| `confidence` | `str` | `high`, `medium`, or `low` |
+| `importance` | `float` | Retrieval importance [0, 1], defaulted by event type |
+| `audio_clip_paths` | `list[str]` | Source audio clips for traceability |
+| `uncertainty_note` | `str` | Aggregated uncertainty notes; required for uncertainty episodes |
+| `memory_timestamp` | `str` | UTC ISO-8601 write time used for recency scoring; optional for legacy records |
+
+High-overlap evidence is never persisted as a confirmed decision or action. The Memory layer independently converts it to `event_type="uncertainty"`, `speakers=["MIXED"]`, and `confidence="low"` even if an upstream caller bypasses the LLM validator.
+
+Long-term persistence uses atomic JSON replacement. Reprocessing a meeting replaces that meeting's previous episodes while preserving episodes from other meetings.
+
+Retrieval indexes `content`, `topic`, `event_type`, `speakers`, and `evidence_text`. It combines normalized BM25, embedding similarity, importance, recency, and an overlap penalty. High-overlap records are penalized only when they are incorrectly represented as a certain event rather than `uncertainty`.
 
 ---
 
-## 5. Meeting Event
+## 5. Structured Meeting Events Document
 
-Defined by `src/llm/event_validator.py` — `validate_meeting_event()`.
+Defined by `src/llm/event_validator.py` and produced by `src/llm/event_extractor.py`.
+
+### Top-level fields
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `meeting_id` | `str` | Meeting identifier |
+| `meeting_id` | `str` | Meeting identifier; must match the evidence records |
+| `meeting_summary` | `str` | Evidence-grounded meeting summary |
+| `events` | `list[dict]` | Validated structured events |
+
+### Event fields
+
+| Field | Type | Description |
+|-------|------|-------------|
 | `event_id` | `str` | Unique event identifier |
-| `summary` | `str` | Event summary text |
+| `event_type` | `str` | `decision`, `action_item`, `open_question`, `disagreement`, `uncertainty`, `speaker_stance`, or `topic_transition` |
+| `content` | `str` | Evidence-backed event content |
+| `speakers` | `list[str]` | Speaker labels supported by cited evidence |
 | `evidence_ids` | `list[str]` | Evidence ID citations (must exist in evidence segments) |
-| `confidence` | `float` | Event confidence [0, 1] |
-| `uncertainty_note` | `str` | Human-readable uncertainty note |
+| `confidence` | `str` | `high`, `medium`, or `low` |
+| `uncertainty_note` | `str` | Optional explanation added when confidence is reduced |
+
+Action items additionally require `task` and `owner`; `deadline` is optional. `owner` must be supported by cited evidence or equal to `"uncertain"`.
+
+Validation rejects missing/unknown evidence IDs, duplicate event IDs, unsupported speakers, invalid action items, and invalid event types. Events citing high-overlap evidence cannot remain high confidence; uncertainty events are always low confidence.
 
 ---
 
 ## 6. QA Answer
 
-Defined by `src/rag_qa.py` — `answer_question_with_evidence()`.
+Defined by `src/qa/answerer.py` and validated by `src/qa/answer_validator.py`.
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `answer` | `str` | Answer text |
-| `evidence` | `list[dict]` | Supporting evidence segments |
-| `speaker` | `str` | Cited speakers |
-| `timestamp` | `str` | Time range string |
-| `confidence` | `float` | Answer confidence [0, 1] |
+| `episode_ids` | `list[str]` | Retrieved episodes actually used by the answer |
+| `evidence_ids` | `list[str]` | Evidence IDs cited in the answer text |
+| `citations` | `list[dict]` | Episode ID, evidence IDs, and exact start/end time for each citation |
+| `speakers` | `list[str]` | Speaker labels supported by cited episodes |
+| `confidence` | `str` | `high`, `medium`, or `low` |
 | `uncertainty_note` | `str` | Uncertainty explanation |
-| `query` | `str` | Original query (echoed) |
+| `insufficient_evidence` | `bool` | True when retrieved evidence cannot answer the question |
+| `question` | `str` | Original question |
+
+Every supported answer must include its evidence IDs and exact episode time ranges in the rendered answer text. Unknown citations, altered timestamps, unsupported speakers, or high-overlap evidence presented without a low-confidence uncertainty warning are rejected. Empty retrieval returns an explicit cannot-determine response.
 
 ---
 
@@ -198,9 +241,9 @@ Annotation CSV (11 cols)
                               └── generated by ── data_synthesis.py
 
 ASR Transcript (5 fields)
-    └── input to ── Metadata Builder
+    └── input to ── Evidence Segment Builder
                          └── produces ── Evidence Segment (17 fields)
                                               ├── input to ── Event Extractor → Meeting Event (6 fields)
                                               └── input to ── Episode Creator → Episodic Memory (11 fields)
-                                                                                      └── input to ── QA → QA Answer (7 fields)
+                                                                                      └── input to ── QA → validated QA Answer
 ```

@@ -45,7 +45,7 @@
 7. 将片段转换为情景记忆记录并持久化。
 8. 检索情景记忆，以说话人、时间戳、置信度和不确定性说明回答问题。
 
-模块设计见 [docs/system_architecture.zh-CN.md](docs/system_architecture.zh-CN.md)，完整 pipeline 调用链见 [docs/pipeline_walkthrough.md](docs/pipeline_walkthrough.md)。
+模块设计见 [docs/system_architecture.zh-CN.md](docs/system_architecture.zh-CN.md)，目录职责与扩展约定见 [docs/project_structure.zh-CN.md](docs/project_structure.zh-CN.md)，完整 pipeline 调用链见 [docs/pipeline_walkthrough.md](docs/pipeline_walkthrough.md)。
 
 ## 仓库结构
 
@@ -97,7 +97,7 @@
 
 ## Episodic Memory / 情景记忆设计
 
-一个 episode 表示有意义的会议事件或一组连贯片段。它保存会议与事件 ID、时间范围、说话人、主题、摘要、证据 ID 列表与原始证据、置信度、不确定性说明，以及后续加入的嵌入向量。底（JSONL 文件），后续接入向量检索。
+一个 episode 表示一个有意义且有证据支持的会议事件。它保存会议与事件 ID、时间范围、说话人、主题、内容、证据 ID、证据文本、重叠分数、置信度、重要度、写入时间和音频片段路径。长期记忆写入 `memory/episodic_memory.json`，按 meeting ID 原子更新，并通过 BM25 + embedding 混合检索。
 
 情景记忆支持：
 
@@ -135,7 +135,8 @@
 - 重叠检测：pyannote OSD 适配器（有 HF token 时）+ 保守能量 fallback（上限 0.39，不会误触发高重叠路由）；
 - 双路径路由（阈值 0.4）、低重叠 ASR + 说话人归属路径、高重叠候选生成（不强行确定单一转写）；
 - 元数据构建、schema 验证和 LLM 事件提取；
-- 情景记忆的创建、JSONL 持久化与关键词检索；
+- 事件级情景记忆创建、按会议原子更新的 JSON 持久化与 BM25 + embedding 混合检索；
+- Gemma 仅基于 top-k Episode 回答，并校验证据 ID、时间戳、说话人和不确定性；
 - 基于 Gradio 的交互式 UI 演示；
 - 端到端 pipeline 编排（`src/pipeline/run_pipeline.py`）；
 - 75 项单元测试覆盖已实现基础设施。
@@ -165,7 +166,10 @@ python main.py data/raw_audio/meeting_001.wav --meeting-id meeting_001
 启动 Gradio 交互演示：
 
 ```bash
+python -m pip install -r requirements-demo.txt
 python app.py
 ```
+
+Demo 包含音频上传、重叠感知时间线、高重叠候选查看、结构化会议记忆，以及仅针对当前会议的证据引用问答。
 
 大型音频文件、模型权重和生成结果不应提交到 Git。

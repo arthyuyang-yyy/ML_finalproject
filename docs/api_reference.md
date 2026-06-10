@@ -218,11 +218,28 @@ When waveform samples are provided and faster-whisper is installed, candidates a
 
 ---
 
-## Metadata & Validation
+## Evidence Building & Validation
 
-### `src/metadata_builder.py`
+### `src/evidence/builder.py`
 
 ```python
+def build_evidence_segments(
+    low_overlap_segments,
+    high_overlap_segments,
+    *,
+    meeting_id=None,
+    source_audio_path="",
+    language="und",
+    overlap_threshold=0.4,
+) -> list[dict[str, Any]]
+
+def build_evidence_file(
+    low_overlap_path,
+    high_overlap_path,
+    output_path,
+    **builder_kwargs,
+) -> list[dict[str, Any]]
+
 def build_metadata_segment(
     meeting_id, segment_id, speaker, start_time, end_time, text,
     processing_path, overlap_score, asr_confidence, speaker_confidence,
@@ -231,6 +248,8 @@ def build_metadata_segment(
     language="und", route_reason="",
 ) -> dict[str, Any]
 ```
+
+`src/metadata_builder.py` re-exports `build_metadata_segment()` for backward compatibility.
 
 ### `src/schema_validation.py`
 
@@ -252,16 +271,25 @@ def validate_meeting(segments: Any) -> list[dict[str, Any]]
 def extract_meeting_events(
     evidence_segments: list[dict[str, Any]],
     client: GemmaClient | None = None,
-) -> list[dict[str, Any]]
+    event_index: int = 1,
+    max_attempts: int = 2,
+) -> dict[str, Any]
+
+def extract_meeting_events_file(
+    evidence_path,
+    output_path,
+    client: GemmaClient | None = None,
+) -> dict[str, Any]
 ```
 
 ### `src/llm/event_validator.py`
 
 ```python
 def validate_meeting_event(event: Any, known_evidence_ids: set[str] | None = None) -> dict[str, Any]
+def validate_meeting_events_document(document, evidence_segments, drop_invalid_events=False) -> dict[str, Any]
 ```
 
-**Event shape:** `{"meeting_id", "event_id", "summary", "evidence_ids", "confidence", "uncertainty_note"}`
+**Document shape:** `{"meeting_id", "meeting_summary", "events"}`. Each event has `event_id`, `event_type`, `content`, `speakers`, `evidence_ids`, and `confidence`; action items also require `task` and `owner`.
 
 ### `src/llm/gemma_client.py`
 
@@ -276,43 +304,65 @@ class GemmaClient:
 def build_event_extraction_prompt(evidence_segments: list[dict[str, Any]]) -> str
 ```
 
-### `src/llm_postprocess.py`
-
-```python
-SYSTEM_INSTRUCTIONS: str
-
-def build_llm_prompt_with_metadata(segments: list[dict], memory_context=None) -> str
-def uncertainty_aware_correction(segments: list[dict]) -> list[dict]  # stub
-def generate_evidence_based_summary(segments: list[dict]) -> dict      # stub
-```
-
 ---
 
 ## Episodic Memory
 
-### `src/episodic_memory.py`
+### `src/memory/episodic_store.py`
 
 ```python
-def create_episode_from_segments(segments: list[dict]) -> dict[str, Any]
-def store_episode(episode: dict, path: str | Path = "outputs/episodic_memory.jsonl") -> None
-def search_episodes(query: str, top_k: int = 5,
-                    path: str | Path = "outputs/episodic_memory.jsonl") -> list[dict]
+def build_episodes(meeting_events: dict, evidence_segments: list[dict]) -> list[Episode]
+def build_episodes_file(meeting_events_path, evidence_segments_path,
+                        output_path="memory/episodic_memory.json") -> list[Episode]
+def upsert_episodes(path, episodes, meeting_id=None) -> list[Episode]
+def read_episodes(path="memory/episodic_memory.json") -> list[Episode]
+def write_episodes(path, episodes) -> None
 ```
 
-**Episode shape:** `{"meeting_id", "episode_id", "start_time", "end_time", "speakers", "topic", "summary", "evidence_ids", "evidence", "confidence", "uncertainty_note"}`
+**Episode shape:** `{"episode_id", "meeting_id", "event_type", "topic", "content", "speakers", "start_time", "end_time", "evidence_ids", "evidence_text", "overlap_score", "confidence", "importance", "audio_clip_paths", "uncertainty_note", "memory_timestamp"}`
+
+### `src/memory/retriever.py`
+
+```python
+def retrieve_episodes(question, episodes=None,
+                      path="memory/episodic_memory.json", top_k=5,
+                      embedding_backend=None, min_score=0.0) -> list[dict]
+
+class HashingEmbeddingBackend
+class SentenceTransformerEmbeddingBackend
+```
+
+The retriever indexes `content`, `topic`, `event_type`, `speakers`, and `evidence_text`. Results include a `retrieval` object with the final score and each score component. The scoring formula is:
+
+```text
+0.45 * embedding_similarity
++ 0.25 * normalized_bm25
++ 0.15 * importance
++ 0.10 * recency
+- 0.20 * overlap_penalty
+```
+
+High-overlap non-uncertainty episodes receive the overlap penalty. The default hashing backend is dependency-free; `SentenceTransformerEmbeddingBackend` provides optional multilingual semantic embeddings.
 
 ---
 
 ## QA
 
-### `src/rag_qa.py`
+### `src/qa/answerer.py`
 
 ```python
-def retrieve_relevant_memory(query: str, top_k: int = 5) -> list[dict]
-def answer_question_with_evidence(query: str, retrieved_episodes: list[dict]) -> dict
+def answer_question(question: str, retrieved_episodes: list[dict],
+                    client: GemmaClient | None = None,
+                    max_attempts: int = 2) -> dict
 ```
 
-**QA answer shape:** `{"answer", "evidence", "speaker", "timestamp", "confidence", "uncertainty_note", "query"}`
+Gemma sees only the supplied top-k episodes and must return JSON. The answer is accepted only when every episode ID, evidence ID, timestamp, speaker, confidence level, and uncertainty statement validates against those episodes. Invalid model output receives one repair attempt and then falls back to a deterministic cited answer.
+
+**QA answer shape:** `{"answer", "episode_ids", "evidence_ids", "citations", "speakers", "confidence", "uncertainty_note", "insufficient_evidence", "question"}`
+
+### `src/rag_qa.py`
+
+Compatibility facade exporting `retrieve_relevant_memory()` and `answer_question_with_evidence()` for existing callers.
 
 ---
 
@@ -356,9 +406,17 @@ def to_annotation_rows(annotation: dict) -> list[dict]
 ### `src/ui/gradio_app.py`
 
 ```python
-def build_app()       # returns gradio.Blocks
-def launch() -> None  # starts the Gradio server
+def prepare_demo_data(result: dict) -> dict
+def build_timeline_rows(evidence_segments: list[dict]) -> list[list]
+def build_memory_rows(episodes: list[dict]) -> list[list]
+def candidate_detail(segment_id: str, state: dict) -> dict
+def answer_demo_question(question: str, state: dict, top_k: int = 5) -> tuple
+def run_demo_pipeline(audio_path: str, meeting_id: str) -> dict
+def build_app() -> gradio.Blocks
+def launch() -> None
 ```
+
+The five UI areas consume canonical pipeline artifacts. QA retrieval is scoped to the episodes held in the current page state, preventing unrelated meetings in long-term memory from leaking into the demo answer.
 
 ---
 

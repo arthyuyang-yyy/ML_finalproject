@@ -22,6 +22,11 @@ class EditDistanceTests(unittest.TestCase):
         result = edit_distance(list("abc"), list("abc"))
         self.assertEqual(result["distance"], 0)
 
+    def test_both_empty_sequences(self) -> None:
+        result = edit_distance([], [])
+        self.assertEqual(result["distance"], 0)
+        self.assertEqual(result["reference_length"], 0)
+
     def test_counts_substitution_deletion_insertion(self) -> None:
         # ref: a b c d ; hyp: a x c -> 1 sub (b->x), 1 del (d)
         result = edit_distance(["a", "b", "c", "d"], ["a", "x", "c"])
@@ -50,6 +55,10 @@ class ErrorRateTests(unittest.TestCase):
         result = word_error_rate("", "extra words")
         self.assertEqual(result["error_rate"], 1.0)
 
+    def test_empty_hypothesis_with_deletions(self) -> None:
+        result = word_error_rate("hello world", "")
+        self.assertAlmostEqual(result["error_rate"], 1.0)
+
 
 class OverlapRoutingTests(unittest.TestCase):
     def test_perfect_routing(self) -> None:
@@ -75,6 +84,10 @@ class OverlapRoutingTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             evaluate_overlap_routing(["nope"], ["low_overlap_cluster"])
 
+    def test_empty_predictions_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            evaluate_overlap_routing([], ["low_overlap_cluster"])
+
 
 class SpeakerAttributionTests(unittest.TestCase):
     def test_label_permutation_is_resolved(self) -> None:
@@ -91,6 +104,15 @@ class SpeakerAttributionTests(unittest.TestCase):
     def test_mismatched_length_raises(self) -> None:
         with self.assertRaises(ValueError):
             speaker_attribution_accuracy(["A"], ["A", "B"])
+
+    def test_empty_lists_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            speaker_attribution_accuracy([], [])
+
+    def test_five_speaker_permutation(self) -> None:
+        refs = ["A", "B", "C", "D", "E"]
+        hyps = ["E", "D", "C", "B", "A"]  # perfect permutation exists
+        self.assertEqual(speaker_attribution_accuracy(refs, hyps)["accuracy"], 1.0)
 
 
 class DeferredEvidenceTests(unittest.TestCase):

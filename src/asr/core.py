@@ -32,8 +32,8 @@ from typing import Any
 
 import numpy as np
 
-from .audio.preprocess import TARGET_SAMPLE_RATE
-from .utils import validate_score
+from src.audio.preprocess import TARGET_SAMPLE_RATE
+from src.utils import validate_score
 
 
 def logprob_to_confidence(avg_logprob: float, no_speech_prob: float = 0.0) -> float:
@@ -69,7 +69,7 @@ class ASRAdapter:
 
     def transcribe_file(self, audio_path: str) -> dict[str, Any]:
         """Load an audio file (via :mod:`src.audio.preprocess`) and transcribe it."""
-        from .audio.preprocess import load_audio
+        from ..audio.preprocess import load_audio
 
         samples, sample_rate = load_audio(audio_path)
         return self.transcribe_array(samples, sample_rate)
@@ -411,7 +411,7 @@ def _ensure_sample_rate(samples: np.ndarray, sample_rate: int) -> np.ndarray:
     samples = np.asarray(samples, dtype=np.float32)
     if sample_rate == TARGET_SAMPLE_RATE:
         return samples
-    from .audio.preprocess import resample
+    from ..audio.preprocess import resample
 
     return resample(samples, sample_rate, TARGET_SAMPLE_RATE)
 

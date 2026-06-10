@@ -27,8 +27,8 @@ Audio
   -> write_segment_clips (export per-segment WAV)
   -> validate_metadata_segment
   -> extract_meeting_events (LLM or fallback)
-  -> create_episode_from_segments
-  -> store_episode (JSONL)
+  -> build_episodes (event-level episodes; force overlap uncertainty)
+  -> upsert_episodes (atomic JSON replacement by meeting ID)
   -> write_json (per-meeting JSON artifacts)
 ```
 
@@ -50,10 +50,8 @@ See [pipeline_walkthrough.md](pipeline_walkthrough.md) for the complete 14-step 
 | Speech separation | `src/speech_separation.py` | Separation interface (stub — pending model integration) |
 | High-overlap path | `src/high_overlap.py` | Preserve mixed-speaker records with empty main transcript and multiple candidates |
 | Candidate generator | `src/candidate_generator.py` | Produce multiple transcript/speaker hypotheses with faster-whisper beam/temperature/language variations, with fallback candidates for lightweight runs |
-| Metadata builder | `src/metadata_builder.py` | Normalize outputs into the shared 17-field evidence schema |
+| Evidence builder | `src/evidence/builder.py` | Merge low/high-overlap results, normalize candidates, sort by time, and emit the shared 17-field evidence schema |
 | Schema validation | `src/schema_validation.py` | Validates evidence-packet records, candidate structure, and per-meeting lists |
-| LLM post-process | `src/llm_postprocess.py` | Build constrained metadata-aware prompts; uncertainty-aware correction interface (correction stub) |
-
 ### Pipeline Orchestration
 
 | Module | File | Responsibility |
@@ -66,17 +64,18 @@ See [pipeline_walkthrough.md](pipeline_walkthrough.md) for the complete 14-step 
 
 | Module | File | Responsibility |
 | --- | --- | --- |
-| Event extractor | `src/llm/event_extractor.py` | Extract meeting events from evidence segments (LLM or deterministic fallback) |
-| Event validator | `src/llm/event_validator.py` | Validate LLM-extracted events, enforce evidence_id citations |
-| Gemma client | `src/llm/gemma_client.py` | Pluggable Gemma JSON-generation interface |
-| Prompts | `src/llm/prompts.py` | Build evidence-aware event extraction prompts |
+| Event extractor | `src/llm/event_extractor.py` | Produce structured meeting documents with JSON repair, retry, invalid-event filtering, and deterministic fallback |
+| Event validator | `src/llm/event_validator.py` | Enforce event types, real evidence IDs, supported speakers/owners, action-item fields, and overlap-confidence rules |
+| Gemma client | `src/llm/gemma_client.py` | Injectable local or remote Gemma JSON-generation function |
+| Prompts | `src/llm/prompts.py` | Build strict JSON-schema extraction and repair prompts grounded in evidence |
 
 ### Memory & QA
 
 | Module | File | Responsibility |
 | --- | --- | --- |
-| Episodic memory | `src/episodic_memory.py` | Create episodes from segments, persist as JSONL, keyword-based search |
-| RAG QA | `src/rag_qa.py` | Retrieve relevant episodes and answer with evidence citations |
+| Episodic memory | `src/memory/episodic_store.py` | Convert events to traceable episodes, enforce overlap uncertainty, and atomically upsert long-term JSON memory by meeting |
+| Hybrid retrieval | `src/memory/retriever.py` | Rank episodes with BM25, embeddings, importance, recency, and overlap-aware penalties |
+| RAG QA | `src/qa/answerer.py` | Let Gemma answer from top-k episodes only, validate citations, and fall back safely when output is invalid |
 
 ### Evaluation & Data
 
@@ -90,17 +89,17 @@ See [pipeline_walkthrough.md](pipeline_walkthrough.md) for the complete 14-step 
 
 | Module | File | Responsibility |
 | --- | --- | --- |
-| Gradio app | `src/ui/gradio_app.py` | Interactive pipeline demo via Gradio |
+| Gradio app | `src/ui/gradio_app.py` | Five-area demo for upload, evidence timeline, high-overlap candidates, meeting memory, and current-meeting QA |
 
 ### Package Facades
 
 | Package | Re-exports |
 | --- | --- |
 | `src/overlap/` | `detect_overlap_segments`, `estimate_segment_overlap_scores`, `detect_pyannote_overlap_regions`, `DEFAULT_OVERLAP_THRESHOLD` |
-| `src/evidence/` | `build_metadata_segment`, `validate_metadata_segment`, `validate_meeting`, `validate_candidate` |
+| `src/evidence/` | `build_evidence_segments`, `build_evidence_file`, `build_metadata_segment`, `validate_metadata_segment`, `validate_meeting`, `validate_candidate` |
 | `src/llm/` | `extract_meeting_events`, `validate_meeting_event` |
-| `src/memory/` | `create_episode_from_segments`, `store_episode`, `search_episodes` |
-| `src/qa/` | `answer_question_with_evidence`, `retrieve_relevant_memory` |
+| `src/memory/` | `build_episodes`, `build_episodes_file`, `upsert_episodes`, `read_episodes`, `retrieve_episodes` |
+| `src/qa/` | `answer_question`, `validate_qa_answer`, prompt builders, and compatibility QA entry points |
 | `src/candidates/` | `generate_high_overlap_candidates` |
 
 ## Key Contracts
@@ -128,6 +127,7 @@ Per-meeting outputs are written to `outputs/{meeting_id}/`:
 | Evidence segments | `evidence_segments.json` | All validated evidence records |
 | Meeting events | `meeting_events.json` | LLM-extracted meeting events |
 | Episodic memory | `episodic_memory.json` | Episode records |
+| Long-term episodic memory | `memory/episodic_memory.json` | Cross-meeting episodes; reprocessing a meeting replaces its previous records |
 | Audio clips | `clips/{evidence_id}.wav` | Per-segment WAV exports |
 
 ## Implementation Status
@@ -137,5 +137,5 @@ Per-meeting outputs are written to `outputs/{meeting_id}/`:
 | 1. Validate metadata and annotation contracts | Completed |
 | 2. Baseline overlap detection, ASR, and diarization | Completed (pyannote adapters + conservative fallbacks, low-overlap ASR/speaker path, mock defaults for tests) |
 | 3. Candidate generation and uncertainty-aware prompts | Completed (multi-decode candidate interface, fallback candidates, LLM event extraction) |
-| 4. Local episode storage and retrieval | Completed (JSONL persistence, keyword search) |
+| 4. Local episode storage and retrieval | Completed (atomic long-term JSON upsert, BM25 + embedding hybrid retrieval) |
 | 5. Run ablations and evidence-quality evaluation | Pending (requires annotated evaluation split, heavy-model integration) |

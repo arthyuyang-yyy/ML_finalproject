@@ -74,13 +74,13 @@
 - 跨会议回忆
 - 证据命中率（回答是否引用正确片段）
 
-**记忆基础设施**（实现于 `src/episodic_memory.py` 和 `src/rag_qa.py`）：
+**记忆基础设施**（实现于 `src/memory/episodic_store.py` 和 `src/memory/retriever.py`）：
 - 从证据片段创建 episode
-- JSONL 持久化
-- 关键词检索基线
+- 按会议替换的原子 JSON 持久化
+- BM25 + embedding 混合检索，并结合重要度、时效性和重叠惩罚
 - QA 响应格式（含 evidence、speaker、timestamp、confidence）
 
-**状态：** 存储、检索和基线 QA 已实现。语义/向量检索和正式 QA 评估待进行。
+**状态：** 存储、混合检索和基线 QA 已实现。正式 QA 评估与 embedding 模型对比待进行。
 
 ## 实验 5：幻觉与证据评估
 

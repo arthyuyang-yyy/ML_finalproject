@@ -173,7 +173,8 @@ Completed:
 - overlap detection with pyannote OSD adapter (priority) and conservative energy fallback;
 - dual-path routing (threshold 0.4), low-overlap ASR + speaker-attribution path, and high-overlap candidate generation without forcing one transcript;
 - metadata construction, schema validation, and LLM event extraction;
-- episodic memory creation, JSONL persistence, and keyword-based retrieval;
+- event-level episodic memory creation, atomic JSON upsert by meeting, and BM25 + embedding hybrid retrieval;
+- top-k-only Gemma QA with validated evidence/timestamp citations and deterministic fallback;
 - Gradio interactive UI demo;
 - end-to-end pipeline orchestration (`src/pipeline/run_pipeline.py`);
 - 75 unit tests covering the implemented baseline infrastructure.
@@ -205,8 +206,11 @@ python main.py data/raw_audio/meeting_001.wav --meeting-id meeting_001
 Launch the Gradio interactive demo:
 
 ```bash
+python -m pip install -r requirements-demo.txt
 python app.py
 ```
+
+The demo includes audio upload, an overlap-aware timeline, high-overlap candidate inspection, structured meeting memory, and evidence-cited QA over the current meeting.
 
 Keep large audio files, model weights, and generated outputs outside Git.
 

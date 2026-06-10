@@ -3,15 +3,90 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 
 from src.pipeline.config import PipelineConfig
 from src.pipeline.io import read_json
 from src.pipeline.run_pipeline import run_meeting_pipeline
+from src.audio.preprocess import load_audio
+from src.llm.gemma_client import GemmaClient
 
 
 class PipelineTests(unittest.TestCase):
+    def test_pipeline_accepts_structured_gemma_client(self) -> None:
+        try:
+            import soundfile as sf
+        except ImportError:
+            self.skipTest("soundfile is not installed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sample_rate = 16000
+            t = np.arange(sample_rate) / sample_rate
+            input_path = root / "input.wav"
+            sf.write(input_path, (0.5 * np.sin(2 * np.pi * 220 * t)).astype(np.float32), sample_rate)
+
+            client = GemmaClient(generator=lambda prompt: {
+                "meeting_id": "meeting_gemma",
+                "meeting_summary": "The meeting selected the mock baseline.",
+                "events": [{
+                    "event_id": "ev_001",
+                    "event_type": "decision",
+                    "content": "Use the mock baseline for pipeline testing.",
+                    "speakers": ["SPEAKER_00"],
+                    "evidence_ids": ["meeting_gemma_seg_001"],
+                    "confidence": "high",
+                }],
+            })
+            result = run_meeting_pipeline(
+                str(input_path),
+                "meeting_gemma",
+                PipelineConfig(outputs_root=root / "outputs"),
+                llm_client=client,
+            )
+
+            self.assertEqual(result["meeting_events"]["events"][0]["event_type"], "decision")
+            stored = read_json(Path(result["output_dir"]) / "meeting_events.json")
+            self.assertEqual(stored["meeting_summary"], "The meeting selected the mock baseline.")
+            memory_path = Path(result["artifacts"]["long_term_episodic_memory"])
+            self.assertTrue(memory_path.exists())
+            memory = read_json(memory_path)
+            self.assertEqual(memory[0]["event_type"], "decision")
+            self.assertEqual(memory[0]["evidence_ids"], ["meeting_gemma_seg_001"])
+
+            repeated = run_meeting_pipeline(
+                str(input_path),
+                "meeting_gemma",
+                PipelineConfig(outputs_root=root / "outputs"),
+                llm_client=client,
+            )
+            self.assertEqual(repeated["long_term_memory_size"], 1)
+            self.assertEqual(len(read_json(memory_path)), 1)
+
+    def test_pipeline_does_not_reload_preprocessed_audio(self) -> None:
+        try:
+            import soundfile as sf
+        except ImportError:
+            self.skipTest("soundfile is not installed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sample_rate = 16000
+            t = np.arange(sample_rate) / sample_rate
+            input_path = root / "input.wav"
+            sf.write(input_path, (0.5 * np.sin(2 * np.pi * 220 * t)).astype(np.float32), sample_rate)
+
+            with patch("src.audio.preprocess.load_audio", wraps=load_audio) as mocked_load:
+                run_meeting_pipeline(
+                    str(input_path),
+                    "meeting_single_read",
+                    PipelineConfig(outputs_root=root / "outputs"),
+                )
+
+            self.assertEqual(mocked_load.call_count, 1)
+
     def test_run_meeting_pipeline_writes_per_meeting_artifacts(self) -> None:
         try:
             import soundfile as sf
@@ -57,6 +132,11 @@ class PipelineTests(unittest.TestCase):
             self.assertIn("asr_confidence", low)
             self.assertIn("speaker_confidence", low)
             self.assertEqual(low["candidates"], [])
+
+            meeting_events = read_json(output_dir / "meeting_events.json")
+            self.assertEqual(meeting_events["meeting_id"], "meeting_test")
+            self.assertIn("meeting_summary", meeting_events)
+            self.assertIsInstance(meeting_events["events"], list)
 
     def test_high_overlap_pipeline_output_preserves_candidates(self) -> None:
         try:

@@ -46,6 +46,9 @@ class SnrScalingTests(unittest.TestCase):
         b = np.zeros(SAMPLE_RATE, dtype=np.float32)
         np.testing.assert_array_equal(scale_to_snr(a, b, 0.0), b)
 
+    def test_signal_power_empty_array(self) -> None:
+        self.assertEqual(signal_power(np.array([], dtype=np.float32)), 0.0)
+
 
 class MixTwoSpeakersTests(unittest.TestCase):
     def test_mixture_length_accounts_for_overlap(self) -> None:
@@ -101,6 +104,10 @@ class OverlapGeometryTests(unittest.TestCase):
         ]
         self.assertAlmostEqual(overlap_ratio(segments, duration_s=3.0), 1.0 / 3.0, places=3)
 
+    def test_overlap_ratio_zero_duration(self) -> None:
+        segments = [{"speaker": "A", "start": 0.0, "end": 1.0}]
+        self.assertEqual(overlap_ratio(segments, duration_s=0.0), 0.0)
+
 
 class AnnotationRowsTests(unittest.TestCase):
     def test_rows_match_template_columns(self) -> None:
@@ -111,6 +118,12 @@ class AnnotationRowsTests(unittest.TestCase):
         self.assertEqual(len(rows), 2)
         for row in rows:
             self.assertEqual(set(row), set(ANNOTATION_COLUMNS))
+
+    def test_to_annotation_rows_empty_segments(self) -> None:
+        from src.data_synthesis import build_annotation
+        ann = build_annotation([], SAMPLE_RATE, 0, "meeting")
+        rows = to_annotation_rows(ann)
+        self.assertEqual(rows, [])
 
 
 if __name__ == "__main__":

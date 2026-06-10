@@ -4,14 +4,14 @@ import unittest
 
 import numpy as np
 
-from src.dual_path_router import route_segment
-from src.overlap_detector import (
+from src.overlap.detector import (
     DEFAULT_OVERLAP_THRESHOLD,
     _energy_overlap_proxy,
     _merge_regions,
     _overlap_fraction,
     estimate_segment_overlap_scores,
 )
+from src.overlap.router import route_segment
 
 
 class OverlapScoringTests(unittest.TestCase):
