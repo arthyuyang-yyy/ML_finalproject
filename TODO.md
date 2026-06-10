@@ -11,6 +11,11 @@
 
 - [x] Implement audio preprocessing and VAD segmentation.
 - [ ] Add baseline overlap detector and threshold calibration.
+  - Output a continuous overlap score in `[0.0, 1.0]` per segment (enforced by schema validation).
+  - Return timestamped overlap regions in seconds from the start of the meeting audio.
+  - Route segments to `low_overlap_cluster` or `high_overlap_candidate` via a configurable threshold (do not hard-code it).
+  - Calibrate the threshold against human overlap labels: sweep thresholds and report accuracy, precision, recall, F1, and the cost/quality trade-off curve (see Experiment 1 in `docs/experiment_plan.md`).
+  - Segments routed to `high_overlap_candidate` must carry a candidate list and an uncertainty note downstream (schema-enforced).
 - [ ] Add ASR and speaker-diarization adapters.
 - [ ] Implement high-overlap candidate generation baseline.
 
