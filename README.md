@@ -102,7 +102,7 @@ See [docs/system_architecture.md](docs/system_architecture.md) for the module-le
 │   ├── qa/                # QA facade
 │   ├── candidates/        # Candidate generation facade
 │   └── ui/                # Gradio interactive demo
-├── tests/                 # Unit tests (70 cases)
+├── tests/                 # Unit tests (109 cases)
 ├── app.py                 # Gradio interactive demo entry point
 ├── main.py                # CLI pipeline entry point
 ├── README.md
@@ -135,14 +135,16 @@ Each processed segment uses a shared schema:
 
 ## Episodic Memory Design
 
-An episode represents a meaningful meeting event or coherent segment group. It stores meeting and episode IDs, timestamp range, speakers, topic, original and corrected transcripts, overlap and confidence information, candidates, decisions, action items, evidence text, and a future embedding vector.
+An episode represents a meaningful meeting event or coherent segment group. Episodes inherit event IDs and topics from extracted meeting events, while uncovered segments fall back to time-gap grouping. Each episode preserves supporting evidence IDs, evidence segments, timestamps, speakers, confidence, overlap score, importance, and uncertainty.
 
 Episodes support:
 
 - evidence-backed meeting QA;
 - historical and cross-meeting recall;
 - action-item and decision retrieval;
-- speaker-specific search;
+- semantic retrieval when `sentence-transformers` is available, with CJK-aware lexical fallback;
+- meeting-, speaker-, and time-filtered search;
+- relevance-gated ranking with importance, recency, and overlap-aware adjustments;
 - traceability from an answer to exact timestamps.
 
 ## Planned Experiments
@@ -152,8 +154,8 @@ Episodes support:
 | 1. Overlap routing | Compare predicted overlap routes with manual labels | Infrastructure ready; pyannote adapter and energy fallback implemented; annotation set pending |
 | 2. High-overlap candidates | Compare candidate generation with forced single-output transcription | Candidate interface implemented; formal experiment pending |
 | 3. Metadata-aware LLM | Compare plain-text, speaker-aware, and full-metadata LLM post-processing | LLM event extraction implemented; metadata-input ablation pending |
-| 4. Episodic Memory QA | Compare summary QA, transcript RAG, and speaker-aware memory QA | Storage, retrieval, and baseline QA implemented; formal experiment pending |
-| 5. Hallucination and evidence | Measure hallucination rate and timestamped evidence hit rate | Metric interfaces defined (stub); formal experiment pending |
+| 4. Episodic Memory QA | Compare summary QA, transcript RAG, and speaker-aware memory QA | Event-grouped storage, hybrid retrieval, filters, and baseline evidence-backed QA implemented; formal experiment pending |
+| 5. Hallucination and evidence | Measure hallucination rate and timestamped evidence hit rate | Evidence precision/recall/F1, hit rate, hallucination, abstention, and confidence-calibration metrics implemented; formal experiment pending |
 
 Full details are in [docs/experiment_plan.md](docs/experiment_plan.md).
 
@@ -168,24 +170,28 @@ Completed:
 - audio loading, mono conversion, polyphase resampling, peak normalization, and energy-based VAD segmentation (with merging and splitting);
 - audio clip export per evidence segment (`src/audio/clipper.py`);
 - controlled two-speaker overlap synthesis with SNR control and ground-truth overlap annotations;
-- objective WER, CER, overlap-routing classification, and best-mapping speaker-attribution metrics;
+- objective WER, CER, overlap-routing classification, best-mapping speaker-attribution, evidence-support, hallucination, abstention, and confidence-calibration metrics;
 - pluggable ASR adapters (Mock/WhisperX/Whisper/Paraformer) with calibrated confidence;
 - overlap detection with pyannote OSD adapter (priority) and conservative energy fallback;
 - dual-path routing (threshold 0.4), low-overlap ASR + speaker-attribution path, and high-overlap candidate generation without forcing one transcript;
-- metadata construction, schema validation, and LLM event extraction;
-- episodic memory creation, JSONL persistence, and keyword-based retrieval;
-- Gradio interactive UI demo;
+- metadata construction, schema validation, and deterministic evidence-linked LLM event extraction fallback;
+- event-grouped episodic memory creation, JSONL persistence, semantic/lexical retrieval, relevance gating, and meeting/speaker/time filters;
+- baseline evidence-backed QA with evidence IDs, timestamps, confidence, uncertainty, and retrieval metadata;
+- Gradio demo skeleton and application entry point;
 - end-to-end pipeline orchestration (`src/pipeline/run_pipeline.py`);
-- 75 unit tests covering the implemented baseline infrastructure.
+- 109 unit tests covering the implemented baseline infrastructure, memory retrieval, and evidence evaluation.
 
 Pending before formal experiments:
 
 - manually annotated evaluation split;
-- pyannote model download and calibration experiments;
-- heavy-model integrations (Whisper, FunASR) with accuracy comparisons;
-- metadata-input ablation experiments and evidence-quality evaluation.
+- integrate pyannote diarization output into the end-to-end low-overlap path;
+- overlap-threshold calibration and routing experiments against human labels;
+- real heavy-model runs and accuracy comparisons for WhisperX, Whisper, FunASR, pyannote, and optional speech separation;
+- real Gemma-compatible backend, strict JSON repair/validation, and complete evidence-only prompts;
+- complete Gradio timeline, candidate drill-down, memory, and QA pages;
+- metadata-input ablations, Episodic Memory QA comparisons, and uncertainty/candidate-usefulness evaluation.
 
-Current verification note: pass the full 75-test suite with `python -m unittest discover -s tests -v`. Heavy models such as faster-whisper, WhisperX, Whisper, pyannote, and speech separation models remain intentionally unloaded without their respective backends.
+Current verification note: the full 109-test suite passes with `python -m unittest discover -s tests -v`. Heavy models such as faster-whisper, WhisperX, Whisper, pyannote, sentence-transformers, and speech separation models remain optional and are loaded only when their backends are installed and configured.
 
 ## How to Run
 
@@ -259,12 +265,15 @@ Keep large audio files, model weights, and generated outputs outside Git.
 
 ## 当前进度
 
-项目处于**基础设施与基线准备阶段**，已有可运行的端到端 pipeline（`src/pipeline/run_pipeline.py`）。已完成 70 项单元测试。
+项目处于**基础设施与基线准备阶段**，已有可运行的端到端 pipeline（`src/pipeline/run_pipeline.py`），尚未产生正式实验结果。当前完整测试为 109 项。
 
 已完成：
-- 完整的 pipeline 编排、音频预处理、VAD、重叠检测（pyannote + 能量 fallback）、双路径路由、ASR 适配器、候选生成、元数据构建、schema 验证、LLM 事件提取、情景记忆存储与检索、Gradio 交互演示。
+- pipeline 编排、音频预处理、VAD、音频切片、重叠检测（pyannote OSD + 能量 fallback）、双路径路由、ASR 适配器、高重叠候选生成、元数据构建与 schema 验证；
+- 按事件分组的 Episodic Memory、JSONL 持久化、语义/词法检索、相关性门槛、重要性/时间/重叠联合排序，以及会议/说话人/时间过滤；
+- 基于证据的基础 QA，以及证据 precision/recall/F1、命中率、幻觉率、正确拒答率和置信度校准指标；
+- 确定性 LLM 事件提取 fallback 和 Gradio 演示骨架。
 
-正式实验前仍需：人工标注评估集构建、pyannote 模型校准、重模型（Whisper/FunASR）集成、元信息消融实验。
+正式实验前仍需：将 pyannote diarization 接入主 Pipeline、人工标注评估集、重叠阈值校准、真实重模型运行与对比、真实 Gemma 后端和严格 JSON 修复、完整 Gradio 页面，以及元信息/Memory QA/不确定性消融实验。
 
 ## 运行方式
 
