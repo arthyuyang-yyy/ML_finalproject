@@ -16,5 +16,26 @@ def answer_question_with_evidence(
     The returned dictionary must include ``answer``, ``evidence``, ``speaker``,
     ``timestamp``, ``confidence``, and ``uncertainty_note``.
     """
-    # TODO: constrain the QA model to retrieved evidence and validate citations.
-    raise NotImplementedError("Evidence-backed QA is not implemented yet.")
+    if not retrieved_episodes:
+        return {
+            "answer": "No relevant meeting memory was found.",
+            "evidence": [],
+            "speaker": "",
+            "timestamp": "",
+            "confidence": 0.0,
+            "uncertainty_note": "Keyword baseline retrieval returned no episodes.",
+        }
+
+    episode = retrieved_episodes[0]
+    evidence = episode.get("evidence", [])
+    speakers = ", ".join(episode.get("speakers", []))
+    timestamp = f"{episode.get('start_time', 0.0):.3f}-{episode.get('end_time', 0.0):.3f}s"
+    return {
+        "answer": episode.get("summary", ""),
+        "evidence": evidence,
+        "speaker": speakers,
+        "timestamp": timestamp,
+        "confidence": episode.get("confidence", 0.0),
+        "uncertainty_note": episode.get("uncertainty_note", ""),
+        "query": query,
+    }

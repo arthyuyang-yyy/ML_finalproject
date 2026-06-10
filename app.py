@@ -1,9 +1,11 @@
-"""Application entry point for a future interactive meeting-memory interface."""
+"""Application entry point for the interactive meeting-memory demo."""
+
+from src.ui.gradio_app import launch
 
 
 def main() -> None:
-    """Describe the planned application without starting a web framework."""
-    print("Interactive meeting-memory application is not implemented yet.")
+    """Start the Gradio demo."""
+    launch()
 
 
 if __name__ == "__main__":

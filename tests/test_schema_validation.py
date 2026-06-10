@@ -91,8 +91,9 @@ class SegmentValidationTests(unittest.TestCase):
 class CandidateValidationTests(unittest.TestCase):
     def test_valid_candidate_passes(self) -> None:
         candidate = {
-            "transcript": "keep it",
-            "speaker_hypothesis": "SPEAKER_01",
+            "candidate_id": "m1-1_c1",
+            "speaker": "SPEAKER_01",
+            "text": "keep it",
             "confidence": 0.4,
             "uncertainty_note": "stream B",
         }
@@ -101,8 +102,9 @@ class CandidateValidationTests(unittest.TestCase):
     def test_candidate_missing_field_raises(self) -> None:
         with self.assertRaisesRegex(ValueError, "uncertainty_note"):
             validate_candidate({
-                "transcript": "keep it",
-                "speaker_hypothesis": "SPEAKER_01",
+                "candidate_id": "m1-1_c1",
+                "speaker": "SPEAKER_01",
+                "text": "keep it",
                 "confidence": 0.4,
             })
 

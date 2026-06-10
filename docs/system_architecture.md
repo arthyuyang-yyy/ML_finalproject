@@ -23,7 +23,7 @@ Audio
 
 | Module | Responsibility |
 | --- | --- |
-| `preprocessing.py` | Validate and segment input audio |
+| `audio/preprocess.py` | Validate, normalize, export, and segment input audio |
 | `overlap_detector.py` | Score overlap and return overlap regions |
 | `dual_path_router.py` | Choose the low- or high-overlap path |
 | `asr.py` | Pluggable ASR adapters (mock/Whisper/Paraformer) with calibrated confidence |
