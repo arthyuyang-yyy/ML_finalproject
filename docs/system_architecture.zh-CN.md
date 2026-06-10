@@ -23,7 +23,7 @@
 
 | 模块 | 职责 |
 | --- | --- |
-| `preprocessing.py` | 验证输入音频并分段 |
+| `audio/preprocess.py` | 验证、归一化、导出并分段输入音频 |
 | `overlap_detector.py` | 估计重叠分数并返回重叠区域 |
 | `dual_path_router.py` | 选择低重叠或高重叠路径 |
 | `asr.py` | 可插拔 ASR 适配器（mock/Whisper/Paraformer），带校准置信度 |

@@ -6,12 +6,15 @@ Run with::
 """
 
 import unittest
+from inspect import signature
 
 import numpy as np
 
-from src.preprocessing import (
+from src.audio.preprocess import (
     energy_vad,
     peak_normalize,
+    preprocess_audio,
+    resample,
     resample_linear,
     segment_waveform,
     to_mono,
@@ -40,6 +43,17 @@ def _two_burst_signal() -> np.ndarray:
     ])
 
 
+def _short_gap_signal() -> np.ndarray:
+    # 0.5s silence | 0.4s speech | 0.4s silence | 0.4s speech | 0.5s silence
+    return np.concatenate([
+        _silence(0.5),
+        _tone(0.4),
+        _silence(0.4),
+        _tone(0.4),
+        _silence(0.5),
+    ])
+
+
 class HelperTests(unittest.TestCase):
     def test_to_mono_averages_channels(self) -> None:
         stereo = np.array([[1.0, 3.0], [2.0, 4.0]], dtype=np.float32)
@@ -57,6 +71,15 @@ class HelperTests(unittest.TestCase):
         signal = _tone(1.0)
         out = resample_linear(signal, SAMPLE_RATE, SAMPLE_RATE // 2)
         self.assertEqual(out.size, SAMPLE_RATE // 2)
+
+    def test_resample_prefers_shared_public_entrypoint(self) -> None:
+        signal = _tone(1.0)
+        out = resample(signal, SAMPLE_RATE, SAMPLE_RATE // 2)
+        self.assertEqual(out.size, SAMPLE_RATE // 2)
+
+    def test_audio_package_wrapper_uses_shared_preprocess(self) -> None:
+        self.assertIn("target_sample_rate", signature(preprocess_audio).parameters)
+        self.assertIn("target_sr", signature(preprocess_audio).parameters)
 
 
 class EnergyVadTests(unittest.TestCase):
@@ -86,6 +109,17 @@ class EnergyVadTests(unittest.TestCase):
         for earlier, later in zip(regions, regions[1:]):
             self.assertLessEqual(earlier[1], later[0])
 
+    def test_short_neighboring_regions_are_merged(self) -> None:
+        regions = energy_vad(_short_gap_signal(), SAMPLE_RATE)
+        self.assertEqual(len(regions), 1)
+        self.assertGreaterEqual(regions[0][1] - regions[0][0], 1.0)
+
+    def test_long_regions_are_split(self) -> None:
+        regions = energy_vad(_tone(31.0), SAMPLE_RATE, max_segment_s=20.0, target_segment_s=12.0)
+        self.assertGreaterEqual(len(regions), 2)
+        for start, end in regions:
+            self.assertLessEqual(end - start, 20.0)
+
 
 class SegmentWaveformTests(unittest.TestCase):
     def test_returns_schema_compatible_segments(self) -> None:
@@ -94,7 +128,7 @@ class SegmentWaveformTests(unittest.TestCase):
         first = segments[0]
         self.assertEqual(set(first), {"meeting_id", "segment_id", "start_time", "end_time"})
         self.assertEqual(first["meeting_id"], "demo")
-        self.assertEqual(first["segment_id"], "demo-0000")
+        self.assertEqual(first["segment_id"], "demo_seg_001")
         self.assertLess(first["start_time"], first["end_time"])
 
 
