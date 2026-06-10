@@ -1,13 +1,14 @@
-"""Evaluation metrics for recognition, routing, and speaker attribution.
+"""Evaluation metrics for recognition, routing, attribution, and evidence.
 
-This module implements the *objective* metrics that do not depend on the team's
-still-evolving innovation design: word/character error rate, overlap-routing
-classification metrics, and best-mapping speaker-attribution accuracy.
+This module implements the *objective* recognition metrics (word/character error
+rate, overlap-routing classification, best-mapping speaker-attribution accuracy)
+together with the traceability metrics tied to the innovation: evidence
+precision/recall/F1, evidence hit rate, hallucination rate, correct-abstention
+rate, and confidence calibration (see :func:`evaluate_evidence_support`).
 
-Metrics tied to the innovation (evidence hit rate, unsupported-claim and
-hallucination rate, uncertainty-preservation quality, candidate usefulness) are
-intentionally left as TODO stubs until their scoring rules are finalized, so the
-shared interface does not lock in a definition prematurely.
+Remaining innovation metrics (uncertainty-preservation quality, candidate
+usefulness) are still left as future work until their scoring rules are
+finalized, so the shared interface does not lock in a definition prematurely.
 """
 
 from itertools import permutations
@@ -146,15 +147,114 @@ def speaker_attribution_accuracy(reference: list[str], hypothesis: list[str]) ->
 
 
 def evaluate_evidence_support(predictions: list[dict], references: list[dict]) -> dict:
-    """Evaluate evidence hit rate, unsupported claims, and hallucination.
+    """Evaluate evidence grounding: hit rate, hallucination, and calibration.
 
-    Deferred: scoring rules for timestamped evidence and supported claims are
-    part of the traceability innovation and will be defined once that design is
-    finalized, to avoid locking in the contract prematurely.
+    Scoring follows the system's traceability contract: every genuine answer
+    must cite timestamped evidence, so a prediction that cites no evidence is
+    read as an *abstention* ("I don't know") rather than a claim.
+
+    Each ``prediction`` is a QA result (e.g. from
+    :func:`src.rag_qa.answer_question_with_evidence`) and is read for:
+
+    - ``evidence_ids`` -- the evidence the answer is grounded on (empty ==
+      abstention);
+    - ``confidence`` -- the answer's self-reported confidence in ``[0, 1]``.
+
+    Each ``reference`` is the gold annotation for the same question:
+
+    - ``evidence_ids`` -- the evidence that genuinely supports an answer;
+    - ``answerable`` -- whether the question can be answered from memory at all
+      (optional; defaults to ``True`` when gold evidence is present).
+
+    A claim is *supported* when it cites at least one gold evidence id, and a
+    *hallucination* when it cites none (including any claim made for an
+    unanswerable question). Returns micro-averaged evidence precision/recall/F1
+    over answerable claims, the evidence hit rate, the hallucination rate, the
+    correct-abstention rate on unanswerable questions, and a Brier calibration
+    score (lower is better).
     """
-    # TODO(innovation): define matching rules for timestamped evidence,
-    # supported-claim detection, hallucination rate, and confidence calibration.
-    raise NotImplementedError("Evidence evaluation is deferred until the traceability design is finalized.")
+    if len(predictions) != len(references):
+        raise ValueError("predictions and references must have the same length")
+    if not predictions:
+        raise ValueError("predictions must not be empty")
+
+    num_claims = 0
+    num_abstentions = 0
+    unsupported_claims = 0
+    hits = 0
+    answerable_count = 0
+    correct_abstentions = 0
+    unanswerable_count = 0
+    intersection_total = 0
+    predicted_total = 0
+    gold_total = 0
+    brier_terms: list[float] = []
+
+    for prediction, reference in zip(predictions, references):
+        predicted_ids = _evidence_id_set(prediction.get("evidence_ids"))
+        gold_ids = _evidence_id_set(reference.get("evidence_ids"))
+        answerable = bool(reference.get("answerable", bool(gold_ids)))
+        claimed = bool(predicted_ids)
+
+        if answerable:
+            answerable_count += 1
+        else:
+            unanswerable_count += 1
+
+        if not claimed:
+            num_abstentions += 1
+            if not answerable:
+                correct_abstentions += 1
+            continue
+
+        num_claims += 1
+        overlap = predicted_ids & gold_ids
+        supported = bool(overlap)
+        if not supported:
+            unsupported_claims += 1
+
+        confidence = _clamp_unit(prediction.get("confidence", 0.0))
+        brier_terms.append((confidence - (1.0 if supported else 0.0)) ** 2)
+
+        if answerable:
+            intersection_total += len(overlap)
+            predicted_total += len(predicted_ids)
+            gold_total += len(gold_ids)
+            if supported:
+                hits += 1
+
+    precision = intersection_total / predicted_total if predicted_total else 0.0
+    recall = intersection_total / gold_total if gold_total else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+
+    return {
+        "support": len(predictions),
+        "num_claims": num_claims,
+        "num_abstentions": num_abstentions,
+        "evidence_precision": precision,
+        "evidence_recall": recall,
+        "evidence_f1": f1,
+        "evidence_hit_rate": hits / answerable_count if answerable_count else 0.0,
+        "hallucination_rate": unsupported_claims / num_claims if num_claims else 0.0,
+        "correct_abstention_rate": (
+            correct_abstentions / unanswerable_count if unanswerable_count else 0.0
+        ),
+        "confidence_brier": sum(brier_terms) / len(brier_terms) if brier_terms else 0.0,
+    }
+
+
+def _evidence_id_set(evidence_ids: Any) -> set[str]:
+    """Normalize an evidence-id field into a set of strings."""
+    if not evidence_ids:
+        return set()
+    if isinstance(evidence_ids, (str, bytes)):
+        raise ValueError("evidence_ids must be a list of ids, not a single string")
+    return {str(evidence_id) for evidence_id in evidence_ids}
+
+
+def _clamp_unit(value: Any) -> float:
+    """Clamp a confidence-like value into ``[0.0, 1.0]``."""
+    return max(0.0, min(1.0, float(value)))
 
 
 def _error_rate_result(counts: dict[str, int]) -> dict[str, Any]:
