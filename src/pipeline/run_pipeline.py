@@ -6,7 +6,7 @@ from typing import Any
 from src.asr import get_adapter
 from src.audio.clipper import write_segment_clips
 from src.dual_path_router import route_segment
-from src.episodic_memory import create_episode_from_segments
+from src.episodic_memory import create_episodes_from_segments
 from src.high_overlap import process_high_overlap_segments
 from src.llm.event_extractor import extract_meeting_events
 from src.low_overlap import process_low_overlap_segments
@@ -118,7 +118,7 @@ def run_meeting_pipeline(
     ]
 
     meeting_events = extract_meeting_events(evidence_segments)
-    episodic_memory = [create_episode_from_segments(evidence_segments)] if evidence_segments else []
+    episodic_memory = create_episodes_from_segments(evidence_segments, meeting_events)
 
     write_json(paths["low_overlap_segments"], low_overlap_segments)
     write_json(paths["high_overlap_candidates"], high_overlap_segments)

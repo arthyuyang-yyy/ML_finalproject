@@ -93,10 +93,116 @@ class SpeakerAttributionTests(unittest.TestCase):
             speaker_attribution_accuracy(["A"], ["A", "B"])
 
 
-class DeferredEvidenceTests(unittest.TestCase):
-    def test_evidence_support_is_deferred(self) -> None:
-        with self.assertRaises(NotImplementedError):
+class EvidenceSupportTests(unittest.TestCase):
+    def test_empty_predictions_raise(self) -> None:
+        with self.assertRaises(ValueError):
             evaluate_evidence_support([], [])
+
+    def test_mismatched_length_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            evaluate_evidence_support([{"evidence_ids": ["a"]}], [])
+
+    def test_string_evidence_ids_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            evaluate_evidence_support(
+                [{"evidence_ids": "a", "confidence": 1.0}],
+                [{"evidence_ids": ["a"]}],
+            )
+
+    def test_perfectly_grounded_answer(self) -> None:
+        result = evaluate_evidence_support(
+            [{"evidence_ids": ["m1-1", "m1-2"], "confidence": 0.9}],
+            [{"evidence_ids": ["m1-1", "m1-2"], "answerable": True}],
+        )
+        self.assertEqual(result["num_claims"], 1)
+        self.assertEqual(result["evidence_precision"], 1.0)
+        self.assertEqual(result["evidence_recall"], 1.0)
+        self.assertEqual(result["evidence_f1"], 1.0)
+        self.assertEqual(result["evidence_hit_rate"], 1.0)
+        self.assertEqual(result["hallucination_rate"], 0.0)
+
+    def test_partial_evidence_precision_and_recall(self) -> None:
+        # Cites two ids, one correct: precision 0.5; gold has two, one hit: recall 0.5.
+        result = evaluate_evidence_support(
+            [{"evidence_ids": ["m1-1", "wrong"], "confidence": 0.6}],
+            [{"evidence_ids": ["m1-1", "m1-2"], "answerable": True}],
+        )
+        self.assertAlmostEqual(result["evidence_precision"], 0.5)
+        self.assertAlmostEqual(result["evidence_recall"], 0.5)
+        self.assertEqual(result["evidence_hit_rate"], 1.0)
+        self.assertEqual(result["hallucination_rate"], 0.0)
+
+    def test_unsupported_claim_is_hallucination(self) -> None:
+        result = evaluate_evidence_support(
+            [{"evidence_ids": ["made-up"], "confidence": 0.95}],
+            [{"evidence_ids": ["m1-1"], "answerable": True}],
+        )
+        self.assertEqual(result["hallucination_rate"], 1.0)
+        self.assertEqual(result["evidence_hit_rate"], 0.0)
+
+    def test_claim_on_unanswerable_question_is_hallucination(self) -> None:
+        result = evaluate_evidence_support(
+            [{"evidence_ids": ["m1-1"], "confidence": 0.8}],
+            [{"evidence_ids": [], "answerable": False}],
+        )
+        self.assertEqual(result["num_claims"], 1)
+        self.assertEqual(result["hallucination_rate"], 1.0)
+        self.assertEqual(result["correct_abstention_rate"], 0.0)
+
+    def test_correct_abstention_on_unanswerable(self) -> None:
+        result = evaluate_evidence_support(
+            [{"evidence_ids": [], "confidence": 0.0}],
+            [{"evidence_ids": [], "answerable": False}],
+        )
+        self.assertEqual(result["num_abstentions"], 1)
+        self.assertEqual(result["num_claims"], 0)
+        self.assertEqual(result["correct_abstention_rate"], 1.0)
+        self.assertEqual(result["hallucination_rate"], 0.0)
+
+    def test_brier_rewards_calibrated_confidence(self) -> None:
+        confident_correct = evaluate_evidence_support(
+            [{"evidence_ids": ["m1-1"], "confidence": 1.0}],
+            [{"evidence_ids": ["m1-1"], "answerable": True}],
+        )
+        confident_wrong = evaluate_evidence_support(
+            [{"evidence_ids": ["wrong"], "confidence": 1.0}],
+            [{"evidence_ids": ["m1-1"], "answerable": True}],
+        )
+        self.assertEqual(confident_correct["confidence_brier"], 0.0)
+        self.assertEqual(confident_wrong["confidence_brier"], 1.0)
+
+    def test_abstaining_on_answerable_lowers_recall(self) -> None:
+        # Regression: gold evidence of an answerable-but-abstained question must
+        # still count toward recall. Two answerable questions; the first cites
+        # the correct evidence, the second abstains -> recall should be 0.5, not
+        # 1.0 (which the old code returned by skipping the abstained sample).
+        result = evaluate_evidence_support(
+            [
+                {"evidence_ids": ["a"], "confidence": 0.9},
+                {"evidence_ids": [], "confidence": 0.0},
+            ],
+            [
+                {"evidence_ids": ["a"], "answerable": True},
+                {"evidence_ids": ["b"], "answerable": True},
+            ],
+        )
+        self.assertAlmostEqual(result["evidence_recall"], 0.5)
+        self.assertAlmostEqual(result["evidence_precision"], 1.0)
+        self.assertAlmostEqual(result["evidence_hit_rate"], 0.5)
+        self.assertEqual(result["num_claims"], 1)
+        self.assertEqual(result["num_abstentions"], 1)
+
+    def test_explicit_non_abstention_scores_no_evidence_answer_as_claim(self) -> None:
+        # A substantive answer that cites no evidence, flagged abstained=False,
+        # is an unsupported claim (hallucination), not an abstention.
+        result = evaluate_evidence_support(
+            [{"answer": "It was Bob.", "evidence_ids": [], "abstained": False, "confidence": 0.8}],
+            [{"evidence_ids": ["a"], "answerable": True}],
+        )
+        self.assertEqual(result["num_claims"], 1)
+        self.assertEqual(result["num_abstentions"], 0)
+        self.assertEqual(result["hallucination_rate"], 1.0)
+        self.assertAlmostEqual(result["evidence_recall"], 0.0)
 
 
 if __name__ == "__main__":
