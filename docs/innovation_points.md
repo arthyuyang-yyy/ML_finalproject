@@ -46,6 +46,8 @@ Each meeting episode stores:
 
 This supports meeting QA, historical and cross-meeting recall, action-item retrieval, speaker-specific search, and traceable timestamped evidence.
 
+**Implementation status**: Episodes are now grouped per meeting event (inheriting the event ID and topic), with a time-gap fallback for segments not covered by any event. Retrieval supports semantic search (enabled when `sentence-transformers` is installed, falling back to CJK-aware lexical matching) and filtering by meeting ID, speaker, and time range; every result carries a `retrieval_score` and `retrieval_method` so the ranking stays traceable.
+
 ## 5. Evaluation Beyond WER and DER
 
 WER and DER remain useful, but they do not measure whether a meeting assistant is trustworthy. The project also evaluates overlap-routing accuracy, candidate usefulness, speaker-attribution accuracy, uncertainty-preservation quality, action-item extraction accuracy, RAG QA accuracy, evidence hit rate, and hallucination rate.
