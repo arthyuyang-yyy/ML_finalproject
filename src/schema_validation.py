@@ -15,21 +15,27 @@ VALID_PROCESSING_PATHS = {"low_overlap_cluster", "high_overlap_candidate"}
 REQUIRED_SEGMENT_FIELDS = {
     "meeting_id": str,
     "segment_id": str,
+    "evidence_id": str,
     "speaker": str,
     "start_time": (int, float),
     "end_time": (int, float),
     "text": str,
     "processing_path": str,
+    "route_reason": str,
     "overlap_score": (int, float),
     "asr_confidence": (int, float),
     "speaker_confidence": (int, float),
+    "audio_clip_path": str,
+    "source_audio_path": str,
+    "language": str,
     "candidates": list,
     "uncertainty_note": str,
 }
 
 REQUIRED_CANDIDATE_FIELDS = {
-    "transcript": str,
-    "speaker_hypothesis": str,
+    "candidate_id": str,
+    "speaker": str,
+    "text": str,
     "confidence": (int, float),
     "uncertainty_note": str,
 }
@@ -38,7 +44,7 @@ REQUIRED_CANDIDATE_FIELDS = {
 def validate_candidate(candidate: Any, index: int = 0) -> dict[str, Any]:
     """Validate a single high-overlap candidate dict.
 
-    A candidate must carry an alternative transcript, a speaker hypothesis, a
+    A candidate must carry a stable candidate ID, text, speaker hypothesis,
     confidence in ``[0, 1]``, and an uncertainty note explaining why the
     interpretation is ambiguous.
     """

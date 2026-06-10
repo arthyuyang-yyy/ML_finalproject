@@ -3,9 +3,12 @@
 # Core numerics for audio preprocessing and the energy-based VAD baseline.
 numpy>=1.26,<3
 
-# Optional audio backend used by preprocessing.load_audio / segment_audio.
-# Not required for the unit tests, which run on synthetic NumPy signals.
-# soundfile>=0.12
+# Audio backend used by preprocessing, clipping, and the lightweight pipeline.
+soundfile>=0.12
+
+# Optional high-quality resampler used by preprocessing.resample. The code falls
+# back to linear interpolation when SciPy is unavailable.
+# scipy>=1.11
 
 # Optional ASR backends used by src.asr adapters (loaded lazily). Not required
 # for the unit tests, which use the dependency-free MockASRAdapter.

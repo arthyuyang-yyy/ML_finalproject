@@ -31,7 +31,7 @@ from typing import Any
 
 import numpy as np
 
-from .preprocessing import TARGET_SAMPLE_RATE
+from .audio.preprocess import TARGET_SAMPLE_RATE
 from .utils import validate_score
 
 
@@ -67,8 +67,8 @@ class ASRAdapter:
         raise NotImplementedError
 
     def transcribe_file(self, audio_path: str) -> dict[str, Any]:
-        """Load an audio file (via :mod:`src.preprocessing`) and transcribe it."""
-        from .preprocessing import load_audio
+        """Load an audio file (via :mod:`src.audio.preprocess`) and transcribe it."""
+        from .audio.preprocess import load_audio
 
         samples, sample_rate = load_audio(audio_path)
         return self.transcribe_array(samples, sample_rate)
@@ -217,7 +217,7 @@ def transcribe_segments(
     """Attach ``text`` and ``asr_confidence`` to VAD segments from preprocessing.
 
     Each input segment must carry ``start_time``/``end_time`` (as produced by
-    :func:`src.preprocessing.segment_waveform`). The matching audio slice is
+    :func:`src.audio.preprocess.segment_waveform`). The matching audio slice is
     transcribed and the result merged in, leaving the original keys intact so the
     enriched segments can flow into :func:`src.metadata_builder.build_metadata_segment`.
     """
@@ -312,9 +312,9 @@ def _ensure_sample_rate(samples: np.ndarray, sample_rate: int) -> np.ndarray:
     samples = np.asarray(samples, dtype=np.float32)
     if sample_rate == TARGET_SAMPLE_RATE:
         return samples
-    from .preprocessing import resample_linear
+    from .audio.preprocess import resample
 
-    return resample_linear(samples, sample_rate, TARGET_SAMPLE_RATE)
+    return resample(samples, sample_rate, TARGET_SAMPLE_RATE)
 
 
 def _clamp01(value: float) -> float:
