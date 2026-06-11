@@ -111,6 +111,7 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(output_dir.name, "meeting_test")
             self.assertTrue((output_dir / "preprocessed.wav").exists())
             self.assertTrue((output_dir / "vad_segments.json").exists())
+            self.assertTrue((output_dir / "diarization.json").exists())
             self.assertTrue((output_dir / "low_overlap_segments.json").exists())
             self.assertTrue((output_dir / "evidence_segments.json").exists())
             self.assertTrue((output_dir / "clips").exists())
@@ -137,6 +138,42 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(meeting_events["meeting_id"], "meeting_test")
             self.assertIn("meeting_summary", meeting_events)
             self.assertIsInstance(meeting_events["events"], list)
+
+    @patch("src.pipeline.run_pipeline.diarize_with_pyannote")
+    def test_pipeline_passes_pyannote_turns_to_low_overlap_path(self, mocked_diarize) -> None:
+        try:
+            import soundfile as sf
+        except ImportError:
+            self.skipTest("soundfile is not installed")
+
+        mocked_diarize.return_value = [
+            {
+                "speaker": "PYANNOTE_SPEAKER",
+                "start_time": 0.0,
+                "end_time": 1.0,
+                "speaker_confidence": 1.0,
+            }
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sample_rate = 16000
+            t = np.arange(sample_rate) / sample_rate
+            input_path = root / "input.wav"
+            sf.write(input_path, (0.5 * np.sin(2 * np.pi * 220 * t)).astype(np.float32), sample_rate)
+
+            result = run_meeting_pipeline(
+                str(input_path),
+                "meeting_diarization",
+                PipelineConfig(outputs_root=root / "outputs"),
+            )
+
+            output_dir = Path(result["output_dir"])
+            mocked_diarize.assert_called_once_with(str(output_dir / "preprocessed.wav"))
+            self.assertEqual(read_json(output_dir / "diarization.json"), mocked_diarize.return_value)
+            low_overlap = read_json(output_dir / "low_overlap_segments.json")
+            self.assertGreaterEqual(len(low_overlap), 1)
+            self.assertEqual(low_overlap[0]["speaker"], "PYANNOTE_SPEAKER")
 
     def test_high_overlap_pipeline_output_preserves_candidates(self) -> None:
         try:
