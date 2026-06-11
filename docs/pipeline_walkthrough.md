@@ -30,10 +30,9 @@ Reads raw audio, averages channels to mono, resamples to 16 kHz (polyphase if Sc
 
 **Output:** `outputs/{meeting_id}/preprocessed.wav`
 
-### Step 2: Load Audio
-**Module:** `src/audio/preprocess.py` — `load_audio()`
+### Step 2: Reuse Preprocessed Samples
 
-Loads the preprocessed WAV back as a mono float32 NumPy array for in-memory processing. This ensures all downstream functions operate on a consistent in-memory representation.
+`preprocess_audio()` returns the normalized mono float32 samples together with the sample rate. The pipeline reuses this array directly and does not perform a redundant disk read.
 
 ### Step 3: VAD Segmentation
 **Module:** `src/audio/preprocess.py` — `segment_waveform()`
@@ -94,10 +93,10 @@ Candidate generation uses `src/candidate_generator.py` and prefers faster-whispe
 
 If faster-whisper is unavailable, explicit fallback candidates are emitted so downstream uncertainty handling remains testable.
 
-### Step 8: Metadata Construction
-**Module:** `src/metadata_builder.py` — `build_metadata_segment()`
+### Step 8: Evidence Segment Construction
+**Module:** `src/evidence/builder.py` — `build_evidence_segments()`
 
-Builds a 17-field evidence record for each segment, including all timing, routing, confidence, candidate, and provenance data.
+Merges low-overlap and high-overlap results into one timestamp-sorted list. It verifies that each record is supplied through the correct route, normalizes simplified high-overlap candidates, rejects duplicate IDs, and builds a 17-field evidence record containing timing, routing, confidence, candidate, and provenance data.
 
 Fields: `meeting_id`, `segment_id`, `evidence_id`, `speaker`, `start_time`, `end_time`, `text`, `processing_path`, `route_reason`, `overlap_score`, `asr_confidence`, `speaker_confidence`, `audio_clip_path`, `source_audio_path`, `language`, `candidates`, `uncertainty_note`.
 
@@ -114,16 +113,18 @@ Validates every evidence record against the canonical schema: required fields, t
 ### Step 11: Event Extraction
 **Module:** `src/llm/event_extractor.py` — `extract_meeting_events()`
 
-Extracts meeting events from evidence segments. If a `GemmaClient` is available, it calls the LLM with an evidence-aware prompt; otherwise a deterministic fallback produces one event per meeting.
+Extracts a structured `{meeting_id, meeting_summary, events}` document. A configured `GemmaClient` must return JSON-only output using the supported event types. Output is parsed/repaired, validated against real evidence IDs, checked for action-item fields and unsupported speakers, and retried once when invalid. Remaining invalid events are discarded; if no valid LLM result remains, a deterministic evidence-only fallback is used. High-overlap evidence cannot support high-confidence events.
 
 **Artifact:** `meeting_events.json`
 
 ### Step 12: Episodic Memory
-**Module:** `src/episodic_memory.py` — `create_episode_from_segments()`
+**Module:** `src/memory/episodic_store.py` — `build_episodes()`
 
-Groups all evidence segments into one episode record containing aggregated metadata, speakers, summary text, evidence citations, and confidence.
+Converts each extracted meeting event into a traceable episode containing speakers, timestamps, evidence citations, evidence text, confidence, importance, and audio clip paths. Any event citing high-overlap evidence is independently forced to an uncertainty episode with `MIXED` speakers and low confidence.
 
-**Artifact:** `episodic_memory.json`
+**Artifacts:**
+- `outputs/{meeting_id}/episodic_memory.json` — per-meeting episodes
+- `memory/episodic_memory.json` — long-term memory, atomically upserted by meeting ID
 
 ### Step 13: Write Artifacts
 **Module:** `src/pipeline/io.py` — `write_json()`
@@ -140,6 +141,8 @@ Persists all intermediate and final results as JSON files under `outputs/{meetin
 | `meeting_events.json` | Extracted meeting events |
 | `episodic_memory.json` | Episode records |
 
+The long-term memory path is returned as `artifacts.long_term_episodic_memory`. Re-running the same meeting replaces its previous episodes instead of appending duplicates.
+
 ## Output Summary
 
 `run_meeting_pipeline()` returns a dictionary:
@@ -153,8 +156,9 @@ Persists all intermediate and final results as JSON files under `outputs/{meetin
     "num_evidence_segments": int,
     "num_low_overlap_segments": int,
     "num_high_overlap_segments": int,
-    "meeting_events": list[dict],
+    "meeting_events": dict,
     "episodic_memory": list[dict],
+    "long_term_memory_size": int,
     "preprocessed_num_samples": int,
 }
 ```
@@ -172,3 +176,13 @@ result = run_meeting_pipeline("data/raw_audio/meeting_001.wav", "meeting_001")
 # Gradio UI
 python app.py
 ```
+
+The Gradio page is organized into five areas:
+
+1. Upload audio and run the shared pipeline.
+2. Inspect the canonical evidence timeline.
+3. Select high-overlap segments and inspect candidate interpretations.
+4. Review structured episodic memory with evidence citations.
+5. Ask questions using hybrid retrieval over the current meeting's episodes only.
+
+The UI stores canonical evidence and episodes in `gr.State`; it does not duplicate pipeline, retrieval, or QA logic. QA also exposes the retrieved episodes and validated structured answer for traceability.

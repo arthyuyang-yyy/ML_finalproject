@@ -5,6 +5,8 @@ from typing import Any
 
 import numpy as np
 
+from .preprocess import load_audio
+
 
 def write_segment_clips(
     samples: np.ndarray,
@@ -33,3 +35,16 @@ def write_segment_clips(
         sf.write(clip_path, clip, sample_rate, subtype="FLOAT")
         updated.append({**segment, "audio_clip_path": str(clip_path)})
     return updated
+
+
+def export_clips(
+    audio_path: str,
+    segments: list[dict[str, Any]],
+    output_dir: str | Path,
+) -> list[dict[str, Any]]:
+    """Load an audio file, export timestamped clips, and attach their paths."""
+    samples, sample_rate = load_audio(audio_path)
+    return write_segment_clips(samples, sample_rate, segments, output_dir)
+
+
+__all__ = ["export_clips", "write_segment_clips"]

@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from src.candidate_generator import generate_high_overlap_candidates
+from src.candidates.generator import generate_high_overlap_candidates
 from src.high_overlap import HIGH_OVERLAP_PATH, HIGH_OVERLAP_SPEAKER, process_high_overlap_segments
 
 

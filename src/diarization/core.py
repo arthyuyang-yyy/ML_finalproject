@@ -1,10 +1,13 @@
 """Speaker diarization and attribution adapters."""
 
+import logging
 import os
 from typing import Any
 
 DEFAULT_SPEAKER_CONFIDENCE = 0.78
 PYANNOTE_DIARIZATION_MODEL = "pyannote/speaker-diarization-3.1"
+
+logger = logging.getLogger(__name__)
 
 
 def diarize_audio(audio_path: str) -> list[dict]:
@@ -13,7 +16,7 @@ def diarize_audio(audio_path: str) -> list[dict]:
     if pyannote_turns:
         return pyannote_turns
 
-    from .audio.preprocess import segment_audio
+    from ..audio.preprocess import segment_audio
     return cluster_speakers(segment_audio(audio_path))
 
 
@@ -62,17 +65,20 @@ def diarize_with_pyannote(
     """Return pyannote speaker turns, or ``None`` if the backend is unavailable."""
     token = auth_token or os.environ.get("HUGGINGFACE_TOKEN") or os.environ.get("HF_TOKEN")
     if not token:
+        logger.info("pyannote diarization disabled because no Hugging Face token is configured")
         return None
 
     try:
         from pyannote.audio import Pipeline
     except ImportError:
+        logger.warning("pyannote diarization unavailable because pyannote.audio is not installed")
         return None
 
     try:
         pipeline = Pipeline.from_pretrained(model_name, use_auth_token=token)
         output = pipeline(audio_path)
-    except Exception:
+    except Exception as exc:
+        logger.warning("pyannote diarization failed; using deterministic fallback: %s", exc)
         return None
 
     turns: list[dict[str, Any]] = []

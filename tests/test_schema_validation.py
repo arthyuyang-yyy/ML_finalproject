@@ -87,6 +87,59 @@ class SegmentValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "at least one candidate"):
             validate_metadata_segment(record)
 
+    def test_validate_meeting_empty_list_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            validate_meeting([])
+
+    def test_validate_meeting_rejects_non_list(self) -> None:
+        with self.assertRaises(ValueError):
+            validate_meeting("not a list")  # type: ignore[arg-type]
+
+    def test_validate_metadata_segment_rejects_non_dict(self) -> None:
+        with self.assertRaises(ValueError):
+            validate_metadata_segment(["not", "a", "dict"])  # type: ignore[arg-type]
+
+    def test_low_overlap_requires_text(self) -> None:
+        record = _valid_low_overlap()
+        record["text"] = ""
+        with self.assertRaisesRegex(ValueError, "must contain transcript text"):
+            validate_metadata_segment(record)
+
+    def test_low_overlap_rejects_candidates(self) -> None:
+        record = _valid_low_overlap()
+        record["candidates"] = [{
+            "candidate_id": "c1",
+            "speaker": "SPEAKER_00",
+            "text": "alternate",
+            "confidence": 0.5,
+            "uncertainty_note": "not expected",
+        }]
+        with self.assertRaisesRegex(ValueError, "must not contain candidates"):
+            validate_metadata_segment(record)
+
+    def test_high_overlap_requires_mixed_speaker_and_empty_text(self) -> None:
+        record = _valid_low_overlap()
+        record.update({
+            "processing_path": "high_overlap_candidate",
+            "candidates": [{
+                "candidate_id": "c1",
+                "speaker": "SPEAKER_00",
+                "text": "alternate",
+                "confidence": 0.5,
+                "uncertainty_note": "overlap",
+            }],
+            "uncertainty_note": "overlap",
+        })
+        with self.assertRaisesRegex(ValueError, "speaker='MIXED'"):
+            validate_metadata_segment(record)
+
+    def test_meeting_rejects_duplicate_evidence_ids(self) -> None:
+        first = _valid_low_overlap()
+        second = _valid_low_overlap()
+        second["segment_id"] = "m1-2"
+        with self.assertRaisesRegex(ValueError, "duplicate evidence_id"):
+            validate_meeting([first, second])
+
 
 class CandidateValidationTests(unittest.TestCase):
     def test_valid_candidate_passes(self) -> None:
@@ -106,6 +159,16 @@ class CandidateValidationTests(unittest.TestCase):
                 "speaker": "SPEAKER_01",
                 "text": "keep it",
                 "confidence": 0.4,
+            })
+
+    def test_candidate_confidence_out_of_range_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            validate_candidate({
+                "candidate_id": "m1-1_c1",
+                "speaker": "X",
+                "text": "x",
+                "confidence": 2.0,
+                "uncertainty_note": "",
             })
 
 

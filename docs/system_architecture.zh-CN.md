@@ -27,8 +27,8 @@
   -> write_segment_clips（导出每段 WAV）
   -> validate_metadata_segment
   -> extract_meeting_events（LLM 或 fallback）
-  -> create_episode_from_segments
-  -> store_episode（JSONL）
+  -> build_episodes（事件级 Episode，高重叠强制 uncertainty）
+  -> upsert_episodes（按 meeting ID 原子更新 JSON）
   -> write_json（按会议写出多份 JSON artifact）
 ```
 
@@ -50,10 +50,8 @@
 | 语音分离 | `src/speech_separation.py` | 分离接口（stub — 待模型集成） |
 | 高重叠路径 | `src/high_overlap.py` | 保留 mixed-speaker 记录，主转写为空，并保存多个候选 |
 | 候选生成 | `src/candidate_generator.py` | 使用 faster-whisper beam/temperature/language 变化生成多个转写/说话人假设；轻量运行时使用 fallback 候选 |
-| 元数据构建 | `src/metadata_builder.py` | 将输出统一为共享的 17 字段证据 schema |
+| Evidence 构建 | `src/evidence/builder.py` | 合并低/高重叠结果，规范化候选，按时间排序并输出共享的 17 字段证据 schema |
 | Schema 验证 | `src/schema_validation.py` | 验证证据记录、候选结构和 meeting 列表 |
-| LLM 后处理 | `src/llm_postprocess.py` | 构建元信息感知约束 prompt；不确定性纠错接口（stub） |
-
 ### Pipeline 编排
 
 | 模块 | 文件 | 职责 |
@@ -66,17 +64,18 @@
 
 | 模块 | 文件 | 职责 |
 | --- | --- | --- |
-| 事件提取 | `src/llm/event_extractor.py` | 从证据片段提取会议事件（LLM 或确定性 fallback） |
-| 事件验证 | `src/llm/event_validator.py` | 验证 LLM 提取事件，强制 evidence_id 引用 |
-| Gemma 客户端 | `src/llm/gemma_client.py` | 可插拔 Gemma JSON 生成接口 |
-| Prompt 构建 | `src/llm/prompts.py` | 构建证据感知的事件提取 prompt |
+| 事件提取 | `src/llm/event_extractor.py` | 从证据片段生成结构化会议文档；支持 JSON 修复、失败重试、无效事件删除和确定性 fallback |
+| 事件验证 | `src/llm/event_validator.py` | 验证 event 类型、真实 evidence_id、speaker/owner 来源、action item 字段与高重叠置信度约束 |
+| Gemma 客户端 | `src/llm/gemma_client.py` | 可注入本地或远程 Gemma JSON 生成函数 |
+| Prompt 构建 | `src/llm/prompts.py` | 强制 JSON Schema、证据引用和禁止编造的事件抽取/修复 prompt |
 
 ### 记忆与问答
 
 | 模块 | 文件 | 职责 |
 | --- | --- | --- |
-| 情景记忆 | `src/episodic_memory.py` | 从片段创建 episode、JSONL 持久化、关键词检索 |
-| RAG 问答 | `src/rag_qa.py` | 检索相关 episode 并使用证据回答 |
+| 情景记忆 | `src/memory/episodic_store.py` | 将结构化事件转为可追溯 Episode，强制高重叠不确定性，并按会议原子更新长期 JSON Memory |
+| 混合检索 | `src/memory/retriever.py` | 使用 BM25、embedding、重要度、时效性和重叠惩罚排序 Episode |
+| RAG 问答 | `src/qa/answerer.py` | Gemma 只读取 top-k episode；校验引用，输出无效时安全回退 |
 
 ### 评估与数据
 
@@ -90,17 +89,17 @@
 
 | 模块 | 文件 | 职责 |
 | --- | --- | --- |
-| Gradio 应用 | `src/ui/gradio_app.py` | 通过 Gradio 运行交互式 pipeline 演示 |
+| Gradio 应用 | `src/ui/gradio_app.py` | 五区交互演示：上传、证据时间线、高重叠候选、会议记忆和当前会议 QA |
 
 ### 包 Facade
 
 | 包 | 重新导出 |
 | --- | --- |
 | `src/overlap/` | `detect_overlap_segments`, `estimate_segment_overlap_scores`, `detect_pyannote_overlap_regions`, `DEFAULT_OVERLAP_THRESHOLD` |
-| `src/evidence/` | `build_metadata_segment`, `validate_metadata_segment`, `validate_meeting`, `validate_candidate` |
+| `src/evidence/` | `build_evidence_segments`, `build_evidence_file`, `build_metadata_segment`, `validate_metadata_segment`, `validate_meeting`, `validate_candidate` |
 | `src/llm/` | `extract_meeting_events`, `validate_meeting_event` |
-| `src/memory/` | `create_episode_from_segments`, `store_episode`, `search_episodes` |
-| `src/qa/` | `answer_question_with_evidence`, `retrieve_relevant_memory` |
+| `src/memory/` | `build_episodes`, `build_episodes_file`, `upsert_episodes`, `read_episodes`, `retrieve_episodes` |
+| `src/qa/` | `answer_question`、`validate_qa_answer`、Prompt 构建器和兼容入口 |
 | `src/candidates/` | `generate_high_overlap_candidates` |
 
 ## 关键约定
@@ -128,6 +127,7 @@
 | 证据片段 | `evidence_segments.json` | 所有验证通过的证据记录 |
 | 会议事件 | `meeting_events.json` | LLM 提取的会议事件 |
 | 情景记忆 | `episodic_memory.json` | Episode 记录 |
+| 长期情景记忆 | `memory/episodic_memory.json` | 跨会议持久化 Episode；重复处理同一会议时替换旧记录 |
 | 音频 clip | `clips/{evidence_id}.wav` | 每段 WAV 导出 |
 
 ## 实施状态
@@ -137,5 +137,5 @@
 | 1. 验证元数据与标注约定 | 已完成 |
 | 2. 基础重叠检测、ASR 和说话人日志 | 已完成（pyannote 适配器 + 保守 fallback、低重叠 ASR/speaker 路径、测试默认 mock） |
 | 3. 候选生成与不确定性感知 prompt | 已完成（多参数候选接口、fallback 候选、LLM 事件提取） |
-| 4. 本地 episode 存储与检索 | 已完成（JSONL 持久化、关键词检索） |
+| 4. 本地 episode 存储与检索 | 已完成（长期 JSON 原子更新、BM25 + embedding 混合检索） |
 | 5. 消融实验与证据质量评估 | 待完成（需标注评估集、重模型集成） |
