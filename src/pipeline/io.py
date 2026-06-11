@@ -16,7 +16,6 @@ def ensure_meeting_dirs(meeting_dir: str | Path) -> dict[str, Path]:
         "preprocessed": base / "preprocessed.wav",
         "vad_segments": base / "vad_segments.json",
         "overlap": base / "overlap.json",
-        "diarization": base / "diarization.json",
         "low_overlap_segments": base / "low_overlap_segments.json",
         "high_overlap_candidates": base / "high_overlap_candidates.json",
         "evidence_segments": base / "evidence_segments.json",

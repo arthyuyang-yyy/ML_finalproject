@@ -122,7 +122,6 @@ Per-meeting outputs are written to `outputs/{meeting_id}/`:
 | Preprocessed audio | `preprocessed.wav` | 16kHz mono float32 WAV |
 | VAD segments | `vad_segments.json` | Timestamped speech regions |
 | Overlap scores | `overlap.json` | VAD segments with overlap scores |
-| Diarization turns | `diarization.json` | pyannote speaker diarization turns (or deterministic fallback) |
 | Low-overlap segments | `low_overlap_segments.json` | Evidence records routed to low-overlap path |
 | High-overlap candidates | `high_overlap_candidates.json` | Evidence records routed to high-overlap path |
 | Evidence segments | `evidence_segments.json` | All validated evidence records |
