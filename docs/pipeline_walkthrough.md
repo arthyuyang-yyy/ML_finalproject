@@ -50,7 +50,7 @@ Runs energy-threshold VAD to detect speech regions:
 
 Attaches an `overlap_score` [0, 1] to each segment. Three strategies, tried in order:
 
-1. **pyannote OSD** (if `HF_TOKEN` is set): loads the `pyannote/overlapped-speech-detection` model, detects overlapped-speech regions, and computes per-segment overlap coverage ratio.
+1. **pyannote OSD** (if `HF_TOKEN` is set): loads the `pyannote/overlapped-speech-detection` model, detects overlapped-speech regions, and computes per-segment overlap coverage ratio. Once configured, loading or inference failures are surfaced instead of silently changing detectors.
 2. **Explicit regions** (if `overlap_regions` parameter is provided): computes coverage of provided regions.
 3. **Energy fallback**: computes a weak proxy from per-frame RMS high-energy ratio and dynamic range, capped at 0.39 to prevent false routing to the high-overlap path.
 

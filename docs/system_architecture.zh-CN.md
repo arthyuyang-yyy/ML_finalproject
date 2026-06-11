@@ -12,7 +12,7 @@
   -> load_audio
   -> segment_waveform（基于能量的 VAD，含段落合并与分割）
   -> estimate_segment_overlap_scores
-       -> pyannote OSD（如有 HF_TOKEN）
+       -> pyannote OSD（如有 HF_TOKEN；配置后失败将明确报错）
        -> 显式重叠区域
        -> 能量 fallback（保守，上限 0.39）
   -> route_segment（阈值 0.4）

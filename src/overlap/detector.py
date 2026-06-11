@@ -13,7 +13,8 @@ from typing import Any
 import numpy as np
 
 from src.audio.preprocess import TARGET_SAMPLE_RATE, energy_vad, load_audio
-from src.diarization.core import _load_pyannote_pipeline
+from src.diarization.core import load_pyannote_pipeline
+from src.errors import BackendExecutionError, BackendUnavailableError
 from src.fallbacks.overlap import estimate_with_energy_fallback
 
 DEFAULT_OVERLAP_THRESHOLD = 0.4
@@ -64,16 +65,26 @@ def detect_pyannote_overlap_regions(
     model_name: str = PYANNOTE_OVERLAP_MODEL,
     auth_token: str | None = None,
 ) -> list[OverlapRegion] | None:
-    """Return pyannote overlapped-speech regions, or ``None`` if unavailable."""
+    """Return pyannote overlapped-speech regions when configured.
+
+    A missing token disables this optional backend. Once configured, failures
+    are surfaced instead of silently changing the overlap detector.
+    """
     token = auth_token or os.environ.get("HUGGINGFACE_TOKEN") or os.environ.get("HF_TOKEN")
     if not token:
         return None
 
     try:
-        pipeline = _load_pyannote_pipeline(model_name, token)
+        pipeline = load_pyannote_pipeline(model_name, token)
         output = pipeline(audio_path)
-    except Exception:
-        return None
+    except ImportError as exc:
+        raise BackendUnavailableError(
+            "pyannote OSD is configured but pyannote.audio is unavailable"
+        ) from exc
+    except Exception as exc:
+        raise BackendExecutionError(
+            f"pyannote OSD failed for model '{model_name}'"
+        ) from exc
 
     return _coerce_pyannote_regions(output)
 

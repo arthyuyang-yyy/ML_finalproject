@@ -12,7 +12,7 @@ Audio
   -> load_audio
   -> segment_waveform (energy-based VAD with merge & split)
   -> estimate_segment_overlap_scores
-       -> pyannote OSD (if HF_TOKEN set)
+       -> pyannote OSD (if HF_TOKEN set; configured failures are fatal)
        -> explicit overlap regions
        -> energy fallback (conservative, max 0.39)
   -> route_segment (threshold 0.4)

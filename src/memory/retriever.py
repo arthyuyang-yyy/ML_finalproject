@@ -11,8 +11,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Protocol
 
+from ..fallbacks.embeddings import HashingEmbeddingBackend
 from .episodic_store import DEFAULT_MEMORY_PATH, read_episodes
-from src.fallbacks.embeddings import HashingEmbeddingBackend
 
 logger = logging.getLogger(__name__)
 

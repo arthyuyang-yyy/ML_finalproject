@@ -5,6 +5,7 @@ import os
 from functools import lru_cache
 from typing import Any
 
+from src.errors import BackendExecutionError, BackendUnavailableError
 from src.fallbacks.diarization import cluster_speakers
 
 DEFAULT_SPEAKER_CONFIDENCE = 0.78
@@ -63,18 +64,28 @@ def diarize_with_pyannote(
     model_name: str = PYANNOTE_DIARIZATION_MODEL,
     auth_token: str | None = None,
 ) -> list[dict[str, Any]] | None:
-    """Return pyannote speaker turns, or ``None`` if the backend is unavailable."""
+    """Return pyannote speaker turns when configured.
+
+    A missing token means the optional backend is disabled and returns
+    ``None``. Once configured, dependency, model-loading, and inference
+    failures are surfaced because diarization is then a required service.
+    """
     token = auth_token or os.environ.get("HUGGINGFACE_TOKEN") or os.environ.get("HF_TOKEN")
     if not token:
         logger.info("pyannote diarization disabled because no Hugging Face token is configured")
         return None
 
     try:
-        pipeline = _load_pyannote_pipeline(model_name, token)
+        pipeline = load_pyannote_pipeline(model_name, token)
         output = pipeline(audio_path)
+    except ImportError as exc:
+        raise BackendUnavailableError(
+            "pyannote diarization is configured but pyannote.audio is unavailable"
+        ) from exc
     except Exception as exc:
-        logger.warning("pyannote diarization failed; using deterministic fallback: %s", exc)
-        return None
+        raise BackendExecutionError(
+            f"pyannote diarization failed for model '{model_name}'"
+        ) from exc
 
     turns: list[dict[str, Any]] = []
     if hasattr(output, "itertracks"):
@@ -89,7 +100,7 @@ def diarize_with_pyannote(
 
 
 @lru_cache(maxsize=4)
-def _load_pyannote_pipeline(model_name: str, token: str) -> Any:
+def load_pyannote_pipeline(model_name: str, token: str) -> Any:
     """Load each pyannote model once per process."""
     from pyannote.audio import Pipeline
 

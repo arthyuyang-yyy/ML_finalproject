@@ -7,6 +7,7 @@ from .core import (
     assign_speakers_to_segments,
     diarize_audio,
     diarize_with_pyannote,
+    load_pyannote_pipeline,
 )
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "assign_speakers_to_segments",
     "diarize_audio",
     "diarize_with_pyannote",
+    "load_pyannote_pipeline",
 ]

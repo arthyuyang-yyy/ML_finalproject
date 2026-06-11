@@ -67,7 +67,7 @@
 │   ├── candidates/        # 候选生成 facade
 │   ├── fallbacks/         # 确定性轻量回退后端
 │   └── ui/                # Gradio 交互演示
-├── tests/                 # 单元测试（75 项）
+├── tests/                 # 单元测试与集成测试
 ├── app.py                 # Gradio 交互演示入口
 ├── main.py                # 命令行 pipeline 入口
 ├── README.md
@@ -142,7 +142,7 @@
 - Gemma 仅基于 top-k Episode 回答，并校验证据 ID、时间戳、说话人和不确定性；
 - 基于 Gradio 的交互式 UI 演示；
 - 端到端 pipeline 编排（`src/pipeline/run_pipeline.py`）；
-- 75 项单元测试覆盖已实现基础设施。
+- 自动化测试覆盖已实现的基础设施、运行时后端、检索、记忆、QA 与评估。
 
 正式实验前仍需完成：
 

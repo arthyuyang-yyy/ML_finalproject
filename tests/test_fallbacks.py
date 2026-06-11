@@ -352,8 +352,12 @@ class EmbeddingFallbackTests(unittest.TestCase):
             self.assertAlmostEqual(norm, 1.0, places=5)
 
     def test_default_backend_falls_back_to_hashing(self) -> None:
-        backend = _default_embedding_backend()
-        self.assertIsInstance(backend, (HashingEmbeddingBackend, object))
+        with patch(
+            "src.memory.retriever.SentenceTransformerEmbeddingBackend",
+            side_effect=ImportError("unavailable"),
+        ):
+            backend = _default_embedding_backend()
+        self.assertIsInstance(backend, HashingEmbeddingBackend)
         vectors = backend.encode(["test"])
         self.assertEqual(len(vectors), 1)
         self.assertGreater(len(vectors[0]), 0)

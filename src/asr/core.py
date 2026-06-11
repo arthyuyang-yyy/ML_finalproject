@@ -226,7 +226,9 @@ class FunASRAdapter(ASRAdapter):
 
     FunASR does not expose token log-probabilities, so a neutral
     ``default_confidence`` is attached; the cross-engine disagreement signal is
-    what flags Paraformer's uncertain regions downstream.
+    what flags Paraformer's uncertain regions downstream. ``language`` is
+    accepted for the shared adapter interface but is not forwarded to the
+    default Chinese-specific ``paraformer-zh`` model.
     """
 
     name = "funasr"

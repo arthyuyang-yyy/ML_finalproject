@@ -10,6 +10,7 @@ from src.diarization import (
     _best_speaker_for_segment,
 )
 from src.fallbacks.diarization import cluster_speakers
+from src.errors import BackendExecutionError, BackendUnavailableError
 
 
 class ClusterSpeakersTests(unittest.TestCase):
@@ -20,12 +21,15 @@ class ClusterSpeakersTests(unittest.TestCase):
         self.assertIsNone(result)
         self.assertIn("no Hugging Face token", " ".join(captured.output))
 
-    @patch("src.diarization.core._load_pyannote_pipeline", side_effect=RuntimeError("model denied"))
-    def test_model_loading_failure_uses_fallback(self, _mocked_load) -> None:
-        with self.assertLogs("src.diarization.core", level="WARNING") as captured:
-            result = diarize_with_pyannote("missing.wav", auth_token="token")
-        self.assertIsNone(result)
-        self.assertIn("using deterministic fallback", " ".join(captured.output))
+    @patch("src.diarization.core.load_pyannote_pipeline", side_effect=RuntimeError("model denied"))
+    def test_configured_model_loading_failure_is_reported(self, _mocked_load) -> None:
+        with self.assertRaisesRegex(BackendExecutionError, "diarization failed"):
+            diarize_with_pyannote("missing.wav", auth_token="token")
+
+    @patch("src.diarization.core.load_pyannote_pipeline", side_effect=ImportError("missing"))
+    def test_configured_missing_dependency_is_reported(self, _mocked_load) -> None:
+        with self.assertRaisesRegex(BackendUnavailableError, "pyannote.audio is unavailable"):
+            diarize_with_pyannote("missing.wav", auth_token="token")
 
     def test_marks_speakers_unknown_without_diarization(self) -> None:
         segments = [
