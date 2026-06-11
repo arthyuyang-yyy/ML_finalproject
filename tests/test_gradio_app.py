@@ -3,6 +3,13 @@
 import unittest
 from unittest.mock import patch
 
+try:  # gradio is an optional demo dependency (requirements-demo.txt), not needed for unit tests
+    import gradio  # noqa: F401
+
+    _HAS_GRADIO = True
+except ImportError:
+    _HAS_GRADIO = False
+
 from src.ui.gradio_app import (
     answer_demo_question,
     build_app,
@@ -126,6 +133,7 @@ class GradioAdapterTests(unittest.TestCase):
         mocked_run.assert_called_once_with("meeting.wav", "meeting_001")
         self.assertEqual(result["meeting_id"], "meeting_001")
 
+    @unittest.skipUnless(_HAS_GRADIO, "gradio not installed (optional demo dependency)")
     def test_build_app_has_five_area_components(self) -> None:
         app = build_app()
         config = app.get_config_file()
