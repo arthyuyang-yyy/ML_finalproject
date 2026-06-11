@@ -21,6 +21,7 @@ KEYWORD_WEIGHT = 0.25
 IMPORTANCE_WEIGHT = 0.15
 RECENCY_WEIGHT = 0.10
 OVERLAP_PENALTY_WEIGHT = 0.20
+DEFAULT_MIN_RELEVANCE_SCORE = 0.10
 
 INDEX_FIELDS = ("content", "topic", "event_type", "speakers", "evidence_text")
 
@@ -37,7 +38,6 @@ QUERY_EXPANSIONS = {
     "uncertain": ["uncertainty", "overlap"],
     "decision": ["decision", "decided"],
     "responsible": ["action_item", "owner", "task"],
-    "who": ["speaker", "owner"],
 }
 
 
@@ -72,6 +72,7 @@ def retrieve_episodes(
     top_k: int = 5,
     embedding_backend: EmbeddingBackend | None = None,
     min_score: float = 0.0,
+    min_relevance_score: float = DEFAULT_MIN_RELEVANCE_SCORE,
     meeting_id: str | None = None,
     speaker: str | None = None,
     start_time: float | None = None,
@@ -89,6 +90,8 @@ def retrieve_episodes(
         return []
     if min_score < 0.0:
         raise ValueError("min_score must be non-negative")
+    if min_relevance_score < 0.0:
+        raise ValueError("min_relevance_score must be non-negative")
 
     records = list(episodes if episodes is not None else _read_episodes(path))
     records = _filter_episodes(records, meeting_id, speaker, start_time, end_time)
@@ -111,9 +114,12 @@ def retrieve_episodes(
     for index, episode in enumerate(records):
         importance = _unit_score(episode.get("importance", 0.5), "importance")
         overlap_penalty = _overlap_penalty(episode)
-        final_score = (
+        relevance_score = (
             EMBEDDING_WEIGHT * embedding_scores[index]
             + KEYWORD_WEIGHT * keyword_scores[index]
+        )
+        final_score = (
+            relevance_score
             + IMPORTANCE_WEIGHT * importance
             + RECENCY_WEIGHT * recency_scores[index]
             - OVERLAP_PENALTY_WEIGHT * overlap_penalty
@@ -121,6 +127,7 @@ def retrieve_episodes(
         result = dict(episode)
         result["retrieval"] = {
             "final_score": round(final_score, 6),
+            "relevance_score": round(relevance_score, 6),
             "embedding_similarity": round(embedding_scores[index], 6),
             "keyword_score": round(keyword_scores[index], 6),
             "importance": round(importance, 6),
@@ -128,7 +135,7 @@ def retrieve_episodes(
             "overlap_penalty": round(overlap_penalty, 6),
             "embedding_backend": type(backend).__name__,
         }
-        if final_score >= min_score:
+        if relevance_score >= min_relevance_score and final_score >= min_score:
             ranked.append((final_score, result))
 
     ranked.sort(

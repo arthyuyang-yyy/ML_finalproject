@@ -10,6 +10,7 @@ Run with::
 """
 
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
@@ -87,6 +88,21 @@ class FactoryTests(unittest.TestCase):
     def test_rejects_unknown_adapter(self) -> None:
         with self.assertRaises(ValueError):
             get_adapter("does-not-exist")
+
+    def test_funasr_accepts_shared_language_argument(self) -> None:
+        adapter = get_adapter("funasr", language=None)
+        self.assertEqual(adapter.name, "funasr")
+        self.assertIsNone(adapter.language)
+
+    def test_auto_can_select_funasr_with_shared_language_argument(self) -> None:
+        def find_spec(module: str) -> object | None:
+            return object() if module == "funasr" else None
+
+        with patch("src.fallbacks.asr.importlib.util.find_spec", side_effect=find_spec):
+            adapter = get_adapter("auto", language="zh")
+
+        self.assertEqual(adapter.name, "funasr")
+        self.assertEqual(adapter.language, "zh")
 
 
 class TranscribeSegmentsTests(unittest.TestCase):

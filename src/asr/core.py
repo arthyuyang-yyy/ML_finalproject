@@ -237,12 +237,14 @@ class FunASRAdapter(ASRAdapter):
         vad_model: str = "fsmn-vad",
         punc_model: str = "ct-punc",
         device: str | None = None,
+        language: str | None = None,
         default_confidence: float = 0.6,
     ) -> None:
         self.model = model
         self.vad_model = vad_model
         self.punc_model = punc_model
         self.device = device
+        self.language = language
         self.default_confidence = validate_score(default_confidence, "default_confidence")
         self._model: Any = None
 
@@ -263,7 +265,15 @@ class FunASRAdapter(ASRAdapter):
         samples = _ensure_sample_rate(samples, sample_rate)
         model = self._ensure_model()
         result = model.generate(input=samples, batch_size=1)[0]
-        return _from_funasr_result(result, self.name, self.default_confidence, len(samples) / TARGET_SAMPLE_RATE)
+        transcript = _from_funasr_result(
+            result,
+            self.name,
+            self.default_confidence,
+            len(samples) / TARGET_SAMPLE_RATE,
+        )
+        if self.language:
+            transcript["language"] = self.language
+        return transcript
 
 
 _ADAPTERS: dict[str, type[ASRAdapter]] = {
