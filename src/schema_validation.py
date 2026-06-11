@@ -54,13 +54,20 @@ def validate_candidate(candidate: Any, index: int = 0) -> dict[str, Any]:
     for field, expected_type in REQUIRED_CANDIDATE_FIELDS.items():
         if field not in candidate:
             raise ValueError(f"candidate[{index}] is missing required field '{field}'")
-        if not isinstance(candidate[field], expected_type):
+        if not isinstance(candidate[field], expected_type) or (
+            field == "confidence" and isinstance(candidate[field], bool)
+        ):
             raise ValueError(
                 f"candidate[{index}].{field} must be {_type_name(expected_type)}, "
                 f"got {type(candidate[field]).__name__}"
             )
 
     validate_score(candidate["confidence"], f"candidate[{index}].confidence")
+    for field in ("candidate_id", "speaker", "text", "uncertainty_note"):
+        if not candidate[field].strip():
+            raise ValueError(f"candidate[{index}].{field} must be a non-empty string")
+    if "decode_config" in candidate and not isinstance(candidate["decode_config"], dict):
+        raise ValueError(f"candidate[{index}].decode_config must be a dict if present")
     return candidate
 
 
@@ -86,6 +93,12 @@ def validate_metadata_segment(record: Any) -> dict[str, Any]:
 
     if record["end_time"] < record["start_time"]:
         raise ValueError("segment.end_time must not be earlier than segment.start_time")
+    if record["end_time"] == record["start_time"]:
+        raise ValueError("segment duration must be greater than zero")
+
+    for name in ("meeting_id", "segment_id", "evidence_id", "speaker"):
+        if not record[name].strip():
+            raise ValueError(f"segment.{name} must be a non-empty string")
 
     if record["processing_path"] not in VALID_PROCESSING_PATHS:
         raise ValueError(
@@ -104,6 +117,20 @@ def validate_metadata_segment(record: Any) -> dict[str, Any]:
             "high_overlap_candidate segments must keep at least one candidate "
             "to preserve uncertainty for downstream reasoning"
         )
+    if record["processing_path"] == "high_overlap_candidate":
+        if record["speaker"] != "MIXED":
+            raise ValueError("high_overlap_candidate segments must use speaker='MIXED'")
+        if record["text"].strip():
+            raise ValueError("high_overlap_candidate segments must keep the primary text empty")
+        if not record["uncertainty_note"].strip():
+            raise ValueError("high_overlap_candidate segments must explain their uncertainty")
+    else:
+        if not record["text"].strip():
+            raise ValueError("low_overlap_cluster segments must contain transcript text")
+        if record["candidates"]:
+            raise ValueError("low_overlap_cluster segments must not contain candidates")
+        if record["uncertainty_note"].strip():
+            raise ValueError("low_overlap_cluster segments must not carry an uncertainty note")
 
     return record
 
@@ -114,7 +141,15 @@ def validate_meeting(segments: Any) -> list[dict[str, Any]]:
         raise ValueError(f"meeting must be a list of segments, got {type(segments).__name__}")
     if not segments:
         raise ValueError("meeting must contain at least one segment")
-    return [validate_metadata_segment(segment) for segment in segments]
+    validated = [validate_metadata_segment(segment) for segment in segments]
+    meeting_ids = {segment["meeting_id"] for segment in validated}
+    if len(meeting_ids) != 1:
+        raise ValueError("meeting segments must share one meeting_id")
+    if len({segment["segment_id"] for segment in validated}) != len(validated):
+        raise ValueError("meeting contains duplicate segment_id values")
+    if len({segment["evidence_id"] for segment in validated}) != len(validated):
+        raise ValueError("meeting contains duplicate evidence_id values")
+    return validated
 
 
 def _type_name(expected_type: Any) -> str:

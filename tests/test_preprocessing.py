@@ -12,10 +12,13 @@ import numpy as np
 
 from src.audio.preprocess import (
     energy_vad,
+    frame_rms,
+    load_audio,
     peak_normalize,
     preprocess_audio,
     resample,
     resample_linear,
+    segment_audio,
     segment_waveform,
     to_mono,
 )
@@ -77,9 +80,52 @@ class HelperTests(unittest.TestCase):
         out = resample(signal, SAMPLE_RATE, SAMPLE_RATE // 2)
         self.assertEqual(out.size, SAMPLE_RATE // 2)
 
+    def test_resample_rejects_negative_sample_rate(self) -> None:
+        with self.assertRaises(ValueError):
+            resample_linear(_tone(0.1), -1, 16000)
+
+    def test_frame_rms_positive_length_required(self) -> None:
+        with self.assertRaises(ValueError):
+            frame_rms(_tone(0.1), 0, 160)
+
+    def test_frame_rms_short_signal_returns_empty(self) -> None:
+        rms, starts = frame_rms(_tone(0.01), 400, 160)
+        self.assertEqual(rms.size, 0)
+        self.assertEqual(starts.size, 0)
+
+    def test_frame_rms_computes_expected_values(self) -> None:
+        samples = np.array([0.0, 1.0, 0.0, 1.0, 0.0], dtype=np.float32)
+        rms, starts = frame_rms(samples, frame_length=3, hop_length=1)
+        self.assertEqual(starts.size, 3)
+        self.assertGreater(rms[0], 0.0)
+
+    def test_segment_audio_integration(self) -> None:
+        try:
+            import soundfile as sf
+        except ImportError:
+            self.skipTest("soundfile is not installed")
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".wav") as tmp:
+            sf.write(tmp.name, _tone(2.0, amplitude=0.99), SAMPLE_RATE, subtype="FLOAT")
+            segments = segment_audio(tmp.name, meeting_id="test")
+            self.assertGreaterEqual(len(segments), 1)
+            self.assertEqual(segments[0]["meeting_id"], "test")
+
     def test_audio_package_wrapper_uses_shared_preprocess(self) -> None:
         self.assertIn("target_sample_rate", signature(preprocess_audio).parameters)
         self.assertIn("target_sr", signature(preprocess_audio).parameters)
+
+    def test_load_audio_respects_normalize_flag(self) -> None:
+        try:
+            import soundfile as sf
+        except ImportError:
+            self.skipTest("soundfile is not installed")
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".wav") as tmp:
+            raw = np.ones(16000, dtype=np.float32) * 0.5
+            sf.write(tmp.name, raw, SAMPLE_RATE, subtype="FLOAT")
+            loaded, _ = load_audio(tmp.name, normalize=False)
+            np.testing.assert_array_almost_equal(loaded, raw)
 
 
 class EnergyVadTests(unittest.TestCase):
