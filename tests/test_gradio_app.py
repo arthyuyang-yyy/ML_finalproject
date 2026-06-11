@@ -115,6 +115,15 @@ class GradioAdapterTests(unittest.TestCase):
         self.assertEqual(rows, [])
         self.assertTrue(result["insufficient_evidence"])
 
+    def test_unrelated_question_is_insufficient(self) -> None:
+        answer, rows, result = answer_demo_question(
+            "who discovered Neptune?",
+            {"episodic_memory": [_episode()]},
+        )
+        self.assertIn("无法确定", answer)
+        self.assertEqual(rows, [])
+        self.assertTrue(result["insufficient_evidence"])
+
     @patch("src.ui.gradio_app.answer_question")
     def test_qa_passes_configured_gemma_client(self, mocked_answer) -> None:
         mocked_answer.return_value = {"answer": "ok", "insufficient_evidence": False}

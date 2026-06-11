@@ -237,12 +237,14 @@ class FunASRAdapter(ASRAdapter):
         vad_model: str = "fsmn-vad",
         punc_model: str = "ct-punc",
         device: str | None = None,
+        language: str | None = None,
         default_confidence: float = 0.6,
     ) -> None:
         self.model = model
         self.vad_model = vad_model
         self.punc_model = punc_model
         self.device = device
+        self.language = language
         self.default_confidence = validate_score(default_confidence, "default_confidence")
         self._model: Any = None
 

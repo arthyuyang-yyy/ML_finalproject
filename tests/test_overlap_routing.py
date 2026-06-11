@@ -1,6 +1,7 @@
 """Tests for overlap scoring and dual-path routing."""
 
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
@@ -8,6 +9,7 @@ from src.overlap.detector import (
     DEFAULT_OVERLAP_THRESHOLD,
     _merge_regions,
     _overlap_fraction,
+    detect_pyannote_overlap_regions,
     estimate_segment_overlap_scores,
 )
 from src.fallbacks.overlap import energy_overlap_proxy
@@ -76,6 +78,10 @@ class OverlapScoringTests(unittest.TestCase):
         self.assertGreater(scored[0]["overlap_score"], 0.0)
         self.assertEqual(scored[0]["overlap_components"]["diarization_overlap"], 0.6)
         self.assertGreater(scored[0]["overlap_components"]["speaker_change"], 0.0)
+
+    @patch("src.overlap.detector._load_pyannote_pipeline", side_effect=RuntimeError("model denied"))
+    def test_pyannote_model_loading_failure_uses_fallback(self, _mocked_load) -> None:
+        self.assertIsNone(detect_pyannote_overlap_regions("missing.wav", auth_token="token"))
 
 
 class RoutingThresholdTests(unittest.TestCase):

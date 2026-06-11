@@ -112,6 +112,11 @@ class MockASRFallbackTests(unittest.TestCase):
             adapter = get_adapter("auto")
         self.assertEqual(adapter.name, "mock")
 
+    def test_auto_selects_funasr_with_shared_language_configuration(self) -> None:
+        with patch("src.fallbacks.resolve_asr_backend", return_value="funasr"):
+            adapter = get_adapter("auto", language=None)
+        self.assertEqual(adapter.name, "funasr")
+
     def test_mock_adapter_produces_valid_transcript_shape(self) -> None:
         adapter = MockASRAdapter(confidence=0.8, language="en")
         result = adapter.transcribe_array(_tone(1.0), SAMPLE_RATE)

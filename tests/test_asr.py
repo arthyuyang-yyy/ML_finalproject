@@ -14,6 +14,7 @@ import unittest
 import numpy as np
 
 from src.asr import (
+    FunASRAdapter,
     MockASRAdapter,
     get_adapter,
     logprob_to_confidence,
@@ -87,6 +88,11 @@ class FactoryTests(unittest.TestCase):
     def test_rejects_unknown_adapter(self) -> None:
         with self.assertRaises(ValueError):
             get_adapter("does-not-exist")
+
+    def test_funasr_accepts_shared_language_configuration(self) -> None:
+        adapter = get_adapter("funasr", language=None)
+        self.assertIsInstance(adapter, FunASRAdapter)
+        self.assertIsNone(adapter.language)
 
 
 class TranscribeSegmentsTests(unittest.TestCase):

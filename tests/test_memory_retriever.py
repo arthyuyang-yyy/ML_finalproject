@@ -199,6 +199,10 @@ class MemoryRetrieverTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "end_time filter"):
             retrieve_episodes("decision", episodes=self.episodes, start_time=10.0, end_time=1.0)
 
+    def test_unrelated_query_returns_no_hash_embedding_results(self) -> None:
+        results = retrieve_episodes("completely unrelated astronomy question", episodes=self.episodes)
+        self.assertEqual(results, [])
+
 
 if __name__ == "__main__":
     unittest.main()

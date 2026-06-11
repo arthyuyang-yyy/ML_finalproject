@@ -21,6 +21,7 @@ KEYWORD_WEIGHT = 0.25
 IMPORTANCE_WEIGHT = 0.15
 RECENCY_WEIGHT = 0.10
 OVERLAP_PENALTY_WEIGHT = 0.20
+SEMANTIC_RELEVANCE_THRESHOLD = 0.25
 
 INDEX_FIELDS = ("content", "topic", "event_type", "speakers", "evidence_text")
 
@@ -38,6 +39,12 @@ QUERY_EXPANSIONS = {
     "decision": ["decision", "decided"],
     "responsible": ["action_item", "owner", "task"],
     "who": ["speaker", "owner"],
+}
+
+RELEVANCE_QUERY_EXPANSIONS = {
+    trigger: terms
+    for trigger, terms in QUERY_EXPANSIONS.items()
+    if trigger not in {"question", "who"}
 }
 
 
@@ -98,6 +105,8 @@ def retrieve_episodes(
     query_text = _expand_query(question)
     documents = [_index_text(episode) for episode in records]
     keyword_scores = _normalized_bm25_scores(query_text, documents)
+    relevance_query = _expand_query(question, expansions=RELEVANCE_QUERY_EXPANSIONS)
+    lexical_matches = [_has_lexical_overlap(relevance_query, document) for document in documents]
 
     backend = embedding_backend or _default_embedding_backend()
     vectors = backend.encode([query_text, *documents])
@@ -128,7 +137,7 @@ def retrieve_episodes(
             "overlap_penalty": round(overlap_penalty, 6),
             "embedding_backend": type(backend).__name__,
         }
-        if final_score >= min_score:
+        if _is_relevant(lexical_matches[index], embedding_scores[index], backend) and final_score >= min_score:
             ranked.append((final_score, result))
 
     ranked.sort(
@@ -181,6 +190,23 @@ def _filter_episodes(
             continue
         filtered.append(episode)
     return filtered
+
+
+def _is_relevant(
+    lexical_match: bool,
+    embedding_score: float,
+    backend: EmbeddingBackend,
+) -> bool:
+    """Reject unrelated memories before importance and recency affect ranking."""
+    if lexical_match:
+        return True
+    if isinstance(backend, HashingEmbeddingBackend):
+        return False
+    return embedding_score >= SEMANTIC_RELEVANCE_THRESHOLD
+
+
+def _has_lexical_overlap(question: str, document: str) -> bool:
+    return bool(set(_tokenize(question)) & set(_tokenize(document)))
 
 
 def _index_text(episode: dict[str, Any]) -> str:
@@ -236,10 +262,10 @@ def _tokenize(text: str) -> list[str]:
     return latin_tokens + cjk_tokens
 
 
-def _expand_query(question: str) -> str:
+def _expand_query(question: str, expansions: dict[str, list[str]] = QUERY_EXPANSIONS) -> str:
     expanded = [question]
     lowered = question.lower()
-    for trigger, terms in QUERY_EXPANSIONS.items():
+    for trigger, terms in expansions.items():
         if trigger in lowered:
             expanded.extend(terms)
     return " ".join(expanded)

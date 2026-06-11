@@ -20,6 +20,13 @@ class ClusterSpeakersTests(unittest.TestCase):
         self.assertIsNone(result)
         self.assertIn("no Hugging Face token", " ".join(captured.output))
 
+    @patch("src.diarization.core._load_pyannote_pipeline", side_effect=RuntimeError("model denied"))
+    def test_model_loading_failure_uses_fallback(self, _mocked_load) -> None:
+        with self.assertLogs("src.diarization.core", level="WARNING") as captured:
+            result = diarize_with_pyannote("missing.wav", auth_token="token")
+        self.assertIsNone(result)
+        self.assertIn("using deterministic fallback", " ".join(captured.output))
+
     def test_marks_speakers_unknown_without_diarization(self) -> None:
         segments = [
             {"segment_id": "s1", "start_time": 0.0, "end_time": 1.0},

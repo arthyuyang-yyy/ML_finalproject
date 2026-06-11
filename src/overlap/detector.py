@@ -71,10 +71,6 @@ def detect_pyannote_overlap_regions(
 
     try:
         pipeline = _load_pyannote_pipeline(model_name, token)
-    except ImportError:
-        return None
-
-    try:
         output = pipeline(audio_path)
     except Exception:
         return None

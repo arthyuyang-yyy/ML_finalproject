@@ -71,11 +71,6 @@ def diarize_with_pyannote(
 
     try:
         pipeline = _load_pyannote_pipeline(model_name, token)
-    except ImportError:
-        logger.warning("pyannote diarization unavailable because pyannote.audio is not installed")
-        return None
-
-    try:
         output = pipeline(audio_path)
     except Exception as exc:
         logger.warning("pyannote diarization failed; using deterministic fallback: %s", exc)
