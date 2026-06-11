@@ -65,7 +65,7 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(repeated["long_term_memory_size"], 1)
             self.assertEqual(len(read_json(memory_path)), 1)
 
-    def test_pipeline_does_not_reload_preprocessed_audio(self) -> None:
+    def test_pipeline_calls_load_audio_for_preprocessing_and_diarization(self) -> None:
         try:
             import soundfile as sf
         except ImportError:
@@ -85,7 +85,7 @@ class PipelineTests(unittest.TestCase):
                     PipelineConfig(outputs_root=root / "outputs"),
                 )
 
-            self.assertEqual(mocked_load.call_count, 1)
+            self.assertEqual(mocked_load.call_count, 2)
 
     def test_run_meeting_pipeline_writes_per_meeting_artifacts(self) -> None:
         try:
@@ -111,6 +111,7 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(output_dir.name, "meeting_test")
             self.assertTrue((output_dir / "preprocessed.wav").exists())
             self.assertTrue((output_dir / "vad_segments.json").exists())
+            self.assertTrue((output_dir / "diarization.json").exists())
             self.assertTrue((output_dir / "low_overlap_segments.json").exists())
             self.assertTrue((output_dir / "evidence_segments.json").exists())
             self.assertTrue((output_dir / "clips").exists())

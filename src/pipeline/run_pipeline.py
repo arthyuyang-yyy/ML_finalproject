@@ -4,6 +4,7 @@ from typing import Any
 
 from src.asr import get_adapter
 from src.audio.clipper import write_segment_clips
+from src.diarization import diarize_audio
 from src.overlap.router import route_segment
 from src.evidence.builder import build_evidence_segments
 from src.high_overlap import process_high_overlap_segments
@@ -39,6 +40,9 @@ def run_meeting_pipeline(
     vad_segments = segment_waveform(samples, sample_rate, meeting_id=meeting_id)
     write_json(paths["vad_segments"], vad_segments)
 
+    diarization_turns = diarize_audio(str(paths["preprocessed"]))
+    write_json(paths["diarization"], diarization_turns)
+
     scored_segments = estimate_segment_overlap_scores(
         samples,
         vad_segments,
@@ -66,6 +70,7 @@ def run_meeting_pipeline(
         low_overlap_input,
         asr_adapter=get_adapter(cfg.low_overlap_asr_model, **_adapter_kwargs(cfg.low_overlap_asr_model, cfg.language)),
         sample_rate=sample_rate,
+        diarization_turns=diarization_turns if diarization_turns else None,
     )
     high_overlap_processed = process_high_overlap_segments(
         samples,

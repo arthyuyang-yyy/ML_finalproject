@@ -10,7 +10,7 @@
 ## Phase 2: Baselines
 
 - [x] Implement audio preprocessing and VAD segmentation.
-- [x] Add baseline overlap detector and threshold calibration (energy fallback + pyannote adapter).
+- [x] Add baseline overlap detector (energy fallback + pyannote adapter).
 - [x] Add ASR and speaker-diarization adapters (mock baselines; WhisperX/Whisper/FunASR and pyannote optional).
 - [x] Implement high-overlap candidate generation baseline.
 - [x] Implement end-to-end pipeline orchestration (`src/pipeline/run_pipeline.py`).
@@ -30,6 +30,7 @@
 ## Phase 4: Evaluation
 
 - [ ] Build the manually annotated evaluation split.
+- [ ] Calibrate overlap threshold with human-labeled segments (threshold sweep, accuracy/precision/recall/F1 table).
 - [ ] Run routing and candidate-generation experiments.
 - [ ] Run metadata-aware LLM ablations.
 - [ ] Evaluate Episodic Memory QA, evidence quality, and hallucination.
