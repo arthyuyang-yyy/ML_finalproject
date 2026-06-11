@@ -20,7 +20,7 @@ acceptance criteria, schemas, and final deliverables are defined in
 - [x] Step 4 - Pluggable ASR adapters and confidence normalization:
   Mock, Whisper, WhisperX, and FunASR.
 - [x] Step 5 - Optional pyannote diarization adapter.
-- [ ] Step 6 - Integrate diarization into the end-to-end pipeline and enforce
+- [x] Step 6 - Integrate diarization into the end-to-end pipeline and enforce
   the speaker-assignment rules from `Project_task.md`:
   - use the dominant speaker only when coverage is sufficient;
   - use `MIXED` for heavy overlap;
@@ -40,33 +40,33 @@ acceptance criteria, schemas, and final deliverables are defined in
 
 ## Phase 3: LLM, Memory, and QA
 
-- [ ] Step 13 - Connect a real Gemma-compatible backend while retaining the
+- [x] Step 13 - Connect an Ollama Gemma-compatible backend while retaining the
   deterministic offline fallback.
 - [ ] Step 14 - Complete evidence-only, JSON-only prompt constraints and
   uncertainty rules from `Project_task.md`.
-- [ ] Step 15 - Add LLM JSON parse, repair, regeneration, and evidence-ID
+- [x] Step 15 - Add LLM JSON parse, repair, regeneration, and evidence-ID
   validation.
 - [ ] Step 16 - Implement real meeting-event extraction for decisions, action
   items, deadlines, open questions, disagreements, and uncertainty.
 - [x] Step 17a - Basic JSONL episodic-memory storage.
-- [ ] Step 17b - Create event-grouped episodes with complete evidence text,
+- [x] Step 17b - Create event-grouped episodes with complete evidence text,
   clip paths, confidence, importance, and event metadata.
 - [x] Step 18a - Basic keyword retrieval.
-- [ ] Step 18b - Add semantic/hybrid retrieval with relevance gating and
+- [x] Step 18b - Add semantic/hybrid retrieval with relevance gating and
   meeting, speaker, and time filters.
-- [ ] Step 19 - Implement evidence-backed QA that cites evidence IDs and
+- [x] Step 19 - Implement evidence-backed QA that cites evidence IDs and
   timestamps, refuses unsupported answers, and surfaces overlap uncertainty.
 - [x] Emit unified per-meeting pipeline artifacts under
   `outputs/<meeting_id>/`.
 
 ## Gradio Demo
 
-- [ ] Page 1 - Audio upload and Run Pipeline workflow.
-- [ ] Page 2 - Timeline with speaker, route, overlap score, transcript, and
+- [x] Page 1 - Audio upload and Run Pipeline workflow.
+- [x] Page 2 - Timeline with speaker, route, overlap score, transcript, and
   uncertainty.
-- [ ] Page 3 - High-overlap candidate drill-down with audio playback.
-- [ ] Page 4 - Structured meeting-memory view.
-- [ ] Page 5 - Evidence-cited QA window with timestamp traceability.
+- [x] Page 3 - High-overlap candidate drill-down.
+- [x] Page 4 - Structured meeting-memory view.
+- [x] Page 5 - Evidence-cited QA window with timestamp traceability.
 
 ## Phase 4: Evaluation
 

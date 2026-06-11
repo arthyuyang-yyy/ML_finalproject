@@ -1,8 +1,9 @@
 -r requirements-demo.txt
 
-# Choose and configure heavy backends based on the target machine/GPU.
-# openai-whisper>=20231117
-# faster-whisper>=1.0
-# whisperx>=3.1
-# pyannote.audio>=3.1
-# sentence-transformers>=2.7
+# Optional production backends. Model weights are downloaded separately at runtime.
+openai-whisper>=20231117
+faster-whisper>=1.0
+whisperx>=3.1
+pyannote.audio>=3.1
+funasr>=1.0
+sentence-transformers>=2.7

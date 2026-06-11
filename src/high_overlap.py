@@ -17,6 +17,7 @@ def process_high_overlap_segments(
     segments: list[dict[str, Any]],
     sample_rate: int = TARGET_SAMPLE_RATE,
     language: str | None = None,
+    diarization_turns: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Return high-overlap records with empty main text and candidate hypotheses."""
     processed: list[dict[str, Any]] = []
@@ -35,6 +36,7 @@ def process_high_overlap_segments(
             samples=clip,
             sample_rate=sample_rate,
             language=language,
+            speaker_hypotheses=_speakers_for_segment(segment, diarization_turns or []),
         )
         processed.append({
             **segment,
@@ -47,6 +49,23 @@ def process_high_overlap_segments(
             "uncertainty_note": "High-overlap segment; speaker attribution is uncertain.",
         })
     return processed
+
+
+def _speakers_for_segment(
+    segment: dict[str, Any],
+    diarization_turns: list[dict[str, Any]],
+) -> list[str]:
+    """Return diarization speakers that overlap the high-overlap segment."""
+    start = float(segment["start_time"])
+    end = float(segment["end_time"])
+    speakers: list[str] = []
+    for turn in diarization_turns:
+        if min(end, float(turn["end_time"])) <= max(start, float(turn["start_time"])):
+            continue
+        speaker = str(turn["speaker"])
+        if speaker not in speakers:
+            speakers.append(speaker)
+    return speakers
 
 
 def _slice_segment(samples: np.ndarray, segment: dict[str, Any], sample_rate: int) -> np.ndarray:

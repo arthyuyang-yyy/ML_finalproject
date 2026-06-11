@@ -4,6 +4,8 @@ import hashlib
 import json
 import math
 import re
+import logging
+from functools import lru_cache
 from collections import Counter
 from collections.abc import Sequence
 from datetime import datetime, timezone
@@ -11,6 +13,8 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from .episodic_store import DEFAULT_MEMORY_PATH, read_episodes
+
+logger = logging.getLogger(__name__)
 
 EMBEDDING_WEIGHT = 0.45
 KEYWORD_WEIGHT = 0.25
@@ -72,12 +76,12 @@ class SentenceTransformerEmbeddingBackend:
 
     def __init__(self, model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2") -> None:
         try:
-            from sentence_transformers import SentenceTransformer
+            import sentence_transformers  # noqa: F401 - availability check
         except ImportError as exc:
             raise ImportError(
                 "Install sentence-transformers to use the semantic embedding backend."
             ) from exc
-        self.model = SentenceTransformer(model_name)
+        self.model = _load_sentence_transformer(model_name)
 
     def encode(self, texts: Sequence[str]) -> list[list[float]]:
         vectors = self.model.encode(list(texts), normalize_embeddings=True)
@@ -91,6 +95,10 @@ def retrieve_episodes(
     top_k: int = 5,
     embedding_backend: EmbeddingBackend | None = None,
     min_score: float = 0.0,
+    meeting_id: str | None = None,
+    speaker: str | None = None,
+    start_time: float | None = None,
+    end_time: float | None = None,
 ) -> list[dict[str, Any]]:
     """Retrieve episodes with BM25 + embedding hybrid scoring.
 
@@ -106,6 +114,7 @@ def retrieve_episodes(
         raise ValueError("min_score must be non-negative")
 
     records = list(episodes if episodes is not None else _read_episodes(path))
+    records = _filter_episodes(records, meeting_id, speaker, start_time, end_time)
     if not records:
         return []
 
@@ -113,7 +122,7 @@ def retrieve_episodes(
     documents = [_index_text(episode) for episode in records]
     keyword_scores = _normalized_bm25_scores(query_text, documents)
 
-    backend = embedding_backend or HashingEmbeddingBackend()
+    backend = embedding_backend or _default_embedding_backend()
     vectors = backend.encode([query_text, *documents])
     if len(vectors) != len(documents) + 1:
         raise ValueError("embedding backend returned an unexpected number of vectors")
@@ -155,6 +164,46 @@ def retrieve_episodes(
         reverse=True,
     )
     return [episode for _, episode in ranked[:top_k]]
+
+
+@lru_cache(maxsize=2)
+def _load_sentence_transformer(model_name: str) -> Any:
+    from sentence_transformers import SentenceTransformer
+
+    return SentenceTransformer(model_name)
+
+
+def _default_embedding_backend() -> EmbeddingBackend:
+    try:
+        return SentenceTransformerEmbeddingBackend()
+    except (ImportError, OSError) as exc:
+        logger.info("sentence-transformers unavailable; using hashing embeddings: %s", exc)
+        return HashingEmbeddingBackend()
+
+
+def _filter_episodes(
+    episodes: list[dict[str, Any]],
+    meeting_id: str | None,
+    speaker: str | None,
+    start_time: float | None,
+    end_time: float | None,
+) -> list[dict[str, Any]]:
+    if start_time is not None and end_time is not None and end_time < start_time:
+        raise ValueError("end_time filter must be greater than or equal to start_time")
+    filtered: list[dict[str, Any]] = []
+    for episode in episodes:
+        if meeting_id and str(episode.get("meeting_id", "")) != meeting_id:
+            continue
+        if speaker and speaker not in {str(value) for value in episode.get("speakers", [])}:
+            continue
+        episode_start = float(episode.get("start_time", 0.0))
+        episode_end = float(episode.get("end_time", episode_start))
+        if start_time is not None and episode_end < start_time:
+            continue
+        if end_time is not None and episode_start > end_time:
+            continue
+        filtered.append(episode)
+    return filtered
 
 
 def _index_text(episode: dict[str, Any]) -> str:

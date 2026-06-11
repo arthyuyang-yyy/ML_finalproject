@@ -13,6 +13,7 @@ from typing import Any
 import numpy as np
 
 from src.audio.preprocess import TARGET_SAMPLE_RATE, energy_vad, load_audio, to_mono
+from src.diarization.core import _load_pyannote_pipeline
 
 DEFAULT_OVERLAP_THRESHOLD = 0.4
 PYANNOTE_OVERLAP_MODEL = "pyannote/overlapped-speech-detection"
@@ -26,6 +27,8 @@ def estimate_segment_overlap_scores(
     sample_rate: int = TARGET_SAMPLE_RATE,
     audio_path: str | None = None,
     overlap_regions: list[OverlapRegion] | None = None,
+    diarization_turns: list[dict[str, Any]] | None = None,
+    asr_instability: dict[str, float] | None = None,
 ) -> list[dict[str, Any]]:
     """Attach ``overlap_score`` to each VAD segment.
 
@@ -45,16 +48,14 @@ def estimate_segment_overlap_scores(
             detector = "pyannote"
 
     if regions is not None:
-        return [
-            {
-                **segment,
-                "overlap_score": _round_score(_overlap_fraction(segment, regions)),
-                "overlap_detector": detector,
-            }
+        base = [
+            {**segment, "overlap_score": _round_score(_overlap_fraction(segment, regions)), "overlap_detector": detector}
             for segment in segments
         ]
+        return _fuse_overlap_signals(base, diarization_turns or [], asr_instability or {})
 
-    return _estimate_with_energy_fallback(samples, segments, sample_rate)
+    base = _estimate_with_energy_fallback(samples, segments, sample_rate)
+    return _fuse_overlap_signals(base, diarization_turns or [], asr_instability or {})
 
 
 def detect_pyannote_overlap_regions(
@@ -68,17 +69,82 @@ def detect_pyannote_overlap_regions(
         return None
 
     try:
-        from pyannote.audio import Pipeline
+        pipeline = _load_pyannote_pipeline(model_name, token)
     except ImportError:
         return None
 
     try:
-        pipeline = Pipeline.from_pretrained(model_name, use_auth_token=token)
         output = pipeline(audio_path)
     except Exception:
         return None
 
     return _coerce_pyannote_regions(output)
+
+
+def _fuse_overlap_signals(
+    segments: list[dict[str, Any]],
+    diarization_turns: list[dict[str, Any]],
+    asr_instability: dict[str, float],
+) -> list[dict[str, Any]]:
+    """Fuse OSD/energy, diarization overlap, speaker changes, and ASR instability."""
+    fused: list[dict[str, Any]] = []
+    for segment in segments:
+        base = float(segment["overlap_score"])
+        diarization = _diarization_overlap_fraction(segment, diarization_turns)
+        speaker_change = _speaker_change_signal(segment, diarization_turns)
+        instability = max(0.0, min(1.0, float(asr_instability.get(str(segment.get("segment_id", "")), 0.0))))
+        available = bool(diarization_turns) or bool(asr_instability)
+        score = max(base, 0.55 * base + 0.25 * diarization + 0.10 * speaker_change + 0.10 * instability) if available else base
+        fused.append({
+            **segment,
+            "overlap_score": _round_score(score),
+            "overlap_components": {
+                "osd_or_energy": _round_score(base),
+                "diarization_overlap": _round_score(diarization),
+                "speaker_change": _round_score(speaker_change),
+                "asr_instability": _round_score(instability),
+            },
+        })
+    return fused
+
+
+def _diarization_overlap_fraction(
+    segment: dict[str, Any], diarization_turns: list[dict[str, Any]]
+) -> float:
+    """Approximate simultaneous multi-speaker coverage from diarization turns."""
+    start = float(segment["start_time"])
+    end = float(segment["end_time"])
+    duration = max(0.0, end - start)
+    if duration == 0.0:
+        return 0.0
+    events: list[tuple[float, int]] = []
+    for turn in diarization_turns:
+        left = max(start, float(turn["start_time"]))
+        right = min(end, float(turn["end_time"]))
+        if right > left:
+            events.extend([(left, 1), (right, -1)])
+    active = 0
+    previous = start
+    overlap = 0.0
+    for timestamp, delta in sorted(events, key=lambda item: (item[0], item[1])):
+        if active >= 2:
+            overlap += timestamp - previous
+        active += delta
+        previous = timestamp
+    return min(1.0, overlap / duration)
+
+
+def _speaker_change_signal(segment: dict[str, Any], diarization_turns: list[dict[str, Any]]) -> float:
+    """Return a bounded signal for speaker transitions inside a segment."""
+    start = float(segment["start_time"])
+    end = float(segment["end_time"])
+    speakers = [
+        str(turn["speaker"])
+        for turn in sorted(diarization_turns, key=lambda item: float(item["start_time"]))
+        if min(end, float(turn["end_time"])) > max(start, float(turn["start_time"]))
+    ]
+    changes = sum(left != right for left, right in zip(speakers, speakers[1:]))
+    return min(1.0, changes / 2.0)
 
 
 def estimate_overlap_score(audio_path: str) -> float:

@@ -221,7 +221,7 @@ Every supported answer must include its evidence IDs and exact episode time rang
 
 ## 7. ASR Transcript
 
-Defined by `src/asr.py` — `ASRAdapter.transcribe_array()`.
+Defined by `src/asr/core.py` — `ASRAdapter.transcribe_array()`.
 
 | Field | Type | Description |
 |-------|------|-------------|

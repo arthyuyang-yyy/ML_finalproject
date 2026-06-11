@@ -115,6 +115,13 @@ class GradioAdapterTests(unittest.TestCase):
         self.assertEqual(rows, [])
         self.assertTrue(result["insufficient_evidence"])
 
+    @patch("src.ui.gradio_app.answer_question")
+    def test_qa_passes_configured_gemma_client(self, mocked_answer) -> None:
+        mocked_answer.return_value = {"answer": "ok", "insufficient_evidence": False}
+        client = object()
+        answer_demo_question("test", {"episodic_memory": [_episode()]}, client=client)
+        self.assertIs(mocked_answer.call_args.kwargs["client"], client)
+
     def test_run_pipeline_rejects_unsafe_meeting_id(self) -> None:
         with self.assertRaisesRegex(ValueError, "Meeting ID"):
             run_demo_pipeline("meeting.wav", "../escape")
@@ -123,7 +130,9 @@ class GradioAdapterTests(unittest.TestCase):
     def test_run_pipeline_calls_shared_pipeline(self, mocked_run) -> None:
         mocked_run.return_value = {"meeting_id": "meeting_001"}
         result = run_demo_pipeline("meeting.wav", "meeting_001")
-        mocked_run.assert_called_once_with("meeting.wav", "meeting_001")
+        mocked_run.assert_called_once()
+        self.assertEqual(mocked_run.call_args.args, ("meeting.wav", "meeting_001"))
+        self.assertEqual(mocked_run.call_args.kwargs["config"].low_overlap_asr_model, "auto")
         self.assertEqual(result["meeting_id"], "meeting_001")
 
     def test_build_app_has_five_area_components(self) -> None:

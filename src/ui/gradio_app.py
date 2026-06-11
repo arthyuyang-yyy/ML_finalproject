@@ -5,7 +5,9 @@ from pathlib import Path
 from typing import Any
 
 from src.memory.retriever import retrieve_episodes
+from src.llm.gemma_client import GemmaClient, create_gemma_client
 from src.pipeline import run_meeting_pipeline
+from src.pipeline.config import PipelineConfig
 from src.qa.answerer import answer_question
 
 TIMELINE_HEADERS = ["Time", "Speaker", "Path", "Overlap", "Text"]
@@ -14,6 +16,7 @@ EMPTY_STATE: dict[str, Any] = {
     "meeting_id": "",
     "evidence_segments": [],
     "episodic_memory": [],
+    "long_term_memory_path": "",
 }
 
 
@@ -36,6 +39,7 @@ def prepare_demo_data(result: dict[str, Any]) -> dict[str, Any]:
         "meeting_id": str(result.get("meeting_id", "")),
         "evidence_segments": evidence_segments,
         "episodic_memory": episodic_memory,
+        "long_term_memory_path": str(result.get("artifacts", {}).get("long_term_episodic_memory", "")),
     }
     return {
         "state": state,
@@ -105,13 +109,16 @@ def answer_demo_question(
     question: str,
     state: dict[str, Any] | None,
     top_k: int = 5,
+    client: GemmaClient | None = None,
 ) -> tuple[str, list[list[Any]], dict[str, Any]]:
-    """Retrieve within the current meeting and return a validated QA answer."""
+    """Retrieve across persisted episodic memory and return a validated QA answer."""
     if not isinstance(question, str) or not question.strip():
         return "请输入问题。", [], {}
-    episodes = list((state or {}).get("episodic_memory", []))
-    retrieved = retrieve_episodes(question, episodes=episodes, top_k=top_k) if episodes else []
-    result = answer_question(question, retrieved)
+    current_state = state or {}
+    memory_path = str(current_state.get("long_term_memory_path", ""))
+    episodes = None if memory_path and Path(memory_path).exists() else list(current_state.get("episodic_memory", []))
+    retrieved = retrieve_episodes(question, episodes=episodes, path=memory_path, top_k=top_k)
+    result = answer_question(question, retrieved, client=client)
     retrieval_rows = [
         [
             episode.get("episode_id", ""),
@@ -124,12 +131,23 @@ def answer_demo_question(
     return result["answer"], retrieval_rows, result
 
 
-def run_demo_pipeline(audio_path: str | None, meeting_id: str) -> dict[str, Any]:
+def run_demo_pipeline(
+    audio_path: str | None,
+    meeting_id: str,
+    asr_backend: str = "auto",
+    gemma_backend: str = "none",
+    gemma_model: str = "gemma3:4b",
+) -> dict[str, Any]:
     """Validate UI input and execute the shared application pipeline."""
     if not audio_path:
         raise ValueError("请先上传会议音频。")
     normalized_id = _meeting_id(meeting_id or Path(audio_path).stem)
-    return run_meeting_pipeline(audio_path, normalized_id)
+    config = PipelineConfig(
+        low_overlap_asr_model=asr_backend,
+        gemma_backend=gemma_backend,
+        gemma_model=gemma_model,
+    )
+    return run_meeting_pipeline(audio_path, normalized_id, config=config)
 
 
 def build_app():
@@ -139,9 +157,9 @@ def build_app():
     except ImportError as exc:  # pragma: no cover - optional demo dependency
         raise ImportError("Install demo dependencies with `pip install -r requirements-demo.txt`.") from exc
 
-    def run(audio_path: str | None, meeting_id: str):
+    def run(audio_path: str | None, meeting_id: str, asr_backend: str, gemma_backend: str, gemma_model: str):
         try:
-            result = run_demo_pipeline(audio_path, meeting_id)
+            result = run_demo_pipeline(audio_path, meeting_id, asr_backend, gemma_backend, gemma_model)
             view = prepare_demo_data(result)
             selected = view["selected_candidate"]
             status = (
@@ -173,8 +191,9 @@ def build_app():
                 {},
             )
 
-    def ask(question: str, state: dict[str, Any]):
-        return answer_demo_question(question, state)
+    def ask(question: str, state: dict[str, Any], gemma_backend: str, gemma_model: str):
+        client = create_gemma_client(gemma_backend, model=gemma_model)
+        return answer_demo_question(question, state, client=client)
 
     with gr.Blocks(title="Overlap-Aware Meeting Memory", theme=gr.themes.Soft()) as demo:
         state = gr.State(dict(EMPTY_STATE))
@@ -189,6 +208,17 @@ def build_app():
                 audio = gr.Audio(label="Meeting audio", type="filepath")
                 with gr.Column():
                     meeting_id = gr.Textbox(label="Meeting ID", value="meeting_001")
+                    asr_backend = gr.Dropdown(
+                        label="ASR backend",
+                        choices=["auto", "whisperx", "faster-whisper", "whisper", "funasr", "mock"],
+                        value="auto",
+                    )
+                    gemma_backend = gr.Dropdown(
+                        label="Gemma backend",
+                        choices=["none", "ollama"],
+                        value="none",
+                    )
+                    gemma_model = gr.Textbox(label="Gemma model", value="gemma3:4b")
                     run_button = gr.Button("Run Pipeline", variant="primary")
                     status = gr.Markdown("等待上传音频。")
 
@@ -242,7 +272,7 @@ def build_app():
 
         run_button.click(
             run,
-            inputs=[audio, meeting_id],
+            inputs=[audio, meeting_id, asr_backend, gemma_backend, gemma_model],
             outputs=[
                 state,
                 status,
@@ -262,12 +292,12 @@ def build_app():
         )
         ask_button.click(
             ask,
-            inputs=[question, state],
+            inputs=[question, state, gemma_backend, gemma_model],
             outputs=[answer, retrieval_table, answer_json],
         )
         question.submit(
             ask,
-            inputs=[question, state],
+            inputs=[question, state, gemma_backend, gemma_model],
             outputs=[answer, retrieval_table, answer_json],
         )
 

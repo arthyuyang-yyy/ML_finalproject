@@ -173,6 +173,32 @@ class MemoryRetrieverTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "non-empty"):
             retrieve_episodes(" ", episodes=self.episodes)
 
+    def test_filters_by_meeting_speaker_and_time(self) -> None:
+        other = _episode(
+            "ep_other_meeting",
+            event_type="decision",
+            content="Other meeting decision",
+            topic="Other",
+            speakers=["SPEAKER_99"],
+            evidence_text="Other",
+        )
+        other["meeting_id"] = "meeting_002"
+        other["start_time"] = 100.0
+        other["end_time"] = 110.0
+        results = retrieve_episodes(
+            "decision",
+            episodes=[*self.episodes, other],
+            meeting_id="meeting_002",
+            speaker="SPEAKER_99",
+            start_time=105.0,
+            end_time=120.0,
+        )
+        self.assertEqual([item["episode_id"] for item in results], ["ep_other_meeting"])
+
+    def test_rejects_inverted_time_filter(self) -> None:
+        with self.assertRaisesRegex(ValueError, "end_time filter"):
+            retrieve_episodes("decision", episodes=self.episodes, start_time=10.0, end_time=1.0)
+
 
 if __name__ == "__main__":
     unittest.main()

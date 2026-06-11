@@ -167,11 +167,11 @@ def _supported_speakers(evidence: list[dict[str, Any]]) -> set[str]:
     supported: set[str] = set()
     for segment in evidence:
         speaker = str(segment.get("speaker", "")).strip()
-        if speaker and speaker not in {"MIXED", "UNKNOWN"}:
+        if speaker:
             supported.add(speaker)
         for candidate in segment.get("candidates", []):
             candidate_speaker = str(candidate.get("speaker", "")).strip()
-            if candidate_speaker and candidate_speaker not in {"MIXED", "UNKNOWN"}:
+            if candidate_speaker:
                 supported.add(candidate_speaker)
     return supported
 

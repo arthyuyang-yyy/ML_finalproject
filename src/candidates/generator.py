@@ -7,6 +7,7 @@ settings, then keeps distinct transcript/speaker hypotheses as candidates.
 
 import os
 import tempfile
+from functools import lru_cache
 from typing import Any
 
 import numpy as np
@@ -28,6 +29,7 @@ def generate_high_overlap_candidates(
     language: str | None = None,
     decode_configs: list[dict[str, Any]] | None = None,
     max_candidates: int = 4,
+    speaker_hypotheses: list[str] | None = None,
 ) -> list[dict]:
     """Generate transcript/speaker candidates for one high-overlap segment.
 
@@ -37,11 +39,15 @@ def generate_high_overlap_candidates(
     handling and schemas remain usable during lightweight demos.
     """
     configs = _with_language_override(decode_configs or DEFAULT_DECODE_CONFIGS, language)
+    if not speaker_hypotheses and str(segment.get("speaker", "")) not in {"", "MIXED"}:
+        speaker_hypotheses = [str(segment["speaker"])]
     if samples is not None and samples.size:
-        candidates = _generate_with_faster_whisper(segment, samples, sample_rate, configs, max_candidates)
+        candidates = _generate_with_faster_whisper(
+            segment, samples, sample_rate, configs, max_candidates, speaker_hypotheses
+        )
         if candidates:
             return candidates
-    return _fallback_candidates(segment, configs[:2])
+    return _fallback_candidates(segment, configs[:2], speaker_hypotheses)
 
 
 def _generate_with_faster_whisper(
@@ -50,11 +56,12 @@ def _generate_with_faster_whisper(
     sample_rate: int,
     decode_configs: list[dict[str, Any]],
     max_candidates: int,
+    speaker_hypotheses: list[str] | None,
 ) -> list[dict]:
     """Run faster-whisper with multiple decode settings when available."""
     try:
         import soundfile as sf
-        from faster_whisper import WhisperModel
+        import faster_whisper  # noqa: F401 - availability check
     except ImportError:
         return []
 
@@ -63,7 +70,7 @@ def _generate_with_faster_whisper(
     compute_type = os.environ.get("FASTER_WHISPER_COMPUTE_TYPE", "int8")
 
     try:
-        model = WhisperModel(model_name, device=device, compute_type=compute_type)
+        model = _load_faster_whisper_model(model_name, device, compute_type)
     except Exception:
         return []
 
@@ -94,7 +101,7 @@ def _generate_with_faster_whisper(
             index = len(candidates) + 1
             candidates.append({
                 "candidate_id": f"{segment_id}_c{index}",
-                "speaker": _speaker_hypothesis(index),
+                "speaker": _speaker_hypothesis(index, speaker_hypotheses),
                 "text": text,
                 "confidence": confidence,
                 "uncertainty_note": _decode_note(config, backend="faster-whisper"),
@@ -109,7 +116,11 @@ def _generate_with_faster_whisper(
     return candidates
 
 
-def _fallback_candidates(segment: dict, decode_configs: list[dict[str, Any]]) -> list[dict]:
+def _fallback_candidates(
+    segment: dict,
+    decode_configs: list[dict[str, Any]],
+    speaker_hypotheses: list[str] | None = None,
+) -> list[dict]:
     """Return explicit uncertainty-preserving candidates when ASR backend is absent."""
     segment_id = str(segment.get("segment_id") or segment.get("evidence_id") or "segment")
     text = str(segment.get("text", "")).strip()
@@ -119,7 +130,7 @@ def _fallback_candidates(segment: dict, decode_configs: list[dict[str, Any]]) ->
     return [
         {
             "candidate_id": f"{segment_id}_c{index}",
-            "speaker": _speaker_hypothesis(index),
+            "speaker": _speaker_hypothesis(index, speaker_hypotheses),
             "text": text,
             "confidence": round(max(0.0, 0.62 - 0.07 * (index - 1)), 3),
             "uncertainty_note": _decode_note(config, backend="fallback"),
@@ -156,9 +167,20 @@ def _with_language_override(configs: list[dict[str, Any]], language: str | None)
     return updated
 
 
-def _speaker_hypothesis(index: int) -> str:
-    """Alternate speaker hypotheses for ambiguous mixed audio."""
-    return f"SPEAKER_{(index - 1) % 2:02d}"
+def _speaker_hypothesis(index: int, speakers: list[str] | None = None) -> str:
+    """Use diarization-supported speakers instead of inventing identities."""
+    normalized = [str(speaker) for speaker in speakers or [] if str(speaker).strip()]
+    if not normalized:
+        return "UNKNOWN"
+    return normalized[(index - 1) % len(normalized)]
+
+
+@lru_cache(maxsize=4)
+def _load_faster_whisper_model(model_name: str, device: str, compute_type: str) -> Any:
+    """Load each faster-whisper model configuration once per process."""
+    from faster_whisper import WhisperModel
+
+    return WhisperModel(model_name, device=device, compute_type=compute_type)
 
 
 generate_candidates = generate_high_overlap_candidates

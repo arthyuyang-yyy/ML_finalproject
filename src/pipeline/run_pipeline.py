@@ -9,7 +9,7 @@ from src.overlap.router import route_segment
 from src.evidence.builder import build_evidence_segments
 from src.high_overlap import process_high_overlap_segments
 from src.llm.event_extractor import extract_meeting_events
-from src.llm.gemma_client import GemmaClient
+from src.llm.gemma_client import GemmaClient, create_gemma_client
 from src.low_overlap import process_low_overlap_segments
 from src.memory.episodic_store import build_episodes, upsert_episodes
 from src.overlap.detector import estimate_segment_overlap_scores
@@ -28,6 +28,11 @@ def run_meeting_pipeline(
 ) -> dict[str, Any]:
     """Run the lightweight meeting pipeline and write per-meeting artifacts."""
     cfg = config or PipelineConfig()
+    llm_client = llm_client or create_gemma_client(
+        cfg.gemma_backend,
+        model=cfg.gemma_model,
+        base_url=cfg.gemma_base_url,
+    )
     paths = ensure_meeting_dirs(cfg.meeting_dir(meeting_id))
 
     preprocessed_samples, sample_rate = preprocess_audio(
@@ -48,6 +53,7 @@ def run_meeting_pipeline(
         vad_segments,
         sample_rate,
         audio_path=str(paths["preprocessed"]),
+        diarization_turns=diarization_turns,
     )
     write_json(paths["overlap"], scored_segments)
 
@@ -77,6 +83,7 @@ def run_meeting_pipeline(
         high_overlap_input,
         sample_rate=sample_rate,
         language=cfg.language,
+        diarization_turns=diarization_turns,
     )
     evidence_segments = build_evidence_segments(
         low_overlap_processed,

@@ -3,6 +3,7 @@
 from .core import (
     ASRAdapter,
     FunASRAdapter,
+    FasterWhisperAdapter,
     MockASRAdapter,
     WhisperAdapter,
     WhisperXAdapter,
@@ -19,6 +20,7 @@ from .core import (
 __all__ = [
     "ASRAdapter",
     "FunASRAdapter",
+    "FasterWhisperAdapter",
     "MockASRAdapter",
     "WhisperAdapter",
     "WhisperXAdapter",

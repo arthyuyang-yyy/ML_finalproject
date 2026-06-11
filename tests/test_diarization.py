@@ -20,7 +20,7 @@ class ClusterSpeakersTests(unittest.TestCase):
         self.assertIsNone(result)
         self.assertIn("no Hugging Face token", " ".join(captured.output))
 
-    def test_alternates_speaker_labels(self) -> None:
+    def test_marks_speakers_unknown_without_diarization(self) -> None:
         segments = [
             {"segment_id": "s1", "start_time": 0.0, "end_time": 1.0},
             {"segment_id": "s2", "start_time": 1.0, "end_time": 2.0},
@@ -28,9 +28,21 @@ class ClusterSpeakersTests(unittest.TestCase):
         ]
         clustered = cluster_speakers(segments)
         self.assertEqual(len(clustered), 3)
-        self.assertEqual(clustered[0]["speaker"], "SPEAKER_00")
-        self.assertEqual(clustered[1]["speaker"], "SPEAKER_01")
-        self.assertEqual(clustered[2]["speaker"], "SPEAKER_00")
+        self.assertTrue(all(segment["speaker"] == "UNKNOWN" for segment in clustered))
+
+    def test_assignment_uses_coverage_threshold_and_mixed_label(self) -> None:
+        segments = [
+            {"segment_id": "dominant", "start_time": 0.0, "end_time": 10.0},
+            {"segment_id": "mixed", "start_time": 10.0, "end_time": 20.0},
+            {"segment_id": "unknown", "start_time": 20.0, "end_time": 30.0},
+        ]
+        turns = [
+            {"speaker": "A", "start_time": 0.0, "end_time": 8.0},
+            {"speaker": "A", "start_time": 10.0, "end_time": 15.0},
+            {"speaker": "B", "start_time": 15.0, "end_time": 20.0},
+        ]
+        assigned = assign_speakers_to_segments(segments, turns)
+        self.assertEqual([item["speaker"] for item in assigned], ["A", "MIXED", "UNKNOWN"])
 
     def test_preserves_existing_speaker_when_present(self) -> None:
         segments = [{"segment_id": "s1", "speaker": "ALICE", "start_time": 0.0, "end_time": 1.0}]

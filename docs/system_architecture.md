@@ -42,14 +42,14 @@ See [pipeline_walkthrough.md](pipeline_walkthrough.md) for the complete 14-step 
 | --- | --- | --- |
 | Preprocessing | `src/audio/preprocess.py` | Load, mono-convert, polyphase-resample, peak-normalize, VAD-segment, and export float32 WAV |
 | Clip export | `src/audio/clipper.py` | Write per-evidence-segment WAV clips to disk |
-| Overlap detection | `src/overlap_detector.py` | Score overlap: pyannote OSD adapter (priority), explicit region coverage, or energy fallback (max 0.39) |
-| Dual-path router | `src/dual_path_router.py` | Route segments by overlap threshold (default 0.4) |
+| Overlap detection | `src/overlap/detector.py` | Score overlap: pyannote OSD adapter (priority), explicit region coverage, or energy fallback (max 0.39) |
+| Dual-path router | `src/overlap/router.py` | Route segments by overlap threshold (default 0.4) |
 | Low-overlap path | `src/low_overlap.py` | Produce stable text, speaker, timestamps, ASR confidence, and speaker confidence for low-overlap segments |
-| ASR | `src/asr.py` | Pluggable adapters (Mock/WhisperX/Whisper/Paraformer) with calibrated confidence; WhisperX is the preferred heavy backend for low-overlap segments |
-| Diarization | `src/diarization.py` | pyannote speaker turns when configured, otherwise deterministic speaker-labeling fallback |
+| ASR | `src/asr/core.py` | Pluggable adapters (Mock/WhisperX/Whisper/Paraformer) with calibrated confidence; WhisperX is the preferred heavy backend for low-overlap segments |
+| Diarization | `src/diarization/core.py` | pyannote speaker turns when configured, otherwise deterministic speaker-labeling fallback |
 | Speech separation | `src/speech_separation.py` | Separation interface (stub — pending model integration) |
 | High-overlap path | `src/high_overlap.py` | Preserve mixed-speaker records with empty main transcript and multiple candidates |
-| Candidate generator | `src/candidate_generator.py` | Produce multiple transcript/speaker hypotheses with faster-whisper beam/temperature/language variations, with fallback candidates for lightweight runs |
+| Candidate generator | `src/candidates/generator.py` | Produce multiple transcript/speaker hypotheses with faster-whisper beam/temperature/language variations, with fallback candidates for lightweight runs |
 | Evidence builder | `src/evidence/builder.py` | Merge low/high-overlap results, normalize candidates, sort by time, and emit the shared 17-field evidence schema |
 | Schema validation | `src/schema_validation.py` | Validates evidence-packet records, candidate structure, and per-meeting lists |
 ### Pipeline Orchestration
@@ -81,7 +81,7 @@ See [pipeline_walkthrough.md](pipeline_walkthrough.md) for the complete 14-step 
 
 | Module | File | Responsibility |
 | --- | --- | --- |
-| Evaluation | `src/evaluation.py` | WER, CER, overlap-routing metrics, speaker-attribution accuracy, evidence quality (stub) |
+| Evaluation | `src/evaluation/core.py` | WER, CER, overlap-routing metrics, speaker-attribution accuracy, evidence quality (stub) |
 | Data synthesis | `src/data_synthesis.py` | Controlled two-speaker overlap mixtures with SNR and ground-truth annotations |
 | Utilities | `src/utils.py` | `validate_score()` utility |
 
@@ -89,7 +89,7 @@ See [pipeline_walkthrough.md](pipeline_walkthrough.md) for the complete 14-step 
 
 | Module | File | Responsibility |
 | --- | --- | --- |
-| Gradio app | `src/ui/gradio_app.py` | Five-area demo for upload, evidence timeline, high-overlap candidates, meeting memory, and current-meeting QA |
+| Gradio app | `src/ui/gradio_app.py` | Five-area demo for upload, evidence timeline, high-overlap candidates, long-term memory, and cross-meeting QA |
 
 ### Package Facades
 

@@ -46,7 +46,7 @@ Runs energy-threshold VAD to detect speech regions:
 **Artifact:** `vad_segments.json`
 
 ### Step 4: Overlap Scoring
-**Module:** `src/overlap_detector.py` — `estimate_segment_overlap_scores()`
+**Module:** `src/overlap/detector.py` — `estimate_segment_overlap_scores()`
 
 Attaches an `overlap_score` [0, 1] to each segment. Three strategies, tried in order:
 
@@ -59,7 +59,7 @@ Each segment also receives an `overlap_detector` field identifying the strategy 
 **Artifact:** `overlap.json`
 
 ### Step 5: Routing
-**Module:** `src/dual_path_router.py` — `route_segment()`
+**Module:** `src/overlap/router.py` — `route_segment()`
 
 Routes each segment to one of two paths based on `overlap_score >= threshold` (default threshold: 0.4):
 - `"low_overlap_cluster"` — handled by ASR + speaker attribution
@@ -86,7 +86,7 @@ For high-overlap segments, the main evidence record intentionally avoids a force
 - `speaker_confidence` is low
 - multiple transcript/speaker hypotheses are stored in `candidates`
 
-Candidate generation uses `src/candidate_generator.py` and prefers faster-whisper multi-decode settings:
+Candidate generation uses `src/candidates/generator.py` and prefers faster-whisper multi-decode settings:
 - `beam_size`: 1 / 5
 - `temperature`: 0.0 / 0.4 / 0.8
 - `language`: auto / zh / en

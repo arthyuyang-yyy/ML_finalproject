@@ -102,7 +102,7 @@ See [docs/system_architecture.md](docs/system_architecture.md) for the module-le
 │   ├── qa/                # QA facade
 │   ├── candidates/        # Candidate generation facade
 │   └── ui/                # Gradio interactive demo
-├── tests/                 # Unit tests (109 cases)
+├── tests/                 # Unit and integration tests
 ├── app.py                 # Gradio interactive demo entry point
 ├── main.py                # CLI pipeline entry point
 ├── README.md
@@ -171,27 +171,25 @@ Completed:
 - audio clip export per evidence segment (`src/audio/clipper.py`);
 - controlled two-speaker overlap synthesis with SNR control and ground-truth overlap annotations;
 - objective WER, CER, overlap-routing classification, best-mapping speaker-attribution, evidence-support, hallucination, abstention, and confidence-calibration metrics;
-- pluggable ASR adapters (Mock/WhisperX/Whisper/Paraformer) with calibrated confidence;
-- overlap detection with pyannote OSD adapter (priority) and conservative energy fallback;
+- configurable ASR adapters (auto/WhisperX/faster-whisper/Whisper/FunASR/mock) with calibrated confidence;
+- overlap scoring that fuses pyannote OSD, diarization overlap, speaker changes, optional ASR instability, and a conservative energy fallback;
 - dual-path routing (threshold 0.4), low-overlap ASR + speaker-attribution path, and high-overlap candidate generation without forcing one transcript;
 - metadata construction, schema validation, and deterministic evidence-linked LLM event extraction fallback;
 - event-grouped episodic memory creation, JSONL persistence, semantic/lexical retrieval, relevance gating, and meeting/speaker/time filters;
 - baseline evidence-backed QA with evidence IDs, timestamps, confidence, uncertainty, and retrieval metadata;
-- Gradio demo skeleton and application entry point;
+- complete Gradio workflow with selectable ASR/Gemma backends, timeline, candidates, long-term memory, and QA;
 - end-to-end pipeline orchestration (`src/pipeline/run_pipeline.py`);
-- 109 unit tests covering the implemented baseline infrastructure, memory retrieval, and evidence evaluation.
+- automated tests covering the pipeline, runtime backends, retrieval filters, memory, QA, and evaluation.
 
 Pending before formal experiments:
 
 - manually annotated evaluation split;
-- integrate pyannote diarization output into the end-to-end low-overlap path;
 - overlap-threshold calibration and routing experiments against human labels;
 - real heavy-model runs and accuracy comparisons for WhisperX, Whisper, FunASR, pyannote, and optional speech separation;
-- real Gemma-compatible backend, strict JSON repair/validation, and complete evidence-only prompts;
-- complete Gradio timeline, candidate drill-down, memory, and QA pages;
+- additional Gemma backends beyond the implemented Ollama adapter;
 - metadata-input ablations, Episodic Memory QA comparisons, and uncertainty/candidate-usefulness evaluation.
 
-Current verification note: the full 109-test suite passes with `python -m unittest discover -s tests -v`. Heavy models such as faster-whisper, WhisperX, Whisper, pyannote, sentence-transformers, and speech separation models remain optional and are loaded only when their backends are installed and configured.
+Current verification note: run `python3 -m pytest -q` for the current test count. Heavy models remain optional; install them with `requirements-heavy.txt`. Runtime models are loaded lazily and cached per process.
 
 ## How to Run
 
@@ -205,7 +203,10 @@ python -m unittest discover -s tests -v
 Run the end-to-end pipeline:
 
 ```bash
-python main.py data/raw_audio/meeting_001.wav --meeting-id meeting_001
+python main.py data/raw_audio/meeting_001.wav --meeting-id meeting_001 --asr auto
+
+# Local Gemma through Ollama
+python main.py data/raw_audio/meeting_001.wav --gemma-backend ollama --gemma-model gemma3:4b
 ```
 
 Launch the Gradio interactive demo:
@@ -265,7 +266,7 @@ Keep large audio files, model weights, and generated outputs outside Git.
 
 ## 当前进度
 
-项目处于**基础设施与基线准备阶段**，已有可运行的端到端 pipeline（`src/pipeline/run_pipeline.py`），尚未产生正式实验结果。当前完整测试为 109 项。
+项目处于**基础设施与基线准备阶段**，已有可运行的端到端 pipeline（`src/pipeline/run_pipeline.py`），尚未产生正式实验结果。当前测试数量以 `python3 -m pytest -q` 输出为准。
 
 已完成：
 - pipeline 编排、音频预处理、VAD、音频切片、重叠检测（pyannote OSD + 能量 fallback）、双路径路由、ASR 适配器、高重叠候选生成、元数据构建与 schema 验证；
@@ -273,7 +274,7 @@ Keep large audio files, model weights, and generated outputs outside Git.
 - 基于证据的基础 QA，以及证据 precision/recall/F1、命中率、幻觉率、正确拒答率和置信度校准指标；
 - 确定性 LLM 事件提取 fallback 和 Gradio 演示骨架。
 
-正式实验前仍需：将 pyannote diarization 接入主 Pipeline、人工标注评估集、重叠阈值校准、真实重模型运行与对比、真实 Gemma 后端和严格 JSON 修复、完整 Gradio 页面，以及元信息/Memory QA/不确定性消融实验。
+正式实验前仍需：人工标注评估集、重叠阈值校准、真实重模型运行与对比、真实 Gemma 后端和严格 JSON 修复、完整 Gradio 页面，以及元信息/Memory QA/不确定性消融实验。
 
 ## 运行方式
 

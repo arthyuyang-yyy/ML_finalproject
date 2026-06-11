@@ -28,12 +28,16 @@ The transcript-level result has the shape::
     }
 """
 
+import importlib.util
+import logging
 from typing import Any
 
 import numpy as np
 
 from src.audio.preprocess import TARGET_SAMPLE_RATE
 from src.utils import validate_score
+
+logger = logging.getLogger(__name__)
 
 
 def logprob_to_confidence(avg_logprob: float, no_speech_prob: float = 0.0) -> float:
@@ -176,6 +180,51 @@ class WhisperXAdapter(ASRAdapter):
         return _from_whisperx_result(result, self.name, self.default_confidence, len(samples) / TARGET_SAMPLE_RATE)
 
 
+class FasterWhisperAdapter(ASRAdapter):
+    """faster-whisper recognizer sharing the cached candidate-generation model."""
+
+    name = "faster-whisper"
+
+    def __init__(
+        self,
+        model_size: str = "small",
+        device: str = "cpu",
+        compute_type: str = "int8",
+        language: str | None = None,
+    ) -> None:
+        self.model_size = model_size
+        self.device = device
+        self.compute_type = compute_type
+        self.language = language
+
+    def transcribe_array(self, samples: np.ndarray, sample_rate: int = TARGET_SAMPLE_RATE) -> dict[str, Any]:
+        from src.candidates.generator import _load_faster_whisper_model
+
+        samples = _ensure_sample_rate(samples, sample_rate)
+        model = _load_faster_whisper_model(self.model_size, self.device, self.compute_type)
+        raw_segments, info = model.transcribe(samples, language=self.language)
+        decoded = list(raw_segments)
+        segments = [
+            {
+                "start_time": round(float(segment.start), 3),
+                "end_time": round(float(segment.end), 3),
+                "text": str(segment.text).strip(),
+                "asr_confidence": logprob_to_confidence(
+                    float(getattr(segment, "avg_logprob", 0.0)),
+                    float(getattr(segment, "no_speech_prob", 0.0)),
+                ),
+            }
+            for segment in decoded
+        ]
+        return {
+            "text": " ".join(segment["text"] for segment in segments).strip(),
+            "language": str(getattr(info, "language", self.language or "und")),
+            "model": self.name,
+            "asr_confidence": _aggregate_confidence(segments),
+            "segments": segments,
+        }
+
+
 class FunASRAdapter(ASRAdapter):
     """FunASR Paraformer recogniser (lazy ``funasr`` import), strong for Chinese.
 
@@ -225,14 +274,29 @@ _ADAPTERS: dict[str, type[ASRAdapter]] = {
     "mock": MockASRAdapter,
     "whisper": WhisperAdapter,
     "whisperx": WhisperXAdapter,
+    "faster-whisper": FasterWhisperAdapter,
     "funasr": FunASRAdapter,
     "paraformer": FunASRAdapter,
 }
+
+_AUTO_BACKENDS = (
+    ("whisperx", "whisperx"),
+    ("faster-whisper", "faster_whisper"),
+    ("funasr", "funasr"),
+    ("whisper", "whisper"),
+)
 
 
 def get_adapter(name: str = "mock", **kwargs: Any) -> ASRAdapter:
     """Build an ASR adapter by name (``mock``, ``whisperx``, ``whisper``, ``funasr``)."""
     key = name.lower()
+    if key == "auto":
+        key = next(
+            (backend for backend, module in _AUTO_BACKENDS if importlib.util.find_spec(module) is not None),
+            "mock",
+        )
+        if key == "mock":
+            logger.warning("No production ASR backend is installed; falling back to mock ASR")
     if key not in _ADAPTERS:
         raise ValueError(f"unknown ASR adapter '{name}'; choose from {sorted(_ADAPTERS)}")
     return _ADAPTERS[key](**kwargs)

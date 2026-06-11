@@ -61,6 +61,22 @@ class OverlapScoringTests(unittest.TestCase):
     def test_energy_proxy_silence_returns_zero(self) -> None:
         self.assertEqual(_energy_overlap_proxy(np.zeros(16000, dtype=np.float32), 16000), 0.0)
 
+    def test_fuses_diarization_overlap_and_speaker_change(self) -> None:
+        segments = [{"segment_id": "s1", "start_time": 0.0, "end_time": 10.0}]
+        turns = [
+            {"speaker": "A", "start_time": 0.0, "end_time": 8.0},
+            {"speaker": "B", "start_time": 2.0, "end_time": 10.0},
+        ]
+        scored = estimate_segment_overlap_scores(
+            np.zeros(160000, dtype=np.float32),
+            segments,
+            overlap_regions=[],
+            diarization_turns=turns,
+        )
+        self.assertGreater(scored[0]["overlap_score"], 0.0)
+        self.assertEqual(scored[0]["overlap_components"]["diarization_overlap"], 0.6)
+        self.assertGreater(scored[0]["overlap_components"]["speaker_change"], 0.0)
+
 
 class RoutingThresholdTests(unittest.TestCase):
     def test_default_threshold_is_point_four(self) -> None:
