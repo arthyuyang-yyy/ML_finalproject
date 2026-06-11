@@ -35,6 +35,7 @@ jobs:
         continue-on-error: true
         run: ruff check src tests main.py app.py
 
-      # 5) Run the unit test suite.
+      # 5) Run the unit test suite. Use `python -m pytest` so the repo root is
+      #    on sys.path and the `src` package imports without an editable install.
       - name: Pytest
-        run: pytest -q
+        run: python -m pytest -q
