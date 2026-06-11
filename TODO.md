@@ -1,5 +1,9 @@
 # TODO
 
+This file tracks implementation progress. The authoritative requirements,
+acceptance criteria, schemas, and final deliverables are defined in
+[`Project_task.md`](Project_task.md).
+
 ## Phase 1: Interfaces and Data
 
 - [x] Define bilingual research positioning and system architecture.
@@ -7,40 +11,81 @@
 - [x] Create module interfaces without loading heavy models.
 - [x] Add schema validation and small fixture datasets.
 
-## Phase 2: Baselines
+## Phase 2: Audio and Dual-path Baselines
 
-- [x] Implement audio preprocessing and VAD segmentation.
-- [x] Add baseline overlap detector (energy fallback + pyannote adapter).
-- [x] Add ASR and speaker-diarization adapters (mock baselines; WhisperX/Whisper/FunASR and pyannote optional).
-- [x] Implement high-overlap candidate generation baseline.
-- [x] Implement end-to-end pipeline orchestration (`src/pipeline/run_pipeline.py`).
-- [x] Add audio clip export (`src/audio/clipper.py`).
-- [x] Add Gradio interactive demo (`src/ui/gradio_app.py`).
+- [x] Step 1 - Audio preprocessing: mono conversion, 16 kHz resampling,
+  normalization, and standard WAV export.
+- [x] Step 2 - Energy-based VAD with timestamped segments.
+- [x] Step 3 - Per-segment audio clip export with `audio_clip_path`.
+- [x] Step 4 - Pluggable ASR adapters and confidence normalization:
+  Mock, Whisper, WhisperX, and FunASR.
+- [x] Step 5 - Optional pyannote diarization adapter.
+- [ ] Step 6 - Integrate diarization into the end-to-end pipeline and enforce
+  the speaker-assignment rules from `Project_task.md`:
+  - use the dominant speaker only when coverage is sufficient;
+  - use `MIXED` for heavy overlap;
+  - use `UNKNOWN` when no speaker can be assigned reliably.
+- [x] Step 7a - Baseline overlap detection with pyannote OSD and an explicitly
+  labeled conservative energy fallback.
+- [ ] Step 7b - Calibrate the overlap threshold against human labels and report
+  the threshold sweep, routing metrics, and cost/quality trade-off.
+- [x] Step 8 - Configurable dual-path router with default threshold `0.4`.
+- [x] Step 9 - Low-overlap baseline producing speaker, transcript, timestamps,
+  confidence values, and an empty candidate list.
+- [x] Step 10 - High-overlap baseline preserving multiple ASR candidates and
+  an uncertainty note instead of forcing one transcript.
+- [ ] Step 11 - Optional speech separation baseline for high-overlap segments.
+- [x] Step 12 - Evidence-segment schema builder and validator.
+- [ ] Validate that every emitted `audio_clip_path` exists on disk.
 
-## Phase 3: Memory and QA
+## Phase 3: LLM, Memory, and QA
 
-- [x] Implement persistent episode storage (JSONL).
-- [x] Add embedding-based and metadata-filtered retrieval (keyword baseline; vector pending).
-- [x] Connect an LLM provider with uncertainty-preserving prompts (deterministic fallback; real LLM pending).
-- [x] Build evidence-backed QA and action-item retrieval (baseline implemented).
+- [ ] Step 13 - Connect a real Gemma-compatible backend while retaining the
+  deterministic offline fallback.
+- [ ] Step 14 - Complete evidence-only, JSON-only prompt constraints and
+  uncertainty rules from `Project_task.md`.
+- [ ] Step 15 - Add LLM JSON parse, repair, regeneration, and evidence-ID
+  validation.
+- [ ] Step 16 - Implement real meeting-event extraction for decisions, action
+  items, deadlines, open questions, disagreements, and uncertainty.
+- [x] Step 17a - Basic JSONL episodic-memory storage.
+- [ ] Step 17b - Create event-grouped episodes with complete evidence text,
+  clip paths, confidence, importance, and event metadata.
+- [x] Step 18a - Basic keyword retrieval.
+- [ ] Step 18b - Add semantic/hybrid retrieval with relevance gating and
+  meeting, speaker, and time filters.
+- [ ] Step 19 - Implement evidence-backed QA that cites evidence IDs and
+  timestamps, refuses unsupported answers, and surfaces overlap uncertainty.
+- [x] Emit unified per-meeting pipeline artifacts under
+  `outputs/<meeting_id>/`.
 
-- [ ] Add vector/semantic retrieval for episodic memory.
-- [ ] Connect real LLM backend (Gemma, Ollama, or hosted API).
+## Gradio Demo
+
+- [ ] Page 1 - Audio upload and Run Pipeline workflow.
+- [ ] Page 2 - Timeline with speaker, route, overlap score, transcript, and
+  uncertainty.
+- [ ] Page 3 - High-overlap candidate drill-down with audio playback.
+- [ ] Page 4 - Structured meeting-memory view.
+- [ ] Page 5 - Evidence-cited QA window with timestamp traceability.
 
 ## Phase 4: Evaluation
 
 - [ ] Build the manually annotated evaluation split.
-- [ ] Calibrate overlap threshold with human-labeled segments (threshold sweep, accuracy/precision/recall/F1 table).
-- [ ] Run routing and candidate-generation experiments.
-- [ ] Run metadata-aware LLM ablations.
-- [ ] Evaluate Episodic Memory QA, evidence quality, and hallucination.
+- [ ] Experiment 1 - Sweep overlap-routing thresholds and report accuracy,
+  precision, recall, F1, and cost/quality trade-offs.
+- [ ] Experiment 2 - Compare multi-candidate high-overlap processing with a
+  forced single transcript.
+- [ ] Experiment 3 - Run metadata-aware LLM ablations.
+- [ ] Experiment 4 - Compare Episodic Memory QA with summary QA and transcript
+  RAG.
+- [ ] Finalize and run evidence-support, hallucination, uncertainty-preservation,
+  and candidate-usefulness metrics.
 
 ## Shared Infrastructure
 
-Cross-cutting tooling that supports multiple phases rather than a single one.
-
-- [x] Add a synthetic overlapping-speech generator with ground-truth labels (controlled overlap duration and SNR).
-- [x] Implement objective evaluation metrics (WER/CER, overlap-routing classification, speaker-attribution accuracy). Evidence/hallucination/uncertainty metrics deferred until the traceability design is finalized.
-- [x] Add pipeline orchestration, config system, and I/O helpers.
-- [x] Add LLM event extraction with deterministic fallback.
-- [x] Add package facades for clean imports (`src/overlap/`, `src/evidence/`, `src/llm/`, `src/memory/`, `src/qa/`, `src/candidates/`).
+- [x] Add controlled two-speaker overlap synthesis with SNR control and
+  ground-truth labels.
+- [x] Implement WER, CER, overlap-routing, and speaker-attribution metrics.
+- [x] Add pipeline orchestration, configuration, I/O helpers, and package
+  facades.
+- [x] Add deterministic LLM event-extraction fallback.
