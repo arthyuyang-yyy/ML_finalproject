@@ -90,7 +90,9 @@ See [docs/system_architecture.md](docs/system_architecture.md) for the module-le
 ```text
 .
 ├── docs/                  # Bilingual research design and experiment plans
-├── data/                  # Raw/processed audio and annotation templates
+├── data/
+│   ├── raw_audio/         # Raw meeting audio files
+│   └── processed_audio/   # Processed/derived audio
 ├── outputs/               # Generated artifacts, ignored except placeholders
 ├── src/                   # Modular pipeline implementation
 │   ├── audio/             # Audio preprocessing, normalization, export, and clipping
@@ -101,6 +103,7 @@ See [docs/system_architecture.md](docs/system_architecture.md) for the module-le
 │   ├── memory/            # Episodic memory facade
 │   ├── qa/                # QA facade
 │   ├── candidates/        # Candidate generation facade
+│   ├── fallbacks/         # Deterministic lightweight fallback backends
 │   └── ui/                # Gradio interactive demo
 ├── tests/                 # Unit and integration tests
 ├── app.py                 # Gradio interactive demo entry point

@@ -12,8 +12,9 @@ from typing import Any
 
 import numpy as np
 
-from src.audio.preprocess import TARGET_SAMPLE_RATE, energy_vad, load_audio, to_mono
+from src.audio.preprocess import TARGET_SAMPLE_RATE, energy_vad, load_audio
 from src.diarization.core import _load_pyannote_pipeline
+from src.fallbacks.overlap import estimate_with_energy_fallback
 
 DEFAULT_OVERLAP_THRESHOLD = 0.4
 PYANNOTE_OVERLAP_MODEL = "pyannote/overlapped-speech-detection"
@@ -54,7 +55,7 @@ def estimate_segment_overlap_scores(
         ]
         return _fuse_overlap_signals(base, diarization_turns or [], asr_instability or {})
 
-    base = _estimate_with_energy_fallback(samples, segments, sample_rate)
+    base = estimate_with_energy_fallback(samples, segments, sample_rate)
     return _fuse_overlap_signals(base, diarization_turns or [], asr_instability or {})
 
 
@@ -174,53 +175,6 @@ def detect_overlap_segments(audio_path: str, threshold: float = DEFAULT_OVERLAP_
         for segment in estimate_segment_overlap_scores(samples, segments, sample_rate, audio_path=audio_path)
         if float(segment["overlap_score"]) >= threshold
     ]
-
-
-def _estimate_with_energy_fallback(
-    samples: np.ndarray,
-    segments: list[dict[str, Any]],
-    sample_rate: int,
-) -> list[dict[str, Any]]:
-    """Conservative fallback when no overlap model is configured."""
-    samples = to_mono(samples)
-    scored: list[dict[str, Any]] = []
-    for segment in segments:
-        start = max(0, int(round(float(segment["start_time"]) * sample_rate)))
-        end = max(start, int(round(float(segment["end_time"]) * sample_rate)))
-        clip = samples[start:end]
-        score = _energy_overlap_proxy(clip, sample_rate)
-        scored.append({
-            **segment,
-            "overlap_score": _round_score(score),
-            "overlap_detector": "energy_fallback",
-        })
-    return scored
-
-
-def _energy_overlap_proxy(clip: np.ndarray, sample_rate: int) -> float:
-    """Return a weak overlap proxy based on sustained high energy variation."""
-    if clip.size == 0:
-        return 0.0
-
-    frame_length = max(1, int(round(0.025 * sample_rate)))
-    hop_length = max(1, int(round(0.010 * sample_rate)))
-    if clip.size < frame_length:
-        return 0.0
-
-    starts = np.arange(0, clip.size - frame_length + 1, hop_length, dtype=np.int64)
-    rms = np.empty(starts.size, dtype=np.float32)
-    for i, start in enumerate(starts):
-        frame = clip[start : start + frame_length]
-        rms[i] = np.sqrt(np.mean(frame.astype(np.float64) ** 2))
-
-    peak = float(rms.max())
-    if peak == 0.0:
-        return 0.0
-
-    high_energy_ratio = float(np.mean(rms >= peak * 0.75))
-    median = float(np.median(rms))
-    dynamic_ratio = float(np.std(rms) / (median + 1e-8))
-    return min(0.39, 0.08 + 0.22 * high_energy_ratio + 0.08 * min(1.0, dynamic_ratio))
 
 
 def _overlap_fraction(segment: dict[str, Any], overlap_regions: list[OverlapRegion]) -> float:

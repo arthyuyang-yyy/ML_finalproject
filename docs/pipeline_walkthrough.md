@@ -106,7 +106,7 @@ Fields: `meeting_id`, `segment_id`, `evidence_id`, `speaker`, `start_time`, `end
 Writes each segment's audio slice as a float32 WAV file to `outputs/{meeting_id}/clips/{evidence_id}.wav`. The `audio_clip_path` field is updated accordingly.
 
 ### Step 10: Schema Validation
-**Module:** `src/schema_validation.py` — `validate_metadata_segment()`
+**Module:** `src/evidence/validator.py` — `validate_metadata_segment()`
 
 Validates every evidence record against the canonical schema: required fields, types, score ranges [0, 1], valid processing paths, time ordering, and candidate structure (high-overlap segments must have candidates).
 

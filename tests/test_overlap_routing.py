@@ -6,11 +6,11 @@ import numpy as np
 
 from src.overlap.detector import (
     DEFAULT_OVERLAP_THRESHOLD,
-    _energy_overlap_proxy,
     _merge_regions,
     _overlap_fraction,
     estimate_segment_overlap_scores,
 )
+from src.fallbacks.overlap import energy_overlap_proxy
 from src.overlap.router import route_segment
 
 
@@ -59,7 +59,7 @@ class OverlapScoringTests(unittest.TestCase):
         self.assertEqual(_merge_regions([]), [])
 
     def test_energy_proxy_silence_returns_zero(self) -> None:
-        self.assertEqual(_energy_overlap_proxy(np.zeros(16000, dtype=np.float32), 16000), 0.0)
+        self.assertEqual(energy_overlap_proxy(np.zeros(16000, dtype=np.float32), 16000), 0.0)
 
     def test_fuses_diarization_overlap_and_speaker_change(self) -> None:
         segments = [{"segment_id": "s1", "start_time": 0.0, "end_time": 10.0}]

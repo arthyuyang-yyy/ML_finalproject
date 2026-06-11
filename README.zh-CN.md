@@ -52,7 +52,9 @@
 ```text
 .
 ├── docs/                  # 双语研究设计、系统架构与实验计划
-├── data/                  # 原始/处理后音频、标注模板与测试 fixture
+├── data/
+│   ├── raw_audio/         # 原始会议音频
+│   └── processed_audio/   # 预处理/派生音频
 ├── outputs/               # 生成结果，除占位文件外不纳入 Git
 ├── src/                   # 模块化 pipeline 实现
 │   ├── audio/             # 音频预处理、归一化、导出与 clip 输出
@@ -63,6 +65,7 @@
 │   ├── memory/            # 情景记忆 facade
 │   ├── qa/                # 问答 facade
 │   ├── candidates/        # 候选生成 facade
+│   ├── fallbacks/         # 确定性轻量回退后端
 │   └── ui/                # Gradio 交互演示
 ├── tests/                 # 单元测试（75 项）
 ├── app.py                 # Gradio 交互演示入口

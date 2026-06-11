@@ -1,18 +1,18 @@
 """BM25 and embedding hybrid retrieval over episodic memory."""
 
-import hashlib
 import json
+import logging
 import math
 import re
-import logging
-from functools import lru_cache
 from collections import Counter
 from collections.abc import Sequence
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Protocol
 
 from .episodic_store import DEFAULT_MEMORY_PATH, read_episodes
+from src.fallbacks.embeddings import HashingEmbeddingBackend
 
 logger = logging.getLogger(__name__)
 
@@ -46,29 +46,6 @@ class EmbeddingBackend(Protocol):
 
     def encode(self, texts: Sequence[str]) -> list[list[float]]:
         """Encode texts into equal-length vectors."""
-
-
-class HashingEmbeddingBackend:
-    """Dependency-free multilingual character n-gram embedding baseline."""
-
-    def __init__(self, dimensions: int = 384) -> None:
-        if dimensions <= 0:
-            raise ValueError("embedding dimensions must be positive")
-        self.dimensions = dimensions
-
-    def encode(self, texts: Sequence[str]) -> list[list[float]]:
-        return [self._encode_one(text) for text in texts]
-
-    def _encode_one(self, text: str) -> list[float]:
-        vector = [0.0] * self.dimensions
-        features = _embedding_features(text)
-        for feature in features:
-            digest = hashlib.blake2b(feature.encode("utf-8"), digest_size=8).digest()
-            value = int.from_bytes(digest, "big")
-            index = value % self.dimensions
-            sign = 1.0 if value & 1 else -1.0
-            vector[index] += sign
-        return _normalize_vector(vector)
 
 
 class SentenceTransformerEmbeddingBackend:
@@ -259,15 +236,6 @@ def _tokenize(text: str) -> list[str]:
     return latin_tokens + cjk_tokens
 
 
-def _embedding_features(text: str) -> list[str]:
-    normalized = re.sub(r"\s+", " ", text.lower().strip())
-    compact = re.sub(r"\s+", "", normalized)
-    features = _tokenize(normalized)
-    for size in (2, 3):
-        features.extend(compact[index : index + size] for index in range(max(0, len(compact) - size + 1)))
-    return features
-
-
 def _expand_query(question: str) -> str:
     expanded = [question]
     lowered = question.lower()
@@ -321,11 +289,6 @@ def _cosine_similarity(left: Sequence[float], right: Sequence[float]) -> float:
     if left_norm == 0.0 or right_norm == 0.0:
         return 0.0
     return sum(a * b for a, b in zip(left, right)) / (left_norm * right_norm)
-
-
-def _normalize_vector(vector: list[float]) -> list[float]:
-    norm = math.sqrt(sum(value * value for value in vector))
-    return [value / norm for value in vector] if norm else vector
 
 
 def _unit_score(value: Any, name: str) -> float:

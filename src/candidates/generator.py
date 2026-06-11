@@ -13,6 +13,7 @@ from typing import Any
 import numpy as np
 
 from src.audio.preprocess import TARGET_SAMPLE_RATE
+from src.fallbacks.candidates import fallback_candidates
 
 DEFAULT_DECODE_CONFIGS: list[dict[str, Any]] = [
     {"beam_size": 1, "temperature": 0.0, "language": None},
@@ -47,7 +48,7 @@ def generate_high_overlap_candidates(
         )
         if candidates:
             return candidates
-    return _fallback_candidates(segment, configs[:2], speaker_hypotheses)
+    return fallback_candidates(segment, configs[:2], speaker_hypotheses)
 
 
 def _generate_with_faster_whisper(
@@ -116,34 +117,6 @@ def _generate_with_faster_whisper(
     return candidates
 
 
-def _fallback_candidates(
-    segment: dict,
-    decode_configs: list[dict[str, Any]],
-    speaker_hypotheses: list[str] | None = None,
-) -> list[dict]:
-    """Return explicit uncertainty-preserving candidates when ASR backend is absent."""
-    segment_id = str(segment.get("segment_id") or segment.get("evidence_id") or "segment")
-    text = str(segment.get("text", "")).strip()
-    if not text:
-        text = "[high-overlap transcript candidate pending ASR decode]"
-
-    return [
-        {
-            "candidate_id": f"{segment_id}_c{index}",
-            "speaker": _speaker_hypothesis(index, speaker_hypotheses),
-            "text": text,
-            "confidence": round(max(0.0, 0.62 - 0.07 * (index - 1)), 3),
-            "uncertainty_note": _decode_note(config, backend="fallback"),
-            "decode_config": {
-                "beam_size": int(config["beam_size"]),
-                "temperature": float(config["temperature"]),
-                "language": config.get("language") or "auto",
-            },
-        }
-        for index, config in enumerate(decode_configs, start=1)
-    ]
-
-
 def _confidence_from_decoded_segments(decoded_segments: list[Any]) -> float:
     """Best-effort confidence for faster-whisper segment objects."""
     scores: list[float] = []
@@ -181,9 +154,6 @@ def _load_faster_whisper_model(model_name: str, device: str, compute_type: str) 
     from faster_whisper import WhisperModel
 
     return WhisperModel(model_name, device=device, compute_type=compute_type)
-
-
-generate_candidates = generate_high_overlap_candidates
 
 
 def _decode_note(config: dict[str, Any], backend: str) -> str:

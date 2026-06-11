@@ -5,6 +5,8 @@ import os
 from functools import lru_cache
 from typing import Any
 
+from src.fallbacks.diarization import cluster_speakers
+
 DEFAULT_SPEAKER_CONFIDENCE = 0.78
 MIN_SPEAKER_COVERAGE = 0.70
 MIXED_SPEAKER_COVERAGE = 0.20
@@ -21,20 +23,6 @@ def diarize_audio(audio_path: str) -> list[dict]:
 
     from ..audio.preprocess import segment_audio
     return cluster_speakers(segment_audio(audio_path))
-
-
-def cluster_speakers(segments: list[dict]) -> list[dict]:
-    """Assign deterministic speaker labels when no diarization backend exists."""
-    clustered: list[dict] = []
-    for segment in segments:
-        speaker = segment.get("speaker") or "UNKNOWN"
-        confidence = float(segment.get("speaker_confidence", DEFAULT_SPEAKER_CONFIDENCE))
-        clustered.append({
-            **segment,
-            "speaker": speaker,
-            "speaker_confidence": max(0.0, min(1.0, confidence)),
-        })
-    return clustered
 
 
 def assign_speakers_to_segments(

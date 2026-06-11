@@ -20,16 +20,10 @@ class GemmaClient:
         self.generator = generator
 
     def generate_json(self, prompt: str) -> dict[str, Any] | str:
-        """Run the configured Gemma generator or return an offline placeholder."""
-        if self.generator is not None:
-            return self.generator(prompt)
-        return {
-            "meeting_id": "",
-            "meeting_summary": "",
-            "events": [],
-            "uncertainty_note": "Gemma backend is not configured; used deterministic fallback.",
-            "prompt_length": len(prompt),
-        }
+        """Run the configured Gemma generator."""
+        if self.generator is None:
+            raise ValueError("GemmaClient has no generator configured")
+        return self.generator(prompt)
 
 
 class OllamaGemmaClient(GemmaClient):

@@ -4,8 +4,8 @@ import unittest
 
 from src.asr import MockASRAdapter, get_adapter
 from src.audio.vad import segment_waveform
-from src.candidates.generator import generate_candidates
-from src.diarization.speaker_assign import assign_speaker_to_segments
+from src.candidates.generator import generate_high_overlap_candidates
+from src.diarization import assign_speakers_to_segments
 from src.evaluation.qa_metrics import citation_rate, timestamp_citation_rate
 from src.evidence import build_metadata_segment, validate_evidence_segments
 from src.llm.json_repair import parse_or_repair_json
@@ -37,8 +37,8 @@ class ProjectStructureTests(unittest.TestCase):
         self.assertIsInstance(get_adapter("mock"), MockASRAdapter)
         self.assertEqual(route_segment(0.2), "low_overlap_cluster")
         self.assertTrue(callable(segment_waveform))
-        self.assertTrue(callable(generate_candidates))
-        self.assertTrue(callable(assign_speaker_to_segments))
+        self.assertTrue(callable(generate_high_overlap_candidates))
+        self.assertTrue(callable(assign_speakers_to_segments))
 
     def test_json_repair_handles_fences_and_trailing_comma(self) -> None:
         payload = parse_or_repair_json('```json\n{"meeting_id": "m1", "events": [],}\n```')

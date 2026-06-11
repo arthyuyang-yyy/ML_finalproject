@@ -6,10 +6,10 @@ from unittest.mock import patch
 from src.diarization import (
     DEFAULT_SPEAKER_CONFIDENCE,
     assign_speakers_to_segments,
-    cluster_speakers,
     diarize_with_pyannote,
     _best_speaker_for_segment,
 )
+from src.fallbacks.diarization import cluster_speakers
 
 
 class ClusterSpeakersTests(unittest.TestCase):

@@ -15,8 +15,6 @@ class PipelineConfig:
     overlap_threshold: float = DEFAULT_OVERLAP_THRESHOLD
     language: str = "und"
     low_overlap_asr_model: str = "auto"
-    high_overlap_asr_model: str = "faster-whisper"
-    embedding_backend: str = "auto"
     gemma_backend: str = "none"
     gemma_model: str = "gemma3:4b"
     gemma_base_url: str = "http://127.0.0.1:11434"

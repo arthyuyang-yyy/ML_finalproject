@@ -47,11 +47,23 @@
 | 低重叠路径 | `src/low_overlap.py` | 为低重叠片段产出稳定文本、speaker、时间戳、ASR 置信度和说话人置信度 |
 | ASR | `src/asr/core.py` | 可插拔适配器（Mock/WhisperX/Whisper/Paraformer），带校准置信度；低重叠重模型优先推荐 WhisperX |
 | 说话人日志 | `src/diarization/core.py` | 配置后使用 pyannote 说话人 turns；否则使用确定性 fallback |
-| 语音分离 | `src/speech_separation.py` | 分离接口（stub — 待模型集成） |
+| 语音分离 | （已移除） | 分离功能推迟到未来工作，采用独立适配器/后端接口 |
 | 高重叠路径 | `src/high_overlap.py` | 保留 mixed-speaker 记录，主转写为空，并保存多个候选 |
 | 候选生成 | `src/candidates/generator.py` | 使用 faster-whisper beam/temperature/language 变化生成多个转写/说话人假设；轻量运行时使用 fallback 候选 |
 | Evidence 构建 | `src/evidence/builder.py` | 合并低/高重叠结果，规范化候选，按时间排序并输出共享的 17 字段证据 schema |
-| Schema 验证 | `src/schema_validation.py` | 验证证据记录、候选结构和 meeting 列表 |
+| Schema 验证 | `src/evidence/validator.py` | 验证证据记录、候选结构和 meeting 列表 |
+### 回退后端（确定性轻量级后端）
+
+| 模块 | 文件 | 职责 |
+| --- | --- | --- |
+| ASR 回退 | `src/fallbacks/asr.py` | ASR 后端自动选择 |
+| 候选回退 | `src/fallbacks/candidates.py` | 保留不确定性的候选生成 |
+| 说话人日志回退 | `src/fallbacks/diarization.py` | 确定性说话人聚类 |
+| 重叠回退 | `src/fallbacks/overlap.py` | 基于能量的重叠估计 |
+| 事件回退 | `src/fallbacks/events.py` | 确定性会议事件提取 |
+| QA 回退 | `src/fallbacks/qa.py` | 基于证据引用的确定性 QA |
+| 嵌入回退 | `src/fallbacks/embeddings.py` | 基于哈希的字符 n-gram 嵌入 |
+
 ### Pipeline 编排
 
 | 模块 | 文件 | 职责 |

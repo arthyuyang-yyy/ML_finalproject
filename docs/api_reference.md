@@ -249,16 +249,14 @@ def build_metadata_segment(
 ) -> dict[str, Any]
 ```
 
-`src/metadata_builder.py` re-exports `build_metadata_segment()` for backward compatibility.
+`src/evidence/builder.py` exposes `build_metadata_segment()` and `build_evidence_segments()`.
 
-### `src/schema_validation.py`
+### `src/evidence/validator.py`
 
 ```python
-VALID_PROCESSING_PATHS = {"low_overlap_cluster", "high_overlap_candidate"}
-
-def validate_candidate(candidate: Any, index: int = 0) -> dict[str, Any]
 def validate_metadata_segment(record: Any) -> dict[str, Any]
 def validate_meeting(segments: Any) -> list[dict[str, Any]]
+def validate_candidate(candidate: Any, index: int = 0) -> dict[str, Any]
 ```
 
 ---

@@ -260,11 +260,9 @@ class EventValidationTests(unittest.TestCase):
 
 
 class GemmaClientTests(unittest.TestCase):
-    def test_generate_json_returns_placeholder(self) -> None:
-        result = GemmaClient().generate_json("test prompt")
-        self.assertIsInstance(result, dict)
-        self.assertIn("events", result)
-        self.assertEqual(result["events"], [])
+    def test_generate_json_raises_without_generator(self) -> None:
+        with self.assertRaisesRegex(ValueError, "no generator"):
+            GemmaClient().generate_json("test prompt")
 
     def test_configured_generator_is_used(self) -> None:
         client = GemmaClient(generator=lambda prompt: {"prompt": prompt})

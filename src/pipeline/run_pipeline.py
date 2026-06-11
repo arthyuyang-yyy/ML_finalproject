@@ -14,7 +14,7 @@ from src.low_overlap import process_low_overlap_segments
 from src.memory.episodic_store import build_episodes, upsert_episodes
 from src.overlap.detector import estimate_segment_overlap_scores
 from src.audio.preprocess import preprocess_audio, segment_waveform
-from src.schema_validation import validate_metadata_segment
+from src.evidence import validate_metadata_segment
 
 from .config import PipelineConfig
 from .io import ensure_meeting_dirs, write_json

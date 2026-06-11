@@ -5,7 +5,7 @@ This module turns audio into transcript text with timestamps and a calibrated
 pipeline should never hard-code one engine, because Chinese meetings are usually
 better served by Paraformer/FunASR while Whisper is stronger for multilingual or
 English audio, and disagreement between two engines is itself a useful
-uncertainty signal (see :mod:`src.candidate_generator`).
+uncertainty signal (see :mod:`src.candidates.generator`).
 
 Heavy backends (``whisper``, ``whisperx``, ``funasr``) are imported lazily inside
 each adapter so this module stays importable, and the unit tests run, without
@@ -28,16 +28,12 @@ The transcript-level result has the shape::
     }
 """
 
-import importlib.util
-import logging
 from typing import Any
 
 import numpy as np
 
 from src.audio.preprocess import TARGET_SAMPLE_RATE
 from src.utils import validate_score
-
-logger = logging.getLogger(__name__)
 
 
 def logprob_to_confidence(avg_logprob: float, no_speech_prob: float = 0.0) -> float:
@@ -279,24 +275,13 @@ _ADAPTERS: dict[str, type[ASRAdapter]] = {
     "paraformer": FunASRAdapter,
 }
 
-_AUTO_BACKENDS = (
-    ("whisperx", "whisperx"),
-    ("faster-whisper", "faster_whisper"),
-    ("funasr", "funasr"),
-    ("whisper", "whisper"),
-)
-
-
 def get_adapter(name: str = "mock", **kwargs: Any) -> ASRAdapter:
     """Build an ASR adapter by name (``mock``, ``whisperx``, ``whisper``, ``funasr``)."""
+    from src.fallbacks import resolve_asr_backend
+
     key = name.lower()
     if key == "auto":
-        key = next(
-            (backend for backend, module in _AUTO_BACKENDS if importlib.util.find_spec(module) is not None),
-            "mock",
-        )
-        if key == "mock":
-            logger.warning("No production ASR backend is installed; falling back to mock ASR")
+        key = resolve_asr_backend()
     if key not in _ADAPTERS:
         raise ValueError(f"unknown ASR adapter '{name}'; choose from {sorted(_ADAPTERS)}")
     return _ADAPTERS[key](**kwargs)
@@ -324,7 +309,7 @@ def transcribe_segments(
     Each input segment must carry ``start_time``/``end_time`` (as produced by
     :func:`src.audio.preprocess.segment_waveform`). The matching audio slice is
     transcribed and the result merged in, leaving the original keys intact so the
-    enriched segments can flow into :func:`src.metadata_builder.build_metadata_segment`.
+    enriched segments can flow into :func:`src.evidence.builder.build_metadata_segment`.
     """
     samples = np.asarray(samples, dtype=np.float32)
     enriched: list[dict[str, Any]] = []

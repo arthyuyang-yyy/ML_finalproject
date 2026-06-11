@@ -5,7 +5,7 @@ import unittest
 from src.llm.gemma_client import GemmaClient
 from src.qa.answerer import answer_question
 from src.qa.prompts import build_qa_prompt
-from src.rag_qa import answer_question_with_evidence
+from src.qa import answer_question_with_evidence
 
 
 def _episode(

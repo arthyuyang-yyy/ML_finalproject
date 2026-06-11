@@ -18,6 +18,8 @@ from src.asr import (
     get_adapter,
     logprob_to_confidence,
     transcribe_segments,
+)
+from src.asr.core import (
     _aggregate_confidence,
     _from_funasr_result,
     _from_whisper_result,

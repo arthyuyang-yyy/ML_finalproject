@@ -5,7 +5,7 @@ from typing import Any
 import numpy as np
 
 from .audio.preprocess import TARGET_SAMPLE_RATE
-from .candidate_generator import generate_high_overlap_candidates
+from .candidates.generator import generate_high_overlap_candidates
 
 HIGH_OVERLAP_PATH = "high_overlap_candidate"
 HIGH_OVERLAP_SPEAKER = "MIXED"
