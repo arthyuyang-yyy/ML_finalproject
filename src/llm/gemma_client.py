@@ -7,10 +7,13 @@ runtime target is fixed.
 
 from collections.abc import Callable
 import json
+import logging
+import os
 from typing import Any
 from urllib.request import Request, urlopen
 
 GemmaGenerator = Callable[[str], dict[str, Any] | str]
+logger = logging.getLogger(__name__)
 
 
 class GemmaClient:
@@ -67,4 +70,35 @@ def create_gemma_client(
     raise ValueError("gemma backend must be one of: none, ollama")
 
 
-__all__ = ["GemmaClient", "GemmaGenerator", "OllamaGemmaClient", "create_gemma_client"]
+def run_gemma(prompt: str, client: GemmaClient | None = None) -> str:
+    """Run a configured Gemma backend and return raw text.
+
+    When no backend is configured, or the configured backend is unavailable,
+    return an empty JSON object so callers can continue through their
+    deterministic evidence-only fallback.
+    """
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise ValueError("prompt must be a non-empty string")
+
+    configured = client or create_gemma_client(
+        os.environ.get("GEMMA_BACKEND", "none"),
+        model=os.environ.get("GEMMA_MODEL", "gemma3:4b"),
+        base_url=os.environ.get("GEMMA_BASE_URL", "http://127.0.0.1:11434"),
+    )
+    if configured is None:
+        return "{}"
+    try:
+        output = configured.generate_json(prompt)
+    except Exception as exc:
+        logger.warning("Gemma backend failed; using deterministic fallback: %s", exc)
+        return "{}"
+    return output if isinstance(output, str) else json.dumps(output, ensure_ascii=False)
+
+
+__all__ = [
+    "GemmaClient",
+    "GemmaGenerator",
+    "OllamaGemmaClient",
+    "create_gemma_client",
+    "run_gemma",
+]

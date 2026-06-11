@@ -34,10 +34,7 @@ acceptance criteria, schemas, and final deliverables are defined in
   confidence values, and an empty candidate list.
 - [x] Step 10 - High-overlap baseline preserving multiple ASR candidates and
   an uncertainty note instead of forcing one transcript.
-- [ ] Step 11 - Speech separation: removed placeholder stubs (`src/speech_separation.py`,
-  `src/candidates/separation_optional.py`). Future work will introduce an independent
-  adapter/backend interface with defined input/output protocols and acceptance criteria.
-  Pending: model selection, integration path, and evaluation metrics.
+- [ ] Step 11 - Optional speech separation baseline for high-overlap segments.
 - [x] Step 12 - Evidence-segment schema builder and validator.
 - [ ] Validate that every emitted `audio_clip_path` exists on disk.
 
@@ -67,7 +64,7 @@ acceptance criteria, schemas, and final deliverables are defined in
 - [x] Page 1 - Audio upload and Run Pipeline workflow.
 - [x] Page 2 - Timeline with speaker, route, overlap score, transcript, and
   uncertainty.
-- [x] Page 3 - High-overlap candidate drill-down.
+- [x] Page 3 - High-overlap candidate drill-down with audio playback.
 - [x] Page 4 - Structured meeting-memory view.
 - [x] Page 5 - Evidence-cited QA window with timestamp traceability.
 

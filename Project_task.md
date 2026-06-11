@@ -27,7 +27,7 @@ Overlap-aware Dual-path ASR with Episodic Memory for Multi-speaker Meeting Under
 系统支持用户上传一段会议音频，例如：
 
 ```text
-data/raw_audio/meeting_001.wav
+data/raw/meeting_001.wav
 ```
 
 音频可能包含：
@@ -281,8 +281,8 @@ Gemma 只基于这些 evidence 回答
 ├── main.py
 ├── requirements.txt
 ├── data/
-│   ├── raw_audio/
-│   ├── processed_audio/
+│   ├── raw/
+│   ├── processed/
 │   └── demo/
 ├── outputs/
 │   └── meeting_001/
@@ -296,6 +296,9 @@ Gemma 只基于这些 evidence 回答
 │       └── clips/
 ├── memory/
 │   ├── episodic_memory.json
+│   ├── semantic_memory.json
+│   ├── task_memory.json
+│   ├── reflection_memory.json
 │   └── vector_index/
 ├── src/
 │   ├── audio/
@@ -307,23 +310,17 @@ Gemma 只基于这些 evidence 回答
 │   │   └── router.py
 │   ├── asr/
 │   │   ├── whisper_backend.py
-│   │   └── funasr_backend.py
+│   │   └── sensevoice_backend.py
 │   ├── diarization/
-│   │   └── pyannote_backend.py
+│   │   ├── pyannote_backend.py
+│   │   └── speaker_assign.py
 │   ├── candidates/
-│   │   └── generator.py
+│   │   ├── generator.py
+│   │   └── separation_optional.py
 │   ├── evidence/
 │   │   ├── schema.py
 │   │   ├── builder.py
 │   │   └── validator.py
-│   ├── fallbacks/
-│   │   ├── asr.py
-│   │   ├── candidates.py
-│   │   ├── diarization.py
-│   │   ├── overlap.py
-│   │   ├── events.py
-│   │   ├── qa.py
-│   │   └── embeddings.py
 │   ├── llm/
 │   │   ├── gemma_client.py
 │   │   ├── prompts.py
@@ -374,7 +371,7 @@ def preprocess_audio(input_path: str, output_path: str, target_sr: int = 16000) 
 输入：
 
 ```text
-data/raw_audio/meeting_001.wav
+data/raw/meeting_001.wav
 ```
 
 输出：
@@ -579,7 +576,7 @@ def diarize_audio(audio_path: str) -> list[dict]:
 文件：
 
 ```text
-src/diarization/core.py
+src/diarization/speaker_assign.py
 ```
 
 目标：
@@ -589,7 +586,7 @@ src/diarization/core.py
 函数：
 
 ```python
-def assign_speakers_to_segments(segments: list[dict], diarization_turns=None) -> list[dict]:
+def assign_speaker_to_segments(segments: list[dict], diarization: list[dict]) -> list[dict]:
     """
     Assign speaker label and speaker_confidence based on time overlap.
     """
@@ -823,7 +820,7 @@ uncertainty_note 必须存在
 文件：
 
 ```text
-（Speech separation 占位代码已移除，待正式适配器接口定义后接入。）
+src/candidates/separation_optional.py
 ```
 
 目标：

@@ -358,7 +358,7 @@ Gemma sees only the supplied top-k episodes and must return JSON. The answer is 
 
 **QA answer shape:** `{"answer", "episode_ids", "evidence_ids", "citations", "speakers", "confidence", "uncertainty_note", "insufficient_evidence", "question"}`
 
-### `src/qa/answerer.py`
+### `src/rag_qa.py`
 
 Compatibility facade exporting `retrieve_relevant_memory()` and `answer_question_with_evidence()` for existing callers.
 

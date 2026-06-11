@@ -47,7 +47,7 @@
 | 低重叠路径 | `src/low_overlap.py` | 为低重叠片段产出稳定文本、speaker、时间戳、ASR 置信度和说话人置信度 |
 | ASR | `src/asr/core.py` | 可插拔适配器（Mock/WhisperX/Whisper/Paraformer），带校准置信度；低重叠重模型优先推荐 WhisperX |
 | 说话人日志 | `src/diarization/core.py` | 配置后使用 pyannote 说话人 turns；否则使用确定性 fallback |
-| 语音分离 | （已移除） | 分离功能推迟到未来工作，采用独立适配器/后端接口 |
+| 语音分离 | `src/speech_separation.py` | 兼容接口与占位实现，等待模型集成 |
 | 高重叠路径 | `src/high_overlap.py` | 保留 mixed-speaker 记录，主转写为空，并保存多个候选 |
 | 候选生成 | `src/candidates/generator.py` | 使用 faster-whisper beam/temperature/language 变化生成多个转写/说话人假设；轻量运行时使用 fallback 候选 |
 | Evidence 构建 | `src/evidence/builder.py` | 合并低/高重叠结果，规范化候选，按时间排序并输出共享的 17 字段证据 schema |

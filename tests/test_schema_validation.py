@@ -9,8 +9,8 @@ import json
 import unittest
 from pathlib import Path
 
-from src.evidence import build_metadata_segment
-from src.evidence.validator import (
+from src.metadata_builder import build_metadata_segment
+from src.schema_validation import (
     validate_candidate,
     validate_meeting,
     validate_metadata_segment,

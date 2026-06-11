@@ -8,6 +8,7 @@ from src.ui.gradio_app import (
     build_app,
     build_memory_rows,
     build_timeline_rows,
+    candidate_audio_path,
     candidate_detail,
     prepare_demo_data,
     run_demo_pipeline,
@@ -83,6 +84,13 @@ class GradioAdapterTests(unittest.TestCase):
             "SPEAKER_00: Use Gemma for post-processing.",
         )
 
+    def test_candidate_audio_path_returns_traceable_clip(self) -> None:
+        state = {"evidence_segments": [_low_segment(), _high_segment()]}
+        self.assertEqual(
+            candidate_audio_path("m1_seg_013", state),
+            "outputs/meeting_001/clips/m1_seg_013.wav",
+        )
+
     def test_memory_table_contains_traceable_fields(self) -> None:
         self.assertEqual(
             build_memory_rows([_episode()]),
@@ -150,6 +158,7 @@ class GradioAdapterTests(unittest.TestCase):
         labels = {component.get("props", {}).get("label") for component in config["components"]}
         self.assertIn("Meeting audio", labels)
         self.assertIn("High-overlap segment", labels)
+        self.assertIn("High-overlap audio", labels)
         self.assertIn("Candidate detail", labels)
         self.assertIn("Question", labels)
 

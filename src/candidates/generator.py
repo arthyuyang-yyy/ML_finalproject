@@ -156,6 +156,9 @@ def _load_faster_whisper_model(model_name: str, device: str, compute_type: str) 
     return WhisperModel(model_name, device=device, compute_type=compute_type)
 
 
+generate_candidates = generate_high_overlap_candidates
+
+
 def _decode_note(config: dict[str, Any], backend: str) -> str:
     """Human-readable uncertainty note for one candidate."""
     language = config.get("language") or "auto"
