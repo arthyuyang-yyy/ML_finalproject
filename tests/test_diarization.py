@@ -6,10 +6,11 @@ from unittest.mock import patch
 from src.diarization import (
     DEFAULT_SPEAKER_CONFIDENCE,
     assign_speakers_to_segments,
-    cluster_speakers,
     diarize_with_pyannote,
     _best_speaker_for_segment,
 )
+from src.fallbacks.diarization import cluster_speakers
+from src.errors import BackendExecutionError, BackendUnavailableError
 
 
 class ClusterSpeakersTests(unittest.TestCase):
@@ -20,7 +21,17 @@ class ClusterSpeakersTests(unittest.TestCase):
         self.assertIsNone(result)
         self.assertIn("no Hugging Face token", " ".join(captured.output))
 
-    def test_alternates_speaker_labels(self) -> None:
+    @patch("src.diarization.core.load_pyannote_pipeline", side_effect=RuntimeError("model denied"))
+    def test_configured_model_loading_failure_is_reported(self, _mocked_load) -> None:
+        with self.assertRaisesRegex(BackendExecutionError, "diarization failed"):
+            diarize_with_pyannote("missing.wav", auth_token="token")
+
+    @patch("src.diarization.core.load_pyannote_pipeline", side_effect=ImportError("missing"))
+    def test_configured_missing_dependency_is_reported(self, _mocked_load) -> None:
+        with self.assertRaisesRegex(BackendUnavailableError, "pyannote.audio is unavailable"):
+            diarize_with_pyannote("missing.wav", auth_token="token")
+
+    def test_marks_speakers_unknown_without_diarization(self) -> None:
         segments = [
             {"segment_id": "s1", "start_time": 0.0, "end_time": 1.0},
             {"segment_id": "s2", "start_time": 1.0, "end_time": 2.0},
@@ -28,9 +39,21 @@ class ClusterSpeakersTests(unittest.TestCase):
         ]
         clustered = cluster_speakers(segments)
         self.assertEqual(len(clustered), 3)
-        self.assertEqual(clustered[0]["speaker"], "SPEAKER_00")
-        self.assertEqual(clustered[1]["speaker"], "SPEAKER_01")
-        self.assertEqual(clustered[2]["speaker"], "SPEAKER_00")
+        self.assertTrue(all(segment["speaker"] == "UNKNOWN" for segment in clustered))
+
+    def test_assignment_uses_coverage_threshold_and_mixed_label(self) -> None:
+        segments = [
+            {"segment_id": "dominant", "start_time": 0.0, "end_time": 10.0},
+            {"segment_id": "mixed", "start_time": 10.0, "end_time": 20.0},
+            {"segment_id": "unknown", "start_time": 20.0, "end_time": 30.0},
+        ]
+        turns = [
+            {"speaker": "A", "start_time": 0.0, "end_time": 8.0},
+            {"speaker": "A", "start_time": 10.0, "end_time": 15.0},
+            {"speaker": "B", "start_time": 15.0, "end_time": 20.0},
+        ]
+        assigned = assign_speakers_to_segments(segments, turns)
+        self.assertEqual([item["speaker"] for item in assigned], ["A", "MIXED", "UNKNOWN"])
 
     def test_preserves_existing_speaker_when_present(self) -> None:
         segments = [{"segment_id": "s1", "speaker": "ALICE", "start_time": 0.0, "end_time": 1.0}]

@@ -1,22 +1,27 @@
 """BM25 and embedding hybrid retrieval over episodic memory."""
 
-import hashlib
 import json
+import logging
 import math
 import re
 from collections import Counter
 from collections.abc import Sequence
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Protocol
 
+from ..fallbacks.embeddings import HashingEmbeddingBackend
 from .episodic_store import DEFAULT_MEMORY_PATH, read_episodes
+
+logger = logging.getLogger(__name__)
 
 EMBEDDING_WEIGHT = 0.45
 KEYWORD_WEIGHT = 0.25
 IMPORTANCE_WEIGHT = 0.15
 RECENCY_WEIGHT = 0.10
 OVERLAP_PENALTY_WEIGHT = 0.20
+SEMANTIC_RELEVANCE_THRESHOLD = 0.25
 
 INDEX_FIELDS = ("content", "topic", "event_type", "speakers", "evidence_text")
 
@@ -36,6 +41,12 @@ QUERY_EXPANSIONS = {
     "who": ["speaker", "owner"],
 }
 
+RELEVANCE_QUERY_EXPANSIONS = {
+    trigger: terms
+    for trigger, terms in QUERY_EXPANSIONS.items()
+    if trigger not in {"question", "who"}
+}
+
 
 class EmbeddingBackend(Protocol):
     """Minimal embedding interface accepted by the hybrid retriever."""
@@ -44,40 +55,17 @@ class EmbeddingBackend(Protocol):
         """Encode texts into equal-length vectors."""
 
 
-class HashingEmbeddingBackend:
-    """Dependency-free multilingual character n-gram embedding baseline."""
-
-    def __init__(self, dimensions: int = 384) -> None:
-        if dimensions <= 0:
-            raise ValueError("embedding dimensions must be positive")
-        self.dimensions = dimensions
-
-    def encode(self, texts: Sequence[str]) -> list[list[float]]:
-        return [self._encode_one(text) for text in texts]
-
-    def _encode_one(self, text: str) -> list[float]:
-        vector = [0.0] * self.dimensions
-        features = _embedding_features(text)
-        for feature in features:
-            digest = hashlib.blake2b(feature.encode("utf-8"), digest_size=8).digest()
-            value = int.from_bytes(digest, "big")
-            index = value % self.dimensions
-            sign = 1.0 if value & 1 else -1.0
-            vector[index] += sign
-        return _normalize_vector(vector)
-
-
 class SentenceTransformerEmbeddingBackend:
     """Optional semantic embedding backend loaded only when requested."""
 
     def __init__(self, model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2") -> None:
         try:
-            from sentence_transformers import SentenceTransformer
+            import sentence_transformers  # noqa: F401 - availability check
         except ImportError as exc:
             raise ImportError(
                 "Install sentence-transformers to use the semantic embedding backend."
             ) from exc
-        self.model = SentenceTransformer(model_name)
+        self.model = _load_sentence_transformer(model_name)
 
     def encode(self, texts: Sequence[str]) -> list[list[float]]:
         vectors = self.model.encode(list(texts), normalize_embeddings=True)
@@ -91,6 +79,10 @@ def retrieve_episodes(
     top_k: int = 5,
     embedding_backend: EmbeddingBackend | None = None,
     min_score: float = 0.0,
+    meeting_id: str | None = None,
+    speaker: str | None = None,
+    start_time: float | None = None,
+    end_time: float | None = None,
 ) -> list[dict[str, Any]]:
     """Retrieve episodes with BM25 + embedding hybrid scoring.
 
@@ -106,14 +98,17 @@ def retrieve_episodes(
         raise ValueError("min_score must be non-negative")
 
     records = list(episodes if episodes is not None else _read_episodes(path))
+    records = _filter_episodes(records, meeting_id, speaker, start_time, end_time)
     if not records:
         return []
 
     query_text = _expand_query(question)
     documents = [_index_text(episode) for episode in records]
     keyword_scores = _normalized_bm25_scores(query_text, documents)
+    relevance_query = _expand_query(question, expansions=RELEVANCE_QUERY_EXPANSIONS)
+    lexical_matches = [_has_lexical_overlap(relevance_query, document) for document in documents]
 
-    backend = embedding_backend or HashingEmbeddingBackend()
+    backend = embedding_backend or _default_embedding_backend()
     vectors = backend.encode([query_text, *documents])
     if len(vectors) != len(documents) + 1:
         raise ValueError("embedding backend returned an unexpected number of vectors")
@@ -142,7 +137,7 @@ def retrieve_episodes(
             "overlap_penalty": round(overlap_penalty, 6),
             "embedding_backend": type(backend).__name__,
         }
-        if final_score >= min_score:
+        if _is_relevant(lexical_matches[index], embedding_scores[index], backend) and final_score >= min_score:
             ranked.append((final_score, result))
 
     ranked.sort(
@@ -155,6 +150,63 @@ def retrieve_episodes(
         reverse=True,
     )
     return [episode for _, episode in ranked[:top_k]]
+
+
+@lru_cache(maxsize=2)
+def _load_sentence_transformer(model_name: str) -> Any:
+    from sentence_transformers import SentenceTransformer
+
+    return SentenceTransformer(model_name)
+
+
+def _default_embedding_backend() -> EmbeddingBackend:
+    try:
+        return SentenceTransformerEmbeddingBackend()
+    except (ImportError, OSError) as exc:
+        logger.info("sentence-transformers unavailable; using hashing embeddings: %s", exc)
+        return HashingEmbeddingBackend()
+
+
+def _filter_episodes(
+    episodes: list[dict[str, Any]],
+    meeting_id: str | None,
+    speaker: str | None,
+    start_time: float | None,
+    end_time: float | None,
+) -> list[dict[str, Any]]:
+    if start_time is not None and end_time is not None and end_time < start_time:
+        raise ValueError("end_time filter must be greater than or equal to start_time")
+    filtered: list[dict[str, Any]] = []
+    for episode in episodes:
+        if meeting_id and str(episode.get("meeting_id", "")) != meeting_id:
+            continue
+        if speaker and speaker not in {str(value) for value in episode.get("speakers", [])}:
+            continue
+        episode_start = float(episode.get("start_time", 0.0))
+        episode_end = float(episode.get("end_time", episode_start))
+        if start_time is not None and episode_end < start_time:
+            continue
+        if end_time is not None and episode_start > end_time:
+            continue
+        filtered.append(episode)
+    return filtered
+
+
+def _is_relevant(
+    lexical_match: bool,
+    embedding_score: float,
+    backend: EmbeddingBackend,
+) -> bool:
+    """Reject unrelated memories before importance and recency affect ranking."""
+    if lexical_match:
+        return True
+    if isinstance(backend, HashingEmbeddingBackend):
+        return False
+    return embedding_score >= SEMANTIC_RELEVANCE_THRESHOLD
+
+
+def _has_lexical_overlap(question: str, document: str) -> bool:
+    return bool(set(_tokenize(question)) & set(_tokenize(document)))
 
 
 def _index_text(episode: dict[str, Any]) -> str:
@@ -210,19 +262,10 @@ def _tokenize(text: str) -> list[str]:
     return latin_tokens + cjk_tokens
 
 
-def _embedding_features(text: str) -> list[str]:
-    normalized = re.sub(r"\s+", " ", text.lower().strip())
-    compact = re.sub(r"\s+", "", normalized)
-    features = _tokenize(normalized)
-    for size in (2, 3):
-        features.extend(compact[index : index + size] for index in range(max(0, len(compact) - size + 1)))
-    return features
-
-
-def _expand_query(question: str) -> str:
+def _expand_query(question: str, expansions: dict[str, list[str]] = QUERY_EXPANSIONS) -> str:
     expanded = [question]
     lowered = question.lower()
-    for trigger, terms in QUERY_EXPANSIONS.items():
+    for trigger, terms in expansions.items():
         if trigger in lowered:
             expanded.extend(terms)
     return " ".join(expanded)
@@ -272,11 +315,6 @@ def _cosine_similarity(left: Sequence[float], right: Sequence[float]) -> float:
     if left_norm == 0.0 or right_norm == 0.0:
         return 0.0
     return sum(a * b for a, b in zip(left, right)) / (left_norm * right_norm)
-
-
-def _normalize_vector(vector: list[float]) -> list[float]:
-    norm = math.sqrt(sum(value * value for value in vector))
-    return [value / norm for value in vector] if norm else vector
 
 
 def _unit_score(value: Any, name: str) -> float:

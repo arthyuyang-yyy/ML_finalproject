@@ -52,7 +52,9 @@
 ```text
 .
 ├── docs/                  # 双语研究设计、系统架构与实验计划
-├── data/                  # 原始/处理后音频、标注模板与测试 fixture
+├── data/
+│   ├── raw_audio/         # 原始会议音频
+│   └── processed_audio/   # 预处理/派生音频
 ├── outputs/               # 生成结果，除占位文件外不纳入 Git
 ├── src/                   # 模块化 pipeline 实现
 │   ├── audio/             # 音频预处理、归一化、导出与 clip 输出
@@ -63,8 +65,9 @@
 │   ├── memory/            # 情景记忆 facade
 │   ├── qa/                # 问答 facade
 │   ├── candidates/        # 候选生成 facade
+│   ├── fallbacks/         # 确定性轻量回退后端
 │   └── ui/                # Gradio 交互演示
-├── tests/                 # 单元测试（75 项）
+├── tests/                 # 单元测试与集成测试
 ├── app.py                 # Gradio 交互演示入口
 ├── main.py                # 命令行 pipeline 入口
 ├── README.md
@@ -139,7 +142,7 @@
 - Gemma 仅基于 top-k Episode 回答，并校验证据 ID、时间戳、说话人和不确定性；
 - 基于 Gradio 的交互式 UI 演示；
 - 端到端 pipeline 编排（`src/pipeline/run_pipeline.py`）；
-- 75 项单元测试覆盖已实现基础设施。
+- 自动化测试覆盖已实现的基础设施、运行时后端、检索、记忆、QA 与评估。
 
 正式实验前仍需完成：
 

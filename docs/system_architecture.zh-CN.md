@@ -12,7 +12,7 @@
   -> load_audio
   -> segment_waveform（基于能量的 VAD，含段落合并与分割）
   -> estimate_segment_overlap_scores
-       -> pyannote OSD（如有 HF_TOKEN）
+       -> pyannote OSD（如有 HF_TOKEN；配置后失败将明确报错）
        -> 显式重叠区域
        -> 能量 fallback（保守，上限 0.39）
   -> route_segment（阈值 0.4）
@@ -42,16 +42,28 @@
 | --- | --- | --- |
 | 预处理 | `src/audio/preprocess.py` | 加载、单声道转换、polyphase 重采样、峰值归一化、VAD 分段、导出 float32 WAV |
 | Clip 导出 | `src/audio/clipper.py` | 将每个证据片段导出为 WAV clip |
-| 重叠检测 | `src/overlap_detector.py` | 评分重叠：pyannote OSD 适配器（优先）、显式区域覆盖或能量 fallback（上限 0.39） |
-| 双路径路由 | `src/dual_path_router.py` | 按重叠阈值（默认 0.4）路由片段 |
+| 重叠检测 | `src/overlap/detector.py` | 评分重叠：pyannote OSD 适配器（优先）、显式区域覆盖或能量 fallback（上限 0.39） |
+| 双路径路由 | `src/overlap/router.py` | 按重叠阈值（默认 0.4）路由片段 |
 | 低重叠路径 | `src/low_overlap.py` | 为低重叠片段产出稳定文本、speaker、时间戳、ASR 置信度和说话人置信度 |
-| ASR | `src/asr.py` | 可插拔适配器（Mock/WhisperX/Whisper/Paraformer），带校准置信度；低重叠重模型优先推荐 WhisperX |
-| 说话人日志 | `src/diarization.py` | 配置后使用 pyannote 说话人 turns；否则使用确定性 fallback |
-| 语音分离 | `src/speech_separation.py` | 分离接口（stub — 待模型集成） |
+| ASR | `src/asr/core.py` | 可插拔适配器（Mock/WhisperX/Whisper/Paraformer），带校准置信度；低重叠重模型优先推荐 WhisperX |
+| 说话人日志 | `src/diarization/core.py` | 配置后使用 pyannote 说话人 turns；否则使用确定性 fallback |
+| 语音分离 | `src/speech_separation.py` | 兼容接口与占位实现，等待模型集成 |
 | 高重叠路径 | `src/high_overlap.py` | 保留 mixed-speaker 记录，主转写为空，并保存多个候选 |
-| 候选生成 | `src/candidate_generator.py` | 使用 faster-whisper beam/temperature/language 变化生成多个转写/说话人假设；轻量运行时使用 fallback 候选 |
+| 候选生成 | `src/candidates/generator.py` | 使用 faster-whisper beam/temperature/language 变化生成多个转写/说话人假设；轻量运行时使用 fallback 候选 |
 | Evidence 构建 | `src/evidence/builder.py` | 合并低/高重叠结果，规范化候选，按时间排序并输出共享的 17 字段证据 schema |
-| Schema 验证 | `src/schema_validation.py` | 验证证据记录、候选结构和 meeting 列表 |
+| Schema 验证 | `src/evidence/validator.py` | 验证证据记录、候选结构和 meeting 列表 |
+### 回退后端（确定性轻量级后端）
+
+| 模块 | 文件 | 职责 |
+| --- | --- | --- |
+| ASR 回退 | `src/fallbacks/asr.py` | ASR 后端自动选择 |
+| 候选回退 | `src/fallbacks/candidates.py` | 保留不确定性的候选生成 |
+| 说话人日志回退 | `src/fallbacks/diarization.py` | 确定性说话人聚类 |
+| 重叠回退 | `src/fallbacks/overlap.py` | 基于能量的重叠估计 |
+| 事件回退 | `src/fallbacks/events.py` | 确定性会议事件提取 |
+| QA 回退 | `src/fallbacks/qa.py` | 基于证据引用的确定性 QA |
+| 嵌入回退 | `src/fallbacks/embeddings.py` | 基于哈希的字符 n-gram 嵌入 |
+
 ### Pipeline 编排
 
 | 模块 | 文件 | 职责 |
@@ -81,7 +93,7 @@
 
 | 模块 | 文件 | 职责 |
 | --- | --- | --- |
-| 评估 | `src/evaluation.py` | WER、CER、重叠路由指标、说话人归属准确率、证据质量（stub） |
+| 评估 | `src/evaluation/core.py` | WER、CER、重叠路由指标、说话人归属准确率、证据质量（stub） |
 | 数据合成 | `src/data_synthesis.py` | 可控双人重叠语音合成，含 SNR 和真值标注 |
 | 工具 | `src/utils.py` | `validate_score()` |
 

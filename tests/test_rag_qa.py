@@ -114,6 +114,14 @@ class AnswerWithEvidenceTests(unittest.TestCase):
         result = answer_question("谁负责测试？", [_episode()], client=client)
         self.assertEqual(result["timestamp"], "60.200-68.400s")
 
+    def test_backend_failure_triggers_safe_fallback(self) -> None:
+        def fail(_: str) -> dict:
+            raise ConnectionError("backend unavailable")
+
+        result = answer_question("谁负责测试？", [_episode()], client=GemmaClient(generator=fail))
+        self.assertEqual(result["evidence_ids"], ["m1_seg_012"])
+        self.assertIn("60.200-68.400s", result["answer"])
+
     def test_invented_speaker_triggers_safe_fallback(self) -> None:
         invalid = _valid_model_answer()
         invalid["answer"] = invalid["answer"].replace("SPEAKER_01", "SPEAKER_99")

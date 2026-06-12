@@ -10,7 +10,7 @@
 
 将预测的 `low_overlap_cluster` 和 `high_overlap_candidate` 路由与人工重叠标签比较。
 
-**指标**（实现于 `src/evaluation.py` — `evaluate_overlap_routing()`）：
+**指标**（实现于 `src/evaluation/core.py` — `evaluate_overlap_routing()`）：
 
 - **准确率 (Accuracy)**：`(TP + TN) / total`
 - **精确率 (Precision)**：`TP / (TP + FP)`
@@ -19,7 +19,7 @@
 
 正类 = `high_overlap_candidate`。报告不同阈值下的下游成本与质量权衡。
 
-**检测器选项**（实现于 `src/overlap_detector.py`）：
+**检测器选项**（实现于 `src/overlap/detector.py`）：
 - pyannote OSD（需 `HF_TOKEN` 和 `pip install pyannote.audio`）
 - 能量 fallback（始终可用，上限 0.39）
 
@@ -29,14 +29,14 @@
 
 比较候选输出与强制单一转写。
 
-**指标**（相关函数已实现于 `src/evaluation.py`）：
+**指标**（相关函数已实现于 `src/evaluation/core.py`）：
 
 - Oracle 候选 WER：top-K 候选中最佳 WER 对比参考
 - Top-1 WER：最高置信度候选的 WER
 - 说话人假设覆盖率：至少一位候选命中正确说话人的片段比例
 - 候选有效性：人工评定有用信息是否能在模糊重叠区域中保留
 
-**候选生成基线**（实现于 `src/high_overlap.py` 与 `src/candidate_generator.py`）：高重叠主记录保持 mixed/空转写，候选由 faster-whisper 多参数解码生成（beam size、temperature、language）。如未安装 faster-whisper，则输出显式 fallback 候选以保留同一套不确定性 schema。
+**候选生成基线**（实现于 `src/high_overlap.py` 与 `src/candidates/generator.py`）：高重叠主记录保持 mixed/空转写，候选由 faster-whisper 多参数解码生成（beam size、temperature、language）。如未安装 faster-whisper，则输出显式 fallback 候选以保留同一套不确定性 schema。
 
 **状态：** 候选接口已实现。oracle/top-1 WER 和人工评定需标注数据。
 
@@ -50,7 +50,7 @@
 
 **指标：**
 - 纠错质量（原始转写与纠正后转写的 WER）
-- 说话人归属准确率（`speaker_attribution_accuracy()` in `src/evaluation.py`）
+- 说话人归属准确率（`speaker_attribution_accuracy()` in `src/evaluation/core.py`）
 - 不确定性保留质量（不确定片段是否仍被标记）
 - 决策提取准确性
 - 行动项提取准确性
@@ -86,7 +86,7 @@
 
 评估回答、决策和行动项是否得到带时间戳证据的支持。
 
-**指标**（接口定义于 `src/evaluation.py` — `evaluate_evidence_support()`，当前为 stub）：
+**指标**（接口定义于 `src/evaluation/core.py` — `evaluate_evidence_support()`，当前为 stub）：
 
 - 证据精确率：引用证据中正确的比例
 - 证据召回率：正确声明中引用证据的比例
@@ -98,7 +98,7 @@
 
 ## 评估函数参考
 
-| 指标 | 函数 (`src/evaluation.py`) | 状态 |
+| 指标 | 函数 (`src/evaluation/core.py`) | 状态 |
 |------|--------------------------|------|
 | 编辑距离 | `edit_distance()` | 已实现 |
 | 词错误率 (WER) | `word_error_rate()` | 已实现 |
