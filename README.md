@@ -158,41 +158,49 @@ Episodes support:
 | 2. High-overlap candidates | Compare candidate generation with forced single-output transcription | Candidate interface implemented; formal experiment pending |
 | 3. Metadata-aware LLM | Compare plain-text, speaker-aware, and full-metadata LLM post-processing | LLM event extraction implemented; metadata-input ablation pending |
 | 4. Episodic Memory QA | Compare summary QA, transcript RAG, and speaker-aware memory QA | Event-grouped storage, hybrid retrieval, filters, and baseline evidence-backed QA implemented; formal experiment pending |
-| 5. Hallucination and evidence | Measure hallucination rate and timestamped evidence hit rate | Evidence precision/recall/F1, hit rate, hallucination, abstention, and confidence-calibration metrics implemented; formal experiment pending |
+| 5. Hallucination and evidence | Measure hallucination rate and timestamped evidence hit rate | Basic citation-rate metrics exist; full evidence-support and hallucination scoring remains a stub |
 
 Full details are in [docs/experiment_plan.md](docs/experiment_plan.md).
 
 ## Current Status
 
-The project is currently in the **baseline infrastructure stage**. Formal experiment results have not been produced yet.
+The project is currently in the **runnable baseline and formal-experiment preparation stage**. Formal experiment results have not been produced yet.
 
-Completed:
+Implemented and runnable:
 
 - bilingual research design, architecture, innovation points, and experiment plan;
 - shared evidence-packet metadata schema (17 fields), validation rules, and sample meeting fixture;
 - audio loading, mono conversion, polyphase resampling, peak normalization, and energy-based VAD segmentation (with merging and splitting);
 - audio clip export per evidence segment (`src/audio/clipper.py`);
 - controlled two-speaker overlap synthesis with SNR control and ground-truth overlap annotations;
-- objective WER, CER, overlap-routing classification, best-mapping speaker-attribution, evidence-support, hallucination, abstention, and confidence-calibration metrics;
+- objective WER, CER, overlap-routing classification, best-mapping speaker-attribution, citation-rate, and timestamp-citation-rate metrics;
 - configurable ASR adapters (auto/WhisperX/faster-whisper/Whisper/FunASR/mock) with calibrated confidence;
 - overlap scoring that fuses pyannote OSD, diarization overlap, speaker changes, optional ASR instability, and a conservative energy fallback;
 - dual-path routing (threshold 0.4), low-overlap ASR + speaker-attribution path, and high-overlap candidate generation without forcing one transcript;
-- metadata construction, schema validation, and deterministic evidence-linked LLM event extraction fallback;
-- event-grouped episodic memory creation, JSONL persistence, semantic/lexical retrieval, relevance gating, and meeting/speaker/time filters;
+- metadata construction, schema validation, evidence-only JSON prompts, LLM output repair/validation, and deterministic evidence-linked event fallback;
+- event-grouped episodic memory creation, atomic JSON persistence, semantic/lexical retrieval, relevance gating, and meeting/speaker/time filters;
 - baseline evidence-backed QA with evidence IDs, timestamps, confidence, uncertainty, and retrieval metadata;
-- complete Gradio workflow with selectable ASR/Gemma backends, timeline, candidates, long-term memory, and QA;
+- a five-area Gradio workflow with selectable ASR/Gemma backends, timeline, candidates, long-term memory, and QA;
 - end-to-end pipeline orchestration (`src/pipeline/run_pipeline.py`);
 - automated tests covering the pipeline, runtime backends, retrieval filters, memory, QA, and evaluation.
 
-Pending before formal experiments:
+Current run capability:
+
+- the lightweight dependency set can run the complete CLI pipeline from WAV input to per-meeting artifacts, episodic memory, and evidence-backed fallback QA;
+- without optional heavy models, `auto` ASR uses Mock ASR, diarization/overlap/event extraction/QA use deterministic fallbacks, and output is suitable for integration validation rather than recognition-quality claims;
+- real WhisperX/faster-whisper/Whisper/FunASR, pyannote, sentence-transformers, Ollama Gemma, and Gradio require their optional dependencies, model access, tokens, or services.
+
+Pending before the project can claim full experimental completion:
 
 - manually annotated evaluation split;
 - overlap-threshold calibration and routing experiments against human labels;
-- real heavy-model runs and accuracy comparisons for WhisperX, Whisper, FunASR, pyannote, and optional speech separation;
-- additional Gemma backends beyond the implemented Ollama adapter;
-- metadata-input ablations, Episodic Memory QA comparisons, and uncertainty/candidate-usefulness evaluation.
+- optional speech-separation implementation and validation that every emitted clip path exists;
+- real heavy-model runs and accuracy comparisons for WhisperX, faster-whisper, Whisper, FunASR, pyannote, and Ollama Gemma;
+- formal validation of decision/action-item/deadline extraction;
+- full evidence-support, hallucination, uncertainty-preservation, and candidate-usefulness metrics;
+- metadata-input ablations, Episodic Memory QA comparisons, and the planned formal experiments.
 
-Current verification note: run `python3 -m pytest -q` for the current test count. Heavy models remain optional; install them with `requirements-heavy.txt`. Runtime models are loaded lazily and cached per process.
+Verified on June 12, 2026 with the lightweight virtual environment: `258` unit/integration tests passed and `1` optional Gradio component test was skipped because Gradio was not installed. A lightweight end-to-end smoke run completed successfully. Heavy models remain optional and are loaded lazily.
 
 ## How to Run
 
@@ -269,15 +277,23 @@ Keep large audio files, model weights, and generated outputs outside Git.
 
 ## 当前进度
 
-项目处于**基础设施与基线准备阶段**，已有可运行的端到端 pipeline（`src/pipeline/run_pipeline.py`），尚未产生正式实验结果。当前测试数量以 `python3 -m pytest -q` 输出为准。
+项目处于**可运行基线与正式实验准备阶段**。轻量依赖环境已经能够从 WAV 输入完整运行到证据片段、会议事件、Episodic Memory 和证据问答，但尚未产生真实重模型与人工标注数据上的正式实验结果。
 
 已完成：
 - pipeline 编排、音频预处理、VAD、音频切片、重叠检测（pyannote OSD + 能量 fallback）、双路径路由、ASR 适配器、高重叠候选生成、元数据构建与 schema 验证；
-- 按事件分组的 Episodic Memory、JSONL 持久化、语义/词法检索、相关性门槛、重要性/时间/重叠联合排序，以及会议/说话人/时间过滤；
-- 基于证据的基础 QA，以及证据 precision/recall/F1、命中率、幻觉率、正确拒答率和置信度校准指标；
-- 确定性 LLM 事件提取 fallback 和 Gradio 演示骨架。
+- evidence-only JSON Prompt、LLM 输出修复与校验、确定性事件提取 fallback；
+- 按事件分组的 Episodic Memory、原子 JSON 持久化、混合检索与会议/说话人/时间过滤；
+- 引用 evidence ID 与时间戳、保留不确定性并拒绝无证据回答的 QA；
+- 五区 Gradio 工作流和端到端 CLI Pipeline；
+- WER、CER、重叠路由、说话人归属、引用率和时间戳引用率等基础指标。
 
-正式实验前仍需：人工标注评估集、重叠阈值校准、真实重模型运行与对比、真实 Gemma 后端和严格 JSON 修复、完整 Gradio 页面，以及元信息/Memory QA/不确定性消融实验。
+当前可运行程度：
+- 仅安装轻量依赖时可以完整运行 Pipeline，但会使用 Mock ASR 与确定性 fallback，适合验证系统流程，不代表真实识别效果；
+- 配置可选依赖、模型、Hugging Face token 和 Ollama 服务后，可切换真实 ASR、pyannote、Gemma 与 Gradio。
+
+正式实验前仍需：人工标注评估集、重叠阈值校准、语音分离、音频 clip 路径存在性校验、真实重模型对比、正式事件抽取验证、完整证据支持/幻觉指标，以及计划中的消融和对比实验。
+
+2026 年 6 月 12 日验证：轻量环境下 `258` 个测试通过，`1` 个可选 Gradio 组件测试因未安装 Gradio 跳过；轻量端到端 smoke run 成功。
 
 ## 运行方式
 
