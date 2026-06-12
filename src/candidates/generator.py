@@ -6,7 +6,6 @@ settings, then keeps distinct transcript/speaker hypotheses as candidates.
 """
 
 import os
-import tempfile
 from functools import lru_cache
 from typing import Any
 
@@ -61,7 +60,6 @@ def _generate_with_faster_whisper(
 ) -> list[dict]:
     """Run faster-whisper with multiple decode settings when available."""
     try:
-        import soundfile as sf
         import faster_whisper  # noqa: F401 - availability check
     except ImportError:
         return []
@@ -78,42 +76,40 @@ def _generate_with_faster_whisper(
     segment_id = str(segment.get("segment_id") or segment.get("evidence_id") or "segment")
     seen_text: set[str] = set()
     candidates: list[dict] = []
-    with tempfile.NamedTemporaryFile(suffix=".wav") as tmp:
-        sf.write(tmp.name, samples, sample_rate, subtype="FLOAT")
-        for config in decode_configs:
-            try:
-                decoded_segments, _ = model.transcribe(
-                    tmp.name,
-                    beam_size=int(config["beam_size"]),
-                    temperature=float(config["temperature"]),
-                    language=config.get("language"),
-                )
-                decoded = list(decoded_segments)
-            except Exception:
-                continue
+    for config in decode_configs:
+        try:
+            decoded_segments, _ = model.transcribe(
+                samples,
+                beam_size=int(config["beam_size"]),
+                temperature=float(config["temperature"]),
+                language=config.get("language"),
+            )
+            decoded = list(decoded_segments)
+        except Exception:
+            continue
 
-            text = " ".join(str(seg.text).strip() for seg in decoded if str(seg.text).strip()).strip()
-            normalized = " ".join(text.lower().split())
-            if not normalized or normalized in seen_text:
-                continue
-            seen_text.add(normalized)
+        text = " ".join(str(seg.text).strip() for seg in decoded if str(seg.text).strip()).strip()
+        normalized = " ".join(text.lower().split())
+        if not normalized or normalized in seen_text:
+            continue
+        seen_text.add(normalized)
 
-            confidence = _confidence_from_decoded_segments(decoded)
-            index = len(candidates) + 1
-            candidates.append({
-                "candidate_id": f"{segment_id}_c{index}",
-                "speaker": _speaker_hypothesis(index, speaker_hypotheses),
-                "text": text,
-                "confidence": confidence,
-                "uncertainty_note": _decode_note(config, backend="faster-whisper"),
-                "decode_config": {
-                    "beam_size": int(config["beam_size"]),
-                    "temperature": float(config["temperature"]),
-                    "language": config.get("language") or "auto",
-                },
-            })
-            if len(candidates) >= max_candidates:
-                break
+        confidence = _confidence_from_decoded_segments(decoded)
+        index = len(candidates) + 1
+        candidates.append({
+            "candidate_id": f"{segment_id}_c{index}",
+            "speaker": _speaker_hypothesis(index, speaker_hypotheses),
+            "text": text,
+            "confidence": confidence,
+            "uncertainty_note": _decode_note(config, backend="faster-whisper"),
+            "decode_config": {
+                "beam_size": int(config["beam_size"]),
+                "temperature": float(config["temperature"]),
+                "language": config.get("language") or "auto",
+            },
+        })
+        if len(candidates) >= max_candidates:
+            break
     return candidates
 
 
