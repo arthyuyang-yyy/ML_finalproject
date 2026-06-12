@@ -6,3 +6,9 @@
 # whisperx>=3.1
 # pyannote.audio>=3.1
 # sentence-transformers>=2.7
+
+# LLM backends (pick one or more; all are optional and lazily imported)
+# ollama is used via urllib (stdlib) — no extra Python package needed.
+# openai>=1.0               # OpenAIBackend for OpenAI-compatible APIs
+# transformers>=4.40        # TransformersBackend for local Gemma/HF models
+# torch>=2.0                # Required by TransformersBackend
