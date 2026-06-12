@@ -105,9 +105,11 @@ class HelperTests(unittest.TestCase):
         except ImportError:
             self.skipTest("soundfile is not installed")
         import tempfile
-        with tempfile.NamedTemporaryFile(suffix=".wav") as tmp:
-            sf.write(tmp.name, _tone(2.0, amplitude=0.99), SAMPLE_RATE, subtype="FLOAT")
-            segments = segment_audio(tmp.name, meeting_id="test")
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            wav_path = Path(tmp_dir) / "test.wav"
+            sf.write(wav_path, _tone(2.0, amplitude=0.99), SAMPLE_RATE, subtype="FLOAT")
+            segments = segment_audio(str(wav_path), meeting_id="test")
             self.assertGreaterEqual(len(segments), 1)
             self.assertEqual(segments[0]["meeting_id"], "test")
 
@@ -121,10 +123,12 @@ class HelperTests(unittest.TestCase):
         except ImportError:
             self.skipTest("soundfile is not installed")
         import tempfile
-        with tempfile.NamedTemporaryFile(suffix=".wav") as tmp:
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            wav_path = Path(tmp_dir) / "test.wav"
             raw = np.ones(16000, dtype=np.float32) * 0.5
-            sf.write(tmp.name, raw, SAMPLE_RATE, subtype="FLOAT")
-            loaded, _ = load_audio(tmp.name, normalize=False)
+            sf.write(wav_path, raw, SAMPLE_RATE, subtype="FLOAT")
+            loaded, _ = load_audio(str(wav_path), normalize=False)
             np.testing.assert_array_almost_equal(loaded, raw)
 
 
