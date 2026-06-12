@@ -1,13 +1,12 @@
-"""Evaluation metrics for recognition, routing, and speaker attribution.
+"""Evaluation metrics for recognition, routing, attribution, and traceability.
 
-This module implements the *objective* metrics that do not depend on the team's
-still-evolving innovation design: word/character error rate, overlap-routing
-classification metrics, and best-mapping speaker-attribution accuracy.
+This module implements word/character error rate, overlap-routing classification
+metrics, best-mapping speaker-attribution accuracy, and evidence-support metrics
+(precision/recall/F1, hit rate, unsupported-claim and hallucination rate, and
+confidence calibration) following ``docs/experiment_plan.md`` (Experiment 5).
 
-Metrics tied to the innovation (evidence hit rate, unsupported-claim and
-hallucination rate, uncertainty-preservation quality, candidate usefulness) are
-intentionally left as TODO stubs until their scoring rules are finalized, so the
-shared interface does not lock in a definition prematurely.
+Uncertainty-preservation quality and candidate usefulness remain TODO stubs
+until their scoring rules are finalized.
 """
 
 from itertools import permutations
@@ -145,16 +144,126 @@ def speaker_attribution_accuracy(reference: list[str], hypothesis: list[str]) ->
     }
 
 
-def evaluate_evidence_support(predictions: list[dict], references: list[dict]) -> dict:
-    """Evaluate evidence hit rate, unsupported claims, and hallucination.
+_CONFIDENCE_VALUES = {"high": 0.9, "medium": 0.6, "low": 0.3}
 
-    Deferred: scoring rules for timestamped evidence and supported claims are
-    part of the traceability innovation and will be defined once that design is
-    finalized, to avoid locking in the contract prematurely.
+
+def _confidence_value(confidence: Any) -> float | None:
+    """Map a confidence label or numeric score to a probability in [0, 1]."""
+    if isinstance(confidence, bool):
+        return None
+    if isinstance(confidence, (int, float)):
+        return max(0.0, min(1.0, float(confidence)))
+    return _CONFIDENCE_VALUES.get(str(confidence).strip().lower())
+
+
+def evaluate_evidence_support(
+    predictions: list[dict],
+    references: list[dict],
+    source_evidence_ids: Any = None,
+) -> dict[str, Any]:
+    """Evaluate evidence traceability for a set of aligned claim/reference pairs.
+
+    Each ``prediction`` is a claim (e.g. a QA answer, decision, or action item)
+    carrying the evidence it cites; each ``reference`` is the gold annotation for
+    the same claim. They are aligned by index. Relevant fields:
+
+    - prediction ``evidence_ids``: evidence the claim cites;
+    - prediction ``insufficient_evidence`` (optional): ``True`` marks an
+      abstention rather than an asserted claim;
+    - prediction ``confidence`` (optional): ``"high"``/``"medium"``/``"low"`` or
+      a numeric score in [0, 1], used for calibration;
+    - reference ``evidence_ids``: the gold supporting evidence (empty means the
+      claim is not supportable and a faithful system should abstain).
+
+    ``source_evidence_ids`` is the universe of evidence IDs that actually exist
+    in the source segments; a cited ID outside it counts as a hallucination. It
+    defaults to the union of all gold evidence IDs when not provided.
+
+    Returns evidence precision/recall/F1, evidence hit rate, unsupported-claim
+    rate, hallucination rate, and confidence-calibration error (ECE), following
+    the metric definitions in ``docs/experiment_plan.md`` (Experiment 5).
     """
-    # TODO(innovation): define matching rules for timestamped evidence,
-    # supported-claim detection, hallucination rate, and confidence calibration.
-    raise NotImplementedError("Evidence evaluation is deferred until the traceability design is finalized.")
+    if len(predictions) != len(references):
+        raise ValueError("predictions and references must have the same length")
+    if not predictions:
+        raise ValueError("predictions must not be empty")
+
+    gold_sets = [{str(value) for value in ref.get("evidence_ids", [])} for ref in references]
+    cited_sets = [{str(value) for value in pred.get("evidence_ids", [])} for pred in predictions]
+    if source_evidence_ids is None:
+        source_universe = set().union(*gold_sets) if gold_sets else set()
+    else:
+        source_universe = {str(value) for value in source_evidence_ids}
+
+    total_cited = sum(len(cited) for cited in cited_sets)
+    total_gold = sum(len(gold) for gold in gold_sets)
+    total_correct = sum(len(cited & gold) for cited, gold in zip(cited_sets, gold_sets))
+
+    precision = total_correct / total_cited if total_cited else 0.0
+    recall = total_correct / total_gold if total_gold else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+
+    # Evidence hit rate: among answerable claims (gold evidence exists), the
+    # fraction that cited at least one correct piece of evidence.
+    answerable = [i for i, gold in enumerate(gold_sets) if gold]
+    hits = sum(bool(cited_sets[i] & gold_sets[i]) for i in answerable)
+    evidence_hit_rate = hits / len(answerable) if answerable else 0.0
+
+    # Claim-level rates over asserted claims (abstentions are not claims).
+    claims = [i for i, pred in enumerate(predictions) if not pred.get("insufficient_evidence")]
+    unsupported = sum(not (cited_sets[i] & gold_sets[i]) for i in claims)
+    hallucinated = sum(bool(cited_sets[i] - source_universe) for i in claims)
+    unsupported_claim_rate = unsupported / len(claims) if claims else 0.0
+    hallucination_rate = hallucinated / len(claims) if claims else 0.0
+
+    calibration = _confidence_calibration(predictions, cited_sets, gold_sets)
+
+    return {
+        "support": len(predictions),
+        "answerable": len(answerable),
+        "claims": len(claims),
+        "evidence_precision": precision,
+        "evidence_recall": recall,
+        "evidence_f1": f1,
+        "evidence_hit_rate": evidence_hit_rate,
+        "unsupported_claim_rate": unsupported_claim_rate,
+        "hallucination_rate": hallucination_rate,
+        **calibration,
+    }
+
+
+def _confidence_calibration(
+    predictions: list[dict],
+    cited_sets: list[set[str]],
+    gold_sets: list[set[str]],
+) -> dict[str, Any]:
+    """Expected Calibration Error over predictions that expose a confidence.
+
+    A claim is correct when it cites at least one gold evidence; an abstention is
+    correct when there is no gold evidence to cite. Predictions are binned by
+    their confidence value and ECE is the support-weighted gap between mean
+    confidence and accuracy across bins.
+    """
+    bins: dict[float, list[bool]] = {}
+    for pred, cited, gold in zip(predictions, cited_sets, gold_sets):
+        value = _confidence_value(pred.get("confidence"))
+        if value is None:
+            continue
+        if pred.get("insufficient_evidence"):
+            correct = not gold
+        else:
+            correct = bool(cited & gold)
+        bins.setdefault(value, []).append(correct)
+
+    scored = sum(len(outcomes) for outcomes in bins.values())
+    if not scored:
+        return {"calibration_error": 0.0, "calibration_samples": 0}
+
+    ece = sum(
+        len(outcomes) * abs(value - sum(outcomes) / len(outcomes))
+        for value, outcomes in bins.items()
+    ) / scored
+    return {"calibration_error": ece, "calibration_samples": scored}
 
 
 def _error_rate_result(counts: dict[str, int]) -> dict[str, Any]:

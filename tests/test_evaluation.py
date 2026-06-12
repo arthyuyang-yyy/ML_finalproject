@@ -115,9 +115,74 @@ class SpeakerAttributionTests(unittest.TestCase):
         self.assertEqual(speaker_attribution_accuracy(refs, hyps)["accuracy"], 1.0)
 
 
-class DeferredEvidenceTests(unittest.TestCase):
-    def test_evidence_support_is_deferred(self) -> None:
-        with self.assertRaises(NotImplementedError):
+class EvidenceSupportTests(unittest.TestCase):
+    def test_perfect_support(self) -> None:
+        preds = [{"evidence_ids": ["e1", "e2"]}, {"evidence_ids": ["e3"]}]
+        refs = [{"evidence_ids": ["e1", "e2"]}, {"evidence_ids": ["e3"]}]
+        result = evaluate_evidence_support(preds, refs)
+        self.assertEqual(result["evidence_precision"], 1.0)
+        self.assertEqual(result["evidence_recall"], 1.0)
+        self.assertEqual(result["evidence_f1"], 1.0)
+        self.assertEqual(result["evidence_hit_rate"], 1.0)
+        self.assertEqual(result["unsupported_claim_rate"], 0.0)
+        self.assertEqual(result["hallucination_rate"], 0.0)
+        self.assertEqual(result["support"], 2)
+        self.assertEqual(result["answerable"], 2)
+        self.assertEqual(result["claims"], 2)
+
+    def test_partial_precision_and_recall(self) -> None:
+        # Cites one correct (e1) and one extra (x9); gold is e1 and e2.
+        preds = [{"evidence_ids": ["e1", "x9"]}]
+        refs = [{"evidence_ids": ["e1", "e2"]}]
+        result = evaluate_evidence_support(preds, refs)
+        self.assertAlmostEqual(result["evidence_precision"], 0.5)
+        self.assertAlmostEqual(result["evidence_recall"], 0.5)
+        self.assertAlmostEqual(result["evidence_f1"], 0.5)
+        self.assertEqual(result["evidence_hit_rate"], 1.0)
+        self.assertEqual(result["unsupported_claim_rate"], 0.0)
+
+    def test_explicit_source_separates_hallucination_from_wrong_citation(self) -> None:
+        # Item 0 cites a real but wrong segment; item 1 cites a nonexistent one.
+        preds = [{"evidence_ids": ["e2"]}, {"evidence_ids": ["e_fake"]}]
+        refs = [{"evidence_ids": ["e1"]}, {"evidence_ids": ["e1"]}]
+        result = evaluate_evidence_support(preds, refs, source_evidence_ids={"e1", "e2", "e3"})
+        self.assertEqual(result["unsupported_claim_rate"], 1.0)
+        self.assertEqual(result["hallucination_rate"], 0.5)
+
+    def test_correct_abstention_is_not_a_claim(self) -> None:
+        preds = [{"insufficient_evidence": True, "evidence_ids": []}]
+        refs = [{"evidence_ids": []}]
+        result = evaluate_evidence_support(preds, refs)
+        self.assertEqual(result["claims"], 0)
+        self.assertEqual(result["answerable"], 0)
+        self.assertEqual(result["unsupported_claim_rate"], 0.0)
+        self.assertEqual(result["hallucination_rate"], 0.0)
+        self.assertEqual(result["calibration_samples"], 0)
+
+    def test_confidence_calibration_error(self) -> None:
+        preds = [
+            {"evidence_ids": ["e1"], "confidence": "high"},
+            {"evidence_ids": ["e1"], "confidence": "high"},
+            {"evidence_ids": ["x"], "confidence": "high"},
+            {"evidence_ids": ["e1"], "confidence": "low"},
+        ]
+        refs = [
+            {"evidence_ids": ["e1"]},
+            {"evidence_ids": ["e1"]},
+            {"evidence_ids": ["e2"]},
+            {"evidence_ids": ["e1"]},
+        ]
+        result = evaluate_evidence_support(preds, refs)
+        # high bin (0.9): acc 2/3, gap 0.2333, n=3; low bin (0.3): acc 1.0, gap 0.7, n=1
+        self.assertEqual(result["calibration_samples"], 4)
+        self.assertAlmostEqual(result["calibration_error"], 0.35)
+
+    def test_length_mismatch_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            evaluate_evidence_support([{"evidence_ids": []}], [])
+
+    def test_empty_predictions_raises(self) -> None:
+        with self.assertRaises(ValueError):
             evaluate_evidence_support([], [])
 
 

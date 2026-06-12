@@ -374,7 +374,7 @@ def word_error_rate(reference: str, hypothesis: str) -> dict[str, Any]
 def character_error_rate(reference: str, hypothesis: str) -> dict[str, Any]
 def evaluate_overlap_routing(predictions: list[str], references: list[str]) -> dict[str, Any]
 def speaker_attribution_accuracy(reference: list[str], hypothesis: list[str]) -> dict[str, Any]
-def evaluate_evidence_support(predictions: list[dict], references: list[dict]) -> dict  # stub
+def evaluate_evidence_support(predictions: list[dict], references: list[dict], source_evidence_ids=None) -> dict[str, Any]
 ```
 
 ---

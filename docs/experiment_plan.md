@@ -86,15 +86,16 @@ Compare three QA approaches:
 
 Evaluate whether answers, decisions, and action items are supported by timestamped evidence.
 
-**Metrics** (interface defined in `src/evaluation/core.py` — `evaluate_evidence_support()`, currently stub):
+**Metrics** (implemented in `src/evaluation/core.py` — `evaluate_evidence_support()`):
 
 - Evidence precision: fraction of cited evidence that is correct
-- Evidence recall: fraction of correct claims that cite evidence
-- Unsupported-claim rate: fraction of claims with no supporting evidence
-- Hallucination rate: fraction of claims not found in any source segment
-- Confidence calibration: how well confidence scores correlate with correctness
+- Evidence recall: fraction of gold supporting evidence that is cited
+- Evidence hit rate: fraction of answerable claims citing at least one correct piece of evidence
+- Unsupported-claim rate: fraction of asserted claims with no correct supporting evidence
+- Hallucination rate: fraction of asserted claims citing evidence absent from the source segments
+- Confidence calibration: Expected Calibration Error between confidence and correctness
 
-**Status:** Metric interfaces defined (stub). Formal experiment requires manual annotation of evidence-support relationships.
+**Status:** Metrics implemented and unit-tested. Formal experiment still requires manual annotation of evidence-support relationships to supply the gold references.
 
 ## Evaluation Functions Reference
 
@@ -105,4 +106,4 @@ Evaluate whether answers, decisions, and action items are supported by timestamp
 | Character Error Rate (CER) | `character_error_rate()` | Implemented |
 | Overlap routing accuracy | `evaluate_overlap_routing()` | Implemented |
 | Speaker attribution accuracy | `speaker_attribution_accuracy()` | Implemented |
-| Evidence support | `evaluate_evidence_support()` | Stub |
+| Evidence support | `evaluate_evidence_support()` | Implemented |
