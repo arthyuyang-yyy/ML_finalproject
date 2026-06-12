@@ -374,8 +374,12 @@ def word_error_rate(reference: str, hypothesis: str) -> dict[str, Any]
 def character_error_rate(reference: str, hypothesis: str) -> dict[str, Any]
 def evaluate_overlap_routing(predictions: list[str], references: list[str]) -> dict[str, Any]
 def speaker_attribution_accuracy(reference: list[str], hypothesis: list[str]) -> dict[str, Any]
-def evaluate_evidence_support(predictions: list[dict], references: list[dict]) -> dict  # stub
+def evaluate_evidence_support(predictions: list[dict], references: list[dict], source_evidence_ids=None) -> dict[str, Any]
+def evaluate_uncertainty_preservation(predictions: list[dict], references: list[dict]) -> dict[str, Any]
+def evaluate_candidate_usefulness(segments: list[dict], references: list[dict]) -> dict[str, Any]
 ```
+
+A runnable end-to-end experiment over an annotated set lives in `experiments/evidence_eval/` (`run_experiment.py`).
 
 ---
 

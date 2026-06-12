@@ -38,7 +38,9 @@
 
 **候选生成基线**（实现于 `src/high_overlap.py` 与 `src/candidates/generator.py`）：高重叠主记录保持 mixed/空转写，候选由 faster-whisper 多参数解码生成（beam size、temperature、language）。如未安装 faster-whisper，则输出显式 fallback 候选以保留同一套不确定性 schema。
 
-**状态：** 候选接口已实现。oracle/top-1 WER 和人工评定需标注数据。
+**状态：** 候选接口已实现。oracle WER、top-1 WER、WER 降幅和说话人假设覆盖率已实现于
+`evaluate_candidate_usefulness()`，并由 `experiments/evidence_eval/` 实际跑通；人工有用性评定和
+真实模型数字仍需人工标注。
 
 ## 实验 3：元信息感知 LLM 后处理
 
@@ -57,7 +59,9 @@
 
 **LLM 集成**（实现于 `src/llm/event_extractor.py`）：当前使用确定性 fallback；Gemma 客户端接口已就绪，待接入真实 LLM。
 
-**状态：** LLM 事件提取基础设施已实现。元信息消融实验需真实 LLM 集成和人工评估。
+**状态：** LLM 事件提取基础设施已实现。不确定性保留质量已实现于
+`evaluate_uncertainty_preservation()`（保留率/坍缩率/误标率），并由 `experiments/evidence_eval/`
+实际跑通。元信息消融及决策/行动项抽取准确率仍需真实 LLM 集成和人工评估。
 
 ## 实验 4：Episodic Memory 问答
 
@@ -86,15 +90,21 @@
 
 评估回答、决策和行动项是否得到带时间戳证据的支持。
 
-**指标**（接口定义于 `src/evaluation/core.py` — `evaluate_evidence_support()`，当前为 stub）：
+**指标**（已实现于 `src/evaluation/core.py` — `evaluate_evidence_support()`）：
 
 - 证据精确率：引用证据中正确的比例
-- 证据召回率：正确声明中引用证据的比例
-- 无支持声明率：无支持证据的声明比例
-- 幻觉率：未在任何源片段中找到的声明比例
-- 置信度校准：置信度分数与正确性的相关性
+- 证据召回率：金标支持证据中被引用的比例
+- 证据命中率：可回答声明中至少引用一条正确证据的比例
+- 无支持声明率：已断言声明中无任何正确支持证据的比例
+- 幻觉率：已断言声明中引用了源片段不存在的证据的比例
+  （调用时**必须**传入完整的 `source_evidence_ids` 全集；否则默认退化为金标并集，
+  会把"真实存在但非金标"的引用误判为幻觉，并与无支持声明率混淆）
+- 置信度校准：置信度与正确性之间的期望校准误差（ECE）
 
-**状态：** 指标接口已定义（stub）。正式实验需人工标注证据支持关系。
+**状态：** 基于 evidence ID 的指标、不确定性保留、候选有效性均已实现并有单元测试，且可通过
+`experiments/evidence_eval/run_experiment.py` 端到端跑出结果表。仍待完成：基于内容的支持判定
+（判断声明*文本*是否真被证据内容支持，而不仅检查引用的 ID），以及真实评估语料——目前内置标注
+是手工编写的种子集，并非人工标注的 pipeline 输出。
 
 ## 评估函数参考
 
@@ -105,4 +115,6 @@
 | 字符错误率 (CER) | `character_error_rate()` | 已实现 |
 | 重叠路由准确率 | `evaluate_overlap_routing()` | 已实现 |
 | 说话人归属准确率 | `speaker_attribution_accuracy()` | 已实现 |
-| 证据支持 | `evaluate_evidence_support()` | Stub |
+| 证据支持 | `evaluate_evidence_support()` | 已实现 |
+| 不确定性保留 | `evaluate_uncertainty_preservation()` | 已实现 |
+| 候选有效性 | `evaluate_candidate_usefulness()` | 已实现 |
