@@ -124,7 +124,7 @@
 
 ## 当前进度
 
-项目目前处于**基础设施与基线准备阶段**，已有可运行的端到端 pipeline，正式实验结果尚未产生。
+项目目前处于**可运行基线与正式实验准备阶段**。轻量依赖环境已经能够从 WAV 输入完整运行到证据片段、会议事件、Episodic Memory 和证据问答，但正式实验结果尚未产生。
 
 已完成：
 
@@ -133,23 +133,38 @@
 - 音频加载、单声道转换、polyphase 重采样、峰值归一化和基于能量的 VAD 分段（含段落合并与分割）；
 - 音频 clip 导出（`src/audio/clipper.py`）；
 - 双说话人可控重叠语音合成，支持 SNR 控制和重叠真值标注；
-- WER、CER、重叠路由分类和最优映射说话人归属等客观评估指标；
-- 可插拔 ASR 适配器（Mock/WhisperX/Whisper/Paraformer）与置信度校准；
+- WER、CER、重叠路由分类、最优映射说话人归属、引用率和时间戳引用率等基础评估指标；
+- 可插拔 ASR 适配器（Mock/WhisperX/faster-whisper/Whisper/FunASR）与置信度校准；
 - 重叠检测：pyannote OSD 适配器（有 HF token 时）+ 保守能量 fallback（上限 0.39，不会误触发高重叠路由）；
 - 双路径路由（阈值 0.4）、低重叠 ASR + 说话人归属路径、高重叠候选生成（不强行确定单一转写）；
-- 元数据构建、schema 验证和 LLM 事件提取；
+- 元数据构建、schema 验证、evidence-only JSON Prompt、LLM 输出修复与校验，以及确定性事件提取 fallback；
 - 事件级情景记忆创建、按会议原子更新的 JSON 持久化与 BM25 + embedding 混合检索；
 - Gemma 仅基于 top-k Episode 回答，并校验证据 ID、时间戳、说话人和不确定性；
 - 基于 Gradio 的交互式 UI 演示；
 - 端到端 pipeline 编排（`src/pipeline/run_pipeline.py`）；
 - 自动化测试覆盖已实现的基础设施、运行时后端、检索、记忆、QA 与评估。
 
+当前可运行程度：
+
+- 仅安装 `requirements.txt` 时，可以使用 Mock ASR 和确定性 fallback 完整运行 CLI Pipeline，生成每场会议的全部核心 artifact、Episodic Memory 和证据问答结果；
+- 轻量模式适合验证端到端系统流程，不代表真实 ASR、说话人识别、重叠检测或事件抽取质量；
+- 安装并配置可选依赖、模型、Hugging Face token 和 Ollama 服务后，可以切换真实 ASR、pyannote、Gemma 与 Gradio。
+
 正式实验前仍需完成：
 
 - 人工标注评估集构建；
-- pyannote 模型下载与校准实验；
-- faster-whisper/WhisperX/Whisper/FunASR 重模型集成与精度对比；
-- 元信息输入消融实验和证据质量评估。
+- 重叠阈值校准和 pyannote 正式实验；
+- 可选语音分离模块和音频 clip 路径存在性校验；
+- faster-whisper/WhisperX/Whisper/FunASR、pyannote 与 Ollama Gemma 的真实运行和精度对比；
+- decision、action item、deadline 等真实会议事件抽取验证；
+- 完整证据支持、幻觉率、不确定性保留和候选有效性指标；
+- 元信息输入、Episodic Memory QA 和其他计划中的消融实验。
+
+2026 年 6 月 12 日验证结果：
+
+- `258` 个单元与集成测试通过；
+- `1` 个可选 Gradio 组件测试因未安装 Gradio 跳过；
+- 使用轻量依赖和 Mock ASR 的端到端 smoke run 成功。
 
 ## 运行方式
 
