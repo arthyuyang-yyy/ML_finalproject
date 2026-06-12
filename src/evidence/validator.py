@@ -45,13 +45,19 @@ def validate_candidate(candidate: Any, index: int = 0) -> dict[str, Any]:
     return candidate
 
 
-def validate_metadata_segment(record: Any) -> dict[str, Any]:
+def validate_metadata_segment(
+    record: Any,
+    *,
+    require_audio_clip: bool = False,
+) -> dict[str, Any]:
     """Validate one metadata segment (evidence packet) and return it unchanged.
 
     Raises ``ValueError`` describing the first problem found. Checks required
     fields and types, score ranges, time ordering, the processing path, and the
     structure of every candidate. High-overlap segments must keep at least one
     candidate so downstream modules can reason over the preserved uncertainty.
+    When ``require_audio_clip`` is true, ``audio_clip_path`` must point to an
+    existing file.
     """
     if not isinstance(record, dict):
         raise ValueError(f"segment must be a dict, got {type(record).__name__}")
@@ -106,16 +112,26 @@ def validate_metadata_segment(record: Any) -> dict[str, Any]:
         if record["uncertainty_note"].strip():
             raise ValueError("low_overlap_cluster segments must not carry an uncertainty note")
 
+    if require_audio_clip:
+        _validate_audio_clip_path(record["audio_clip_path"])
+
     return record
 
 
-def validate_meeting(segments: Any) -> list[dict[str, Any]]:
+def validate_meeting(
+    segments: Any,
+    *,
+    require_audio_clips: bool = False,
+) -> list[dict[str, Any]]:
     """Validate a list of metadata segments belonging to one or more meetings."""
     if not isinstance(segments, list):
         raise ValueError(f"meeting must be a list of segments, got {type(segments).__name__}")
     if not segments:
         raise ValueError("meeting must contain at least one segment")
-    validated = [validate_metadata_segment(segment) for segment in segments]
+    validated = [
+        validate_metadata_segment(segment, require_audio_clip=require_audio_clips)
+        for segment in segments
+    ]
     meeting_ids = {segment["meeting_id"] for segment in validated}
     if len(meeting_ids) != 1:
         raise ValueError("meeting segments must share one meeting_id")
@@ -142,14 +158,18 @@ def validate_evidence_segments(
 
     for index, segment in enumerate(segments):
         try:
-            validate_metadata_segment(segment)
+            validate_metadata_segment(segment, require_audio_clip=require_audio_clips)
         except ValueError as exc:
             errors.append(f"segment[{index}]: {exc}")
-            continue
-
-        if require_audio_clips and not Path(segment["audio_clip_path"]).is_file():
-            errors.append(f"segment[{index}]: audio clip does not exist: {segment['audio_clip_path']}")
     return errors
+
+
+def _validate_audio_clip_path(audio_clip_path: str) -> None:
+    """Require a non-empty path that points to an existing audio clip file."""
+    if not audio_clip_path.strip():
+        raise ValueError("segment.audio_clip_path must be a non-empty string")
+    if not Path(audio_clip_path).is_file():
+        raise ValueError(f"audio clip does not exist or is not a file: {audio_clip_path}")
 
 
 __all__ = [
