@@ -10,8 +10,10 @@ import unittest
 from src.evaluation import (
     character_error_rate,
     edit_distance,
+    evaluate_candidate_usefulness,
     evaluate_evidence_support,
     evaluate_overlap_routing,
+    evaluate_uncertainty_preservation,
     speaker_attribution_accuracy,
     word_error_rate,
 )
@@ -184,6 +186,82 @@ class EvidenceSupportTests(unittest.TestCase):
     def test_empty_predictions_raises(self) -> None:
         with self.assertRaises(ValueError):
             evaluate_evidence_support([], [])
+
+
+class UncertaintyPreservationTests(unittest.TestCase):
+    def test_preserved_and_collapsed(self) -> None:
+        preds = [
+            {"confidence": "low"},                 # uncertain item, flagged -> preserved
+            {"confidence": "high"},                # uncertain item, not flagged -> collapsed
+            {"speaker": "MIXED"},                  # uncertain item, flagged via MIXED
+            {"confidence": "high"},                # certain item, correctly not flagged
+        ]
+        refs = [
+            {"uncertain": True},
+            {"uncertain": True},
+            {"uncertain": True},
+            {"uncertain": False},
+        ]
+        result = evaluate_uncertainty_preservation(preds, refs)
+        self.assertEqual(result["uncertain_total"], 3)
+        self.assertEqual(result["certain_total"], 1)
+        self.assertAlmostEqual(result["preservation_rate"], 2 / 3)
+        self.assertAlmostEqual(result["collapse_rate"], 1 / 3)
+        self.assertEqual(result["false_uncertainty_rate"], 0.0)
+
+    def test_signals_detected(self) -> None:
+        preds = [
+            {"insufficient_evidence": True},
+            {"uncertainty_note": "speaker attribution uncertain"},
+            {"candidates": [{"text": "a"}]},
+        ]
+        refs = [{"uncertain": True}, {"uncertain": True}, {"uncertain": True}]
+        result = evaluate_uncertainty_preservation(preds, refs)
+        self.assertEqual(result["preservation_rate"], 1.0)
+        self.assertEqual(result["f1"], 1.0)
+
+    def test_false_uncertainty_flagging(self) -> None:
+        preds = [{"confidence": "low"}, {"confidence": "high"}]
+        refs = [{"uncertain": False}, {"uncertain": False}]
+        result = evaluate_uncertainty_preservation(preds, refs)
+        self.assertEqual(result["false_uncertainty_rate"], 0.5)
+
+    def test_length_mismatch_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            evaluate_uncertainty_preservation([{"confidence": "low"}], [])
+
+
+class CandidateUsefulnessTests(unittest.TestCase):
+    def test_oracle_beats_top1(self) -> None:
+        segments = [
+            {
+                "candidates": [
+                    {"text": "the budget is approved", "speaker": "SPEAKER_00", "confidence": 0.8},
+                    {"text": "the project is approved", "speaker": "SPEAKER_01", "confidence": 0.5},
+                ]
+            }
+        ]
+        refs = [{"text": "the project is approved", "speaker": "SPEAKER_01"}]
+        result = evaluate_candidate_usefulness(segments, refs)
+        self.assertEqual(result["evaluated"], 1)
+        # top-1 = highest confidence (0.8) candidate -> 1 substitution / 4 words = 0.25
+        self.assertAlmostEqual(result["top1_wer"], 0.25)
+        # oracle = best candidate matches reference exactly -> 0.0
+        self.assertAlmostEqual(result["oracle_wer"], 0.0)
+        self.assertAlmostEqual(result["wer_reduction"], 0.25)
+        self.assertEqual(result["speaker_coverage"], 1.0)
+
+    def test_segment_without_candidates_is_counted_but_not_scored(self) -> None:
+        segments = [{"candidates": []}]
+        refs = [{"text": "anything", "speaker": "SPEAKER_00"}]
+        result = evaluate_candidate_usefulness(segments, refs)
+        self.assertEqual(result["support"], 1)
+        self.assertEqual(result["evaluated"], 0)
+        self.assertEqual(result["speaker_coverage"], 0.0)
+
+    def test_length_mismatch_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            evaluate_candidate_usefulness([{"candidates": []}], [])
 
 
 if __name__ == "__main__":

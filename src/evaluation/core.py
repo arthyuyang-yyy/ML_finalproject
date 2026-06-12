@@ -1,12 +1,13 @@
 """Evaluation metrics for recognition, routing, attribution, and traceability.
 
 This module implements word/character error rate, overlap-routing classification
-metrics, best-mapping speaker-attribution accuracy, and evidence-support metrics
+metrics, best-mapping speaker-attribution accuracy, evidence-support metrics
 (precision/recall/F1, hit rate, unsupported-claim and hallucination rate, and
-confidence calibration) following ``docs/experiment_plan.md`` (Experiment 5).
+confidence calibration), uncertainty-preservation quality, and candidate
+usefulness, following ``docs/experiment_plan.md`` (Experiments 2 and 5).
 
-Uncertainty-preservation quality and candidate usefulness remain TODO stubs
-until their scoring rules are finalized.
+These metrics score evidence IDs, uncertainty signals, and candidate text; they
+do not yet judge whether a claim's wording is entailed by the evidence content.
 """
 
 from itertools import permutations
@@ -273,6 +274,126 @@ def _confidence_calibration(
         for value, outcomes in bins.items()
     ) / scored
     return {"calibration_error": ece, "calibration_samples": scored}
+
+
+def _marks_uncertainty(prediction: dict[str, Any]) -> bool:
+    """Whether a prediction visibly preserves uncertainty rather than hiding it.
+
+    A faithful system signals uncertainty through any of: abstention, low
+    confidence, a non-empty uncertainty note, a ``MIXED`` speaker, or surviving
+    candidate hypotheses.
+    """
+    if prediction.get("insufficient_evidence"):
+        return True
+    confidence = prediction.get("confidence")
+    if isinstance(confidence, str) and confidence.strip().lower() == "low":
+        return True
+    if isinstance(confidence, (int, float)) and not isinstance(confidence, bool) and float(confidence) < 0.5:
+        return True
+    if str(prediction.get("uncertainty_note", "")).strip():
+        return True
+    if str(prediction.get("speaker", "")).strip().upper() == "MIXED":
+        return True
+    return bool(prediction.get("candidates"))
+
+
+def evaluate_uncertainty_preservation(
+    predictions: list[dict],
+    references: list[dict],
+) -> dict[str, Any]:
+    """Measure whether genuinely uncertain claims stay marked as uncertain.
+
+    Innovation point 2 requires that ambiguous high-overlap content is not
+    silently collapsed into a single confident answer. Aligned by index, each
+    ``reference`` carries a gold ``uncertain`` flag and each ``prediction`` is
+    inspected for any uncertainty signal (see ``_marks_uncertainty``).
+
+    Returns the preservation rate (recall over uncertain items), the collapse
+    rate (uncertain items presented as confident), the false-uncertainty rate
+    (confident items wrongly flagged), and precision/F1.
+    """
+    if len(predictions) != len(references):
+        raise ValueError("predictions and references must have the same length")
+    if not predictions:
+        raise ValueError("predictions must not be empty")
+
+    marked = [_marks_uncertainty(pred) for pred in predictions]
+    uncertain = [bool(ref.get("uncertain")) for ref in references]
+
+    uncertain_total = sum(uncertain)
+    certain_total = len(references) - uncertain_total
+    preserved = sum(m for m, u in zip(marked, uncertain) if u)
+    false_flags = sum(m for m, u in zip(marked, uncertain) if not u)
+
+    preservation_rate = preserved / uncertain_total if uncertain_total else 0.0
+    collapse_rate = 1.0 - preservation_rate if uncertain_total else 0.0
+    false_uncertainty_rate = false_flags / certain_total if certain_total else 0.0
+    flagged = preserved + false_flags
+    precision = preserved / flagged if flagged else 0.0
+    f1 = (
+        2 * precision * preservation_rate / (precision + preservation_rate)
+        if (precision + preservation_rate)
+        else 0.0
+    )
+    return {
+        "support": len(predictions),
+        "uncertain_total": uncertain_total,
+        "certain_total": certain_total,
+        "preservation_rate": preservation_rate,
+        "collapse_rate": collapse_rate,
+        "false_uncertainty_rate": false_uncertainty_rate,
+        "precision": precision,
+        "f1": f1,
+    }
+
+
+def evaluate_candidate_usefulness(
+    segments: list[dict],
+    references: list[dict],
+) -> dict[str, Any]:
+    """Quantify whether multi-candidate high-overlap output keeps useful signal.
+
+    Aligned by index, each ``segment`` exposes ``candidates`` (each with ``text``,
+    ``speaker``, and ``confidence``) and each ``reference`` carries the gold
+    ``text`` and ``speaker``. Segments without candidates are counted but cannot
+    contribute a WER and never cover the speaker.
+
+    Returns mean oracle WER (best candidate), mean top-1 WER (most confident
+    candidate), their difference (the value of keeping several candidates), and
+    speaker-hypothesis coverage.
+    """
+    if len(segments) != len(references):
+        raise ValueError("segments and references must have the same length")
+    if not segments:
+        raise ValueError("segments must not be empty")
+
+    oracle_wers: list[float] = []
+    top1_wers: list[float] = []
+    speaker_hits = 0
+    for segment, reference in zip(segments, references):
+        ref_text = str(reference.get("text", ""))
+        ref_speaker = str(reference.get("speaker", ""))
+        candidates = [c for c in segment.get("candidates", []) if str(c.get("text", "")).strip()]
+        if any(str(c.get("speaker", "")) == ref_speaker and ref_speaker for c in segment.get("candidates", [])):
+            speaker_hits += 1
+        if not candidates:
+            continue
+        wers = [word_error_rate(ref_text, str(c["text"]))["error_rate"] for c in candidates]
+        oracle_wers.append(min(wers))
+        best = max(candidates, key=lambda c: float(c.get("confidence", 0.0) or 0.0))
+        top1_wers.append(word_error_rate(ref_text, str(best["text"]))["error_rate"])
+
+    evaluated = len(oracle_wers)
+    oracle_wer = sum(oracle_wers) / evaluated if evaluated else 0.0
+    top1_wer = sum(top1_wers) / evaluated if evaluated else 0.0
+    return {
+        "support": len(segments),
+        "evaluated": evaluated,
+        "oracle_wer": oracle_wer,
+        "top1_wer": top1_wer,
+        "wer_reduction": top1_wer - oracle_wer,
+        "speaker_coverage": speaker_hits / len(segments),
+    }
 
 
 def _error_rate_result(counts: dict[str, int]) -> dict[str, Any]:
