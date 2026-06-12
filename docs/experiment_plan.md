@@ -93,9 +93,14 @@ Evaluate whether answers, decisions, and action items are supported by timestamp
 - Evidence hit rate: fraction of answerable claims citing at least one correct piece of evidence
 - Unsupported-claim rate: fraction of asserted claims with no correct supporting evidence
 - Hallucination rate: fraction of asserted claims citing evidence absent from the source segments
+  (callers **must** pass the full `source_evidence_ids` universe; otherwise it defaults to the gold
+  union and conflates real-but-non-gold citations with hallucinations)
 - Confidence calibration: Expected Calibration Error between confidence and correctness
 
-**Status:** Metrics implemented and unit-tested. Formal experiment still requires manual annotation of evidence-support relationships to supply the gold references.
+**Status:** Evidence-ID-based metrics implemented and unit-tested. Still pending:
+content-level support checking (whether the claim *text* is entailed by the evidence, not just the
+cited IDs), uncertainty-preservation and candidate-usefulness metrics, and the formal experiment,
+which requires manual annotation of evidence-support relationships to supply the gold references.
 
 ## Evaluation Functions Reference
 

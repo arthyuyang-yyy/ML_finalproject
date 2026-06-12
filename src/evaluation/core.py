@@ -176,8 +176,17 @@ def evaluate_evidence_support(
       claim is not supportable and a faithful system should abstain).
 
     ``source_evidence_ids`` is the universe of evidence IDs that actually exist
-    in the source segments; a cited ID outside it counts as a hallucination. It
-    defaults to the union of all gold evidence IDs when not provided.
+    in the source segments; a cited ID outside it counts as a hallucination.
+
+    Caveat: for a meaningful ``hallucination_rate`` callers MUST pass the full
+    set of real source evidence IDs. When it is omitted it defaults to the union
+    of all gold evidence IDs, which makes any real-but-non-gold citation look
+    hallucinated and conflates hallucination with ``unsupported_claim_rate``.
+
+    Scope: these metrics check whether the *cited evidence IDs* are correct; they
+    do not yet verify that the claim *text* is entailed by the evidence content.
+    Uncertainty-preservation and candidate-usefulness metrics are not covered
+    here (see ``docs/experiment_plan.md`` Experiment 5 follow-ups).
 
     Returns evidence precision/recall/F1, evidence hit rate, unsupported-claim
     rate, hallucination rate, and confidence-calibration error (ECE), following
