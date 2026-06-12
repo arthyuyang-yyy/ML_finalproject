@@ -89,7 +89,7 @@ def write_segment_clips(samples: np.ndarray, sample_rate: int,
 
 ## Overlap Detection
 
-### `src/overlap_detector.py`
+### `src/overlap/detector.py`
 
 ```python
 DEFAULT_OVERLAP_THRESHOLD = 0.4
@@ -114,7 +114,7 @@ def detect_overlap_segments(audio_path: str, threshold: float = 0.4) -> list[dic
 
 ## Routing
 
-### `src/dual_path_router.py`
+### `src/overlap/router.py`
 
 ```python
 def route_segment(overlap_score: float, threshold: float = 0.4) -> str
@@ -125,7 +125,7 @@ def route_segment(overlap_score: float, threshold: float = 0.4) -> str
 
 ## ASR
 
-### `src/asr.py`
+### `src/asr/core.py`
 
 ```python
 def logprob_to_confidence(avg_logprob: float, no_speech_prob: float = 0.0) -> float
@@ -151,7 +151,7 @@ def transcribe_segments(samples, segments, adapter, sample_rate=16000) -> list[d
 
 ## Diarization
 
-### `src/diarization.py`
+### `src/diarization/core.py`
 
 ```python
 def diarize_audio(audio_path: str) -> list[dict]
@@ -200,7 +200,7 @@ def process_high_overlap_segments(
 
 Returns high-overlap segment records with `speaker="MIXED"`, empty main `text`, low `speaker_confidence`, and populated `candidates`.
 
-### `src/candidate_generator.py`
+### `src/candidates/generator.py`
 
 ```python
 def generate_high_overlap_candidates(
@@ -249,16 +249,14 @@ def build_metadata_segment(
 ) -> dict[str, Any]
 ```
 
-`src/metadata_builder.py` re-exports `build_metadata_segment()` for backward compatibility.
+`src/evidence/builder.py` exposes `build_metadata_segment()` and `build_evidence_segments()`.
 
-### `src/schema_validation.py`
+### `src/evidence/validator.py`
 
 ```python
-VALID_PROCESSING_PATHS = {"low_overlap_cluster", "high_overlap_candidate"}
-
-def validate_candidate(candidate: Any, index: int = 0) -> dict[str, Any]
 def validate_metadata_segment(record: Any) -> dict[str, Any]
 def validate_meeting(segments: Any) -> list[dict[str, Any]]
+def validate_candidate(candidate: Any, index: int = 0) -> dict[str, Any]
 ```
 
 ---
@@ -368,7 +366,7 @@ Compatibility facade exporting `retrieve_relevant_memory()` and `answer_question
 
 ## Evaluation
 
-### `src/evaluation.py`
+### `src/evaluation/core.py`
 
 ```python
 def edit_distance(reference: list, hypothesis: list) -> dict[str, int]

@@ -2,9 +2,15 @@
 
 import logging
 import os
+from functools import lru_cache
 from typing import Any
 
+from src.errors import BackendExecutionError, BackendUnavailableError
+from src.fallbacks.diarization import cluster_speakers
+
 DEFAULT_SPEAKER_CONFIDENCE = 0.78
+MIN_SPEAKER_COVERAGE = 0.70
+MIXED_SPEAKER_COVERAGE = 0.20
 PYANNOTE_DIARIZATION_MODEL = "pyannote/speaker-diarization-3.1"
 
 logger = logging.getLogger(__name__)
@@ -20,20 +26,6 @@ def diarize_audio(audio_path: str) -> list[dict]:
     return cluster_speakers(segment_audio(audio_path))
 
 
-def cluster_speakers(segments: list[dict]) -> list[dict]:
-    """Assign deterministic speaker labels when no diarization backend exists."""
-    clustered: list[dict] = []
-    for index, segment in enumerate(segments):
-        speaker = segment.get("speaker") or f"SPEAKER_{index % 2:02d}"
-        confidence = float(segment.get("speaker_confidence", DEFAULT_SPEAKER_CONFIDENCE))
-        clustered.append({
-            **segment,
-            "speaker": speaker,
-            "speaker_confidence": max(0.0, min(1.0, confidence)),
-        })
-    return clustered
-
-
 def assign_speakers_to_segments(
     segments: list[dict[str, Any]],
     diarization_turns: list[dict[str, Any]] | None = None,
@@ -45,10 +37,20 @@ def assign_speakers_to_segments(
         return cluster_speakers(segments)
 
     assigned: list[dict[str, Any]] = []
-    for index, segment in enumerate(segments):
-        best_speaker, coverage = _best_speaker_for_segment(segment, diarization_turns)
-        speaker = best_speaker or segment.get("speaker") or f"SPEAKER_{index % 2:02d}"
-        confidence = coverage if best_speaker else DEFAULT_SPEAKER_CONFIDENCE
+    for segment in segments:
+        coverage_by_speaker = _speaker_coverage(segment, diarization_turns)
+        ordered = sorted(coverage_by_speaker.items(), key=lambda item: item[1], reverse=True)
+        best_speaker, coverage = ordered[0] if ordered else (None, 0.0)
+        significant = [speaker for speaker, value in ordered if value >= MIXED_SPEAKER_COVERAGE]
+        if coverage >= MIN_SPEAKER_COVERAGE and best_speaker is not None:
+            speaker = best_speaker
+            confidence = coverage
+        elif len(significant) >= 2:
+            speaker = "MIXED"
+            confidence = min(1.0, sum(coverage_by_speaker.values()))
+        else:
+            speaker = "UNKNOWN"
+            confidence = coverage
         assigned.append({
             **segment,
             "speaker": speaker,
@@ -62,24 +64,28 @@ def diarize_with_pyannote(
     model_name: str = PYANNOTE_DIARIZATION_MODEL,
     auth_token: str | None = None,
 ) -> list[dict[str, Any]] | None:
-    """Return pyannote speaker turns, or ``None`` if the backend is unavailable."""
+    """Return pyannote speaker turns when configured.
+
+    A missing token means the optional backend is disabled and returns
+    ``None``. Once configured, dependency, model-loading, and inference
+    failures are surfaced because diarization is then a required service.
+    """
     token = auth_token or os.environ.get("HUGGINGFACE_TOKEN") or os.environ.get("HF_TOKEN")
     if not token:
         logger.info("pyannote diarization disabled because no Hugging Face token is configured")
         return None
 
     try:
-        from pyannote.audio import Pipeline
-    except ImportError:
-        logger.warning("pyannote diarization unavailable because pyannote.audio is not installed")
-        return None
-
-    try:
-        pipeline = Pipeline.from_pretrained(model_name, use_auth_token=token)
+        pipeline = load_pyannote_pipeline(model_name, token)
         output = pipeline(audio_path)
+    except ImportError as exc:
+        raise BackendUnavailableError(
+            "pyannote diarization is configured but pyannote.audio is unavailable"
+        ) from exc
     except Exception as exc:
-        logger.warning("pyannote diarization failed; using deterministic fallback: %s", exc)
-        return None
+        raise BackendExecutionError(
+            f"pyannote diarization failed for model '{model_name}'"
+        ) from exc
 
     turns: list[dict[str, Any]] = []
     if hasattr(output, "itertracks"):
@@ -93,6 +99,14 @@ def diarize_with_pyannote(
     return turns
 
 
+@lru_cache(maxsize=4)
+def load_pyannote_pipeline(model_name: str, token: str) -> Any:
+    """Load each pyannote model once per process."""
+    from pyannote.audio import Pipeline
+
+    return Pipeline.from_pretrained(model_name, use_auth_token=token)
+
+
 def _best_speaker_for_segment(
     segment: dict[str, Any],
     diarization_turns: list[dict[str, Any]],
@@ -104,7 +118,25 @@ def _best_speaker_for_segment(
     if duration == 0.0:
         return None, 0.0
 
-    coverage_by_speaker: dict[str, float] = {}
+    coverage_by_speaker = _speaker_coverage(segment, diarization_turns)
+    if not coverage_by_speaker:
+        return None, 0.0
+    speaker, coverage = max(coverage_by_speaker.items(), key=lambda item: item[1])
+    return speaker, coverage
+
+
+def _speaker_coverage(
+    segment: dict[str, Any],
+    diarization_turns: list[dict[str, Any]],
+) -> dict[str, float]:
+    """Return per-speaker fractions of the segment duration."""
+    start = float(segment["start_time"])
+    end = float(segment["end_time"])
+    duration = max(0.0, end - start)
+    if duration == 0.0:
+        return {}
+
+    covered_seconds: dict[str, float] = {}
     for turn in diarization_turns:
         turn_start = float(turn["start_time"])
         turn_end = float(turn["end_time"])
@@ -113,9 +145,5 @@ def _best_speaker_for_segment(
         if overlap_end <= overlap_start:
             continue
         speaker = str(turn["speaker"])
-        coverage_by_speaker[speaker] = coverage_by_speaker.get(speaker, 0.0) + (overlap_end - overlap_start)
-
-    if not coverage_by_speaker:
-        return None, 0.0
-    speaker, covered = max(coverage_by_speaker.items(), key=lambda item: item[1])
-    return speaker, covered / duration
+        covered_seconds[speaker] = covered_seconds.get(speaker, 0.0) + (overlap_end - overlap_start)
+    return {speaker: min(1.0, covered / duration) for speaker, covered in covered_seconds.items()}

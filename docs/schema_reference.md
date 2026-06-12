@@ -6,7 +6,7 @@ This document compares the three schema structures used across the project, thei
 
 ## 1. Evidence Segment Schema (17 fields)
 
-Defined by `src/evidence/builder.py` and `src/evidence/schema.py`, then validated by `src/schema_validation.py`. This is the **canonical in-memory schema** used throughout the pipeline. `src/metadata_builder.py` remains only as a backward-compatible import.
+Defined by `src/evidence/builder.py` and `src/evidence/schema.py`, then validated by `src/evidence/validator.py`. This is the **canonical in-memory schema** used throughout the pipeline. `src/metadata_builder.py` and `src/schema_validation.py` remain backward-compatible import facades.
 
 The 13 fields in the project task document are the domain-facing core. The implementation deliberately retains four provenance fields required for reliable downstream traceability:
 
@@ -221,7 +221,7 @@ Every supported answer must include its evidence IDs and exact episode time rang
 
 ## 7. ASR Transcript
 
-Defined by `src/asr.py` — `ASRAdapter.transcribe_array()`.
+Defined by `src/asr/core.py` — `ASRAdapter.transcribe_array()`.
 
 | Field | Type | Description |
 |-------|------|-------------|

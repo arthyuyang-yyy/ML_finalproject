@@ -18,7 +18,7 @@ class CandidateGeneratorTests(unittest.TestCase):
 
         self.assertGreaterEqual(len(candidates), 2)
         self.assertEqual(candidates[0]["candidate_id"], "m1_seg_009_c1")
-        self.assertEqual(candidates[0]["speaker"], "SPEAKER_00")
+        self.assertEqual(candidates[0]["speaker"], "UNKNOWN")
         self.assertIn("decode_config", candidates[0])
         self.assertIn("High-overlap segment", candidates[0]["uncertainty_note"])
 

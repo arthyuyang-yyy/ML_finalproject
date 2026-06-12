@@ -8,7 +8,7 @@ from src.candidates.generator import generate_high_overlap_candidates
 
 
 class FallbackCandidateTests(unittest.TestCase):
-    def test_returns_two_candidates_with_distinct_speakers(self) -> None:
+    def test_uses_supported_speaker_without_inventing_another(self) -> None:
         segment = {
             "segment_id": "m1_seg_003",
             "speaker": "SPEAKER_00",
@@ -20,7 +20,7 @@ class FallbackCandidateTests(unittest.TestCase):
         self.assertEqual(candidates[0]["candidate_id"], "m1_seg_003_c1")
         self.assertEqual(candidates[1]["candidate_id"], "m1_seg_003_c2")
         self.assertEqual(candidates[0]["speaker"], "SPEAKER_00")
-        self.assertEqual(candidates[1]["speaker"], "SPEAKER_01")
+        self.assertEqual(candidates[1]["speaker"], "SPEAKER_00")
         self.assertIn("uncertainty_note", candidates[0])
         self.assertIn("decode_config", candidates[0])
 
@@ -53,6 +53,13 @@ class FallbackCandidateTests(unittest.TestCase):
         candidates = generate_high_overlap_candidates(segment, samples=np.array([], dtype=np.float32))
         self.assertEqual(len(candidates), 2)
         self.assertIn("fallback", candidates[0]["uncertainty_note"])
+
+    def test_uses_diarization_speaker_hypotheses(self) -> None:
+        candidates = generate_high_overlap_candidates(
+            {"segment_id": "s1", "speaker": "MIXED", "text": ""},
+            speaker_hypotheses=["ALICE", "BOB"],
+        )
+        self.assertEqual([candidate["speaker"] for candidate in candidates], ["ALICE", "BOB"])
 
 
 if __name__ == "__main__":

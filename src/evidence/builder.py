@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from src.overlap.router import route_segment
-from src.schema_validation import validate_meeting, validate_metadata_segment
+from src.evidence.validator import validate_meeting, validate_metadata_segment
 from src.utils import required_text
 
 LOW_OVERLAP_PATH = "low_overlap_cluster"

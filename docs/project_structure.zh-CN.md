@@ -8,13 +8,14 @@
 src/
 ├── audio/          # 预处理、VAD、音频片段导出
 ├── overlap/        # 重叠检测与双路径路由
-├── asr/            # WhisperX、Whisper、FunASR/SenseVoice 兼容后端
-├── diarization/    # pyannote 后端与 speaker assignment
-├── candidates/     # 高重叠多候选与可选语音分离
+├── asr/            # WhisperX、Whisper、FunASR 兼容后端
+├── diarization/    # pyannote 后端
+├── candidates/     # 高重叠多候选
 ├── evidence/       # 统一 EvidenceSegment schema、构建与校验
 ├── llm/            # Gemma 接口、prompt、JSON 修复、事件抽取
 ├── memory/         # Episode schema、事件转记忆、存储与检索
 ├── qa/             # 仅基于检索结果的证据问答
+├── fallbacks/      # 确定性轻量回退后端
 ├── evaluation/     # 路由、证据与 QA 指标
 ├── pipeline/       # 端到端编排、配置与 artifact I/O
 └── ui/             # Gradio 演示

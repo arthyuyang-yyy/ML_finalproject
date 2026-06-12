@@ -1,16 +1,19 @@
 """Tests for overlap scoring and dual-path routing."""
 
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
 from src.overlap.detector import (
     DEFAULT_OVERLAP_THRESHOLD,
-    _energy_overlap_proxy,
     _merge_regions,
     _overlap_fraction,
+    detect_pyannote_overlap_regions,
     estimate_segment_overlap_scores,
 )
+from src.fallbacks.overlap import energy_overlap_proxy
+from src.errors import BackendExecutionError, BackendUnavailableError
 from src.overlap.router import route_segment
 
 
@@ -59,7 +62,33 @@ class OverlapScoringTests(unittest.TestCase):
         self.assertEqual(_merge_regions([]), [])
 
     def test_energy_proxy_silence_returns_zero(self) -> None:
-        self.assertEqual(_energy_overlap_proxy(np.zeros(16000, dtype=np.float32), 16000), 0.0)
+        self.assertEqual(energy_overlap_proxy(np.zeros(16000, dtype=np.float32), 16000), 0.0)
+
+    def test_fuses_diarization_overlap_and_speaker_change(self) -> None:
+        segments = [{"segment_id": "s1", "start_time": 0.0, "end_time": 10.0}]
+        turns = [
+            {"speaker": "A", "start_time": 0.0, "end_time": 8.0},
+            {"speaker": "B", "start_time": 2.0, "end_time": 10.0},
+        ]
+        scored = estimate_segment_overlap_scores(
+            np.zeros(160000, dtype=np.float32),
+            segments,
+            overlap_regions=[],
+            diarization_turns=turns,
+        )
+        self.assertGreater(scored[0]["overlap_score"], 0.0)
+        self.assertEqual(scored[0]["overlap_components"]["diarization_overlap"], 0.6)
+        self.assertGreater(scored[0]["overlap_components"]["speaker_change"], 0.0)
+
+    @patch("src.overlap.detector.load_pyannote_pipeline", side_effect=RuntimeError("model denied"))
+    def test_configured_pyannote_model_failure_is_reported(self, _mocked_load) -> None:
+        with self.assertRaisesRegex(BackendExecutionError, "OSD failed"):
+            detect_pyannote_overlap_regions("missing.wav", auth_token="token")
+
+    @patch("src.overlap.detector.load_pyannote_pipeline", side_effect=ImportError("missing"))
+    def test_configured_pyannote_missing_dependency_is_reported(self, _mocked_load) -> None:
+        with self.assertRaisesRegex(BackendUnavailableError, "pyannote.audio is unavailable"):
+            detect_pyannote_overlap_regions("missing.wav", auth_token="token")
 
 
 class RoutingThresholdTests(unittest.TestCase):

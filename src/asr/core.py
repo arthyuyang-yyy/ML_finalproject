@@ -5,7 +5,7 @@ This module turns audio into transcript text with timestamps and a calibrated
 pipeline should never hard-code one engine, because Chinese meetings are usually
 better served by Paraformer/FunASR while Whisper is stronger for multilingual or
 English audio, and disagreement between two engines is itself a useful
-uncertainty signal (see :mod:`src.candidate_generator`).
+uncertainty signal (see :mod:`src.candidates.generator`).
 
 Heavy backends (``whisper``, ``whisperx``, ``funasr``) are imported lazily inside
 each adapter so this module stays importable, and the unit tests run, without
@@ -176,12 +176,59 @@ class WhisperXAdapter(ASRAdapter):
         return _from_whisperx_result(result, self.name, self.default_confidence, len(samples) / TARGET_SAMPLE_RATE)
 
 
+class FasterWhisperAdapter(ASRAdapter):
+    """faster-whisper recognizer sharing the cached candidate-generation model."""
+
+    name = "faster-whisper"
+
+    def __init__(
+        self,
+        model_size: str = "small",
+        device: str = "cpu",
+        compute_type: str = "int8",
+        language: str | None = None,
+    ) -> None:
+        self.model_size = model_size
+        self.device = device
+        self.compute_type = compute_type
+        self.language = language
+
+    def transcribe_array(self, samples: np.ndarray, sample_rate: int = TARGET_SAMPLE_RATE) -> dict[str, Any]:
+        from src.candidates.generator import _load_faster_whisper_model
+
+        samples = _ensure_sample_rate(samples, sample_rate)
+        model = _load_faster_whisper_model(self.model_size, self.device, self.compute_type)
+        raw_segments, info = model.transcribe(samples, language=self.language)
+        decoded = list(raw_segments)
+        segments = [
+            {
+                "start_time": round(float(segment.start), 3),
+                "end_time": round(float(segment.end), 3),
+                "text": str(segment.text).strip(),
+                "asr_confidence": logprob_to_confidence(
+                    float(getattr(segment, "avg_logprob", 0.0)),
+                    float(getattr(segment, "no_speech_prob", 0.0)),
+                ),
+            }
+            for segment in decoded
+        ]
+        return {
+            "text": " ".join(segment["text"] for segment in segments).strip(),
+            "language": str(getattr(info, "language", self.language or "und")),
+            "model": self.name,
+            "asr_confidence": _aggregate_confidence(segments),
+            "segments": segments,
+        }
+
+
 class FunASRAdapter(ASRAdapter):
     """FunASR Paraformer recogniser (lazy ``funasr`` import), strong for Chinese.
 
     FunASR does not expose token log-probabilities, so a neutral
     ``default_confidence`` is attached; the cross-engine disagreement signal is
-    what flags Paraformer's uncertain regions downstream.
+    what flags Paraformer's uncertain regions downstream. ``language`` is
+    accepted for the shared adapter interface but is not forwarded to the
+    default Chinese-specific ``paraformer-zh`` model.
     """
 
     name = "funasr"
@@ -192,12 +239,14 @@ class FunASRAdapter(ASRAdapter):
         vad_model: str = "fsmn-vad",
         punc_model: str = "ct-punc",
         device: str | None = None,
+        language: str | None = None,
         default_confidence: float = 0.6,
     ) -> None:
         self.model = model
         self.vad_model = vad_model
         self.punc_model = punc_model
         self.device = device
+        self.language = language
         self.default_confidence = validate_score(default_confidence, "default_confidence")
         self._model: Any = None
 
@@ -225,14 +274,18 @@ _ADAPTERS: dict[str, type[ASRAdapter]] = {
     "mock": MockASRAdapter,
     "whisper": WhisperAdapter,
     "whisperx": WhisperXAdapter,
+    "faster-whisper": FasterWhisperAdapter,
     "funasr": FunASRAdapter,
     "paraformer": FunASRAdapter,
 }
 
-
 def get_adapter(name: str = "mock", **kwargs: Any) -> ASRAdapter:
     """Build an ASR adapter by name (``mock``, ``whisperx``, ``whisper``, ``funasr``)."""
+    from src.fallbacks import resolve_asr_backend
+
     key = name.lower()
+    if key == "auto":
+        key = resolve_asr_backend()
     if key not in _ADAPTERS:
         raise ValueError(f"unknown ASR adapter '{name}'; choose from {sorted(_ADAPTERS)}")
     return _ADAPTERS[key](**kwargs)
@@ -260,7 +313,7 @@ def transcribe_segments(
     Each input segment must carry ``start_time``/``end_time`` (as produced by
     :func:`src.audio.preprocess.segment_waveform`). The matching audio slice is
     transcribed and the result merged in, leaving the original keys intact so the
-    enriched segments can flow into :func:`src.metadata_builder.build_metadata_segment`.
+    enriched segments can flow into :func:`src.evidence.builder.build_metadata_segment`.
     """
     samples = np.asarray(samples, dtype=np.float32)
     enriched: list[dict[str, Any]] = []

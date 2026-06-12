@@ -46,11 +46,11 @@ Runs energy-threshold VAD to detect speech regions:
 **Artifact:** `vad_segments.json`
 
 ### Step 4: Overlap Scoring
-**Module:** `src/overlap_detector.py` — `estimate_segment_overlap_scores()`
+**Module:** `src/overlap/detector.py` — `estimate_segment_overlap_scores()`
 
 Attaches an `overlap_score` [0, 1] to each segment. Three strategies, tried in order:
 
-1. **pyannote OSD** (if `HF_TOKEN` is set): loads the `pyannote/overlapped-speech-detection` model, detects overlapped-speech regions, and computes per-segment overlap coverage ratio.
+1. **pyannote OSD** (if `HF_TOKEN` is set): loads the `pyannote/overlapped-speech-detection` model, detects overlapped-speech regions, and computes per-segment overlap coverage ratio. Once configured, loading or inference failures are surfaced instead of silently changing detectors.
 2. **Explicit regions** (if `overlap_regions` parameter is provided): computes coverage of provided regions.
 3. **Energy fallback**: computes a weak proxy from per-frame RMS high-energy ratio and dynamic range, capped at 0.39 to prevent false routing to the high-overlap path.
 
@@ -59,7 +59,7 @@ Each segment also receives an `overlap_detector` field identifying the strategy 
 **Artifact:** `overlap.json`
 
 ### Step 5: Routing
-**Module:** `src/dual_path_router.py` — `route_segment()`
+**Module:** `src/overlap/router.py` — `route_segment()`
 
 Routes each segment to one of two paths based on `overlap_score >= threshold` (default threshold: 0.4):
 - `"low_overlap_cluster"` — handled by ASR + speaker attribution
@@ -86,7 +86,7 @@ For high-overlap segments, the main evidence record intentionally avoids a force
 - `speaker_confidence` is low
 - multiple transcript/speaker hypotheses are stored in `candidates`
 
-Candidate generation uses `src/candidate_generator.py` and prefers faster-whisper multi-decode settings:
+Candidate generation uses `src/candidates/generator.py` and prefers faster-whisper multi-decode settings:
 - `beam_size`: 1 / 5
 - `temperature`: 0.0 / 0.4 / 0.8
 - `language`: auto / zh / en
@@ -106,7 +106,7 @@ Fields: `meeting_id`, `segment_id`, `evidence_id`, `speaker`, `start_time`, `end
 Writes each segment's audio slice as a float32 WAV file to `outputs/{meeting_id}/clips/{evidence_id}.wav`. The `audio_clip_path` field is updated accordingly.
 
 ### Step 10: Schema Validation
-**Module:** `src/schema_validation.py` — `validate_metadata_segment()`
+**Module:** `src/evidence/validator.py` — `validate_metadata_segment()`
 
 Validates every evidence record against the canonical schema: required fields, types, score ranges [0, 1], valid processing paths, time ordering, and candidate structure (high-overlap segments must have candidates).
 
