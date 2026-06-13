@@ -254,8 +254,9 @@ def build_metadata_segment(
 ### `src/evidence/validator.py`
 
 ```python
-def validate_metadata_segment(record: Any) -> dict[str, Any]
-def validate_meeting(segments: Any) -> list[dict[str, Any]]
+def validate_metadata_segment(record: Any, *, require_audio_clip: bool = False) -> dict[str, Any]
+def validate_meeting(segments: Any, *, require_audio_clips: bool = False) -> list[dict[str, Any]]
+def validate_evidence_segments(segments: list[dict[str, Any]], require_audio_clips: bool = False) -> list[str]
 def validate_candidate(candidate: Any, index: int = 0) -> dict[str, Any]
 ```
 

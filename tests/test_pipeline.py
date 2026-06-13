@@ -15,6 +15,34 @@ from src.llm.gemma_client import GemmaClient
 
 
 class PipelineTests(unittest.TestCase):
+    @patch("src.pipeline.run_pipeline.write_segment_clips")
+    def test_pipeline_rejects_missing_exported_audio_clip(self, mocked_write_clips) -> None:
+        try:
+            import soundfile as sf
+        except ImportError:
+            self.skipTest("soundfile is not installed")
+
+        def missing_clip_paths(samples, sample_rate, segments, output_dir):
+            return [
+                {**segment, "audio_clip_path": str(Path(output_dir) / "missing.wav")}
+                for segment in segments
+            ]
+
+        mocked_write_clips.side_effect = missing_clip_paths
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sample_rate = 16000
+            t = np.arange(sample_rate) / sample_rate
+            input_path = root / "input.wav"
+            sf.write(input_path, (0.5 * np.sin(2 * np.pi * 220 * t)).astype(np.float32), sample_rate)
+
+            with self.assertRaisesRegex(ValueError, "does not exist or is not a file"):
+                run_meeting_pipeline(
+                    str(input_path),
+                    "meeting_missing_clip",
+                    PipelineConfig(outputs_root=root / "outputs"),
+                )
+
     def test_pipeline_accepts_structured_gemma_client(self) -> None:
         try:
             import soundfile as sf

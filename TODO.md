@@ -38,7 +38,7 @@ acceptance criteria, schemas, and final deliverables are defined in
   uncertainty instead of forcing one transcript. / 完成高重叠多候选路径。
 - [ ] Step 11 - Optional speech separation baseline for high-overlap segments. / 实现可选语音分离。
 - [x] Step 12 - Evidence-segment schema builder and validator. / 完成统一 Evidence Schema 构建与校验。
-- [ ] Validate that every emitted `audio_clip_path` exists on disk. / 在校验器中检查每个音频路径真实存在。
+- [x] Validate that every emitted `audio_clip_path` exists on disk. / 在校验器中检查每个音频路径真实存在。
 
 ## Phase 3: LLM, Memory, and QA / 阶段三：LLM、记忆与问答
 

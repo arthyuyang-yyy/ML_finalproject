@@ -95,7 +95,10 @@ def run_meeting_pipeline(
     )
 
     evidence_segments = write_segment_clips(samples, sample_rate, evidence_segments, paths["clips"])
-    evidence_segments = [validate_metadata_segment(segment) for segment in evidence_segments]
+    evidence_segments = [
+        validate_metadata_segment(segment, require_audio_clip=True)
+        for segment in evidence_segments
+    ]
     low_overlap_segments = [
         segment for segment in evidence_segments if segment["processing_path"] == "low_overlap_cluster"
     ]

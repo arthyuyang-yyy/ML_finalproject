@@ -6,6 +6,7 @@ Run with the standard library only::
 """
 
 import json
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -98,6 +99,39 @@ class SegmentValidationTests(unittest.TestCase):
     def test_validate_metadata_segment_rejects_non_dict(self) -> None:
         with self.assertRaises(ValueError):
             validate_metadata_segment(["not", "a", "dict"])  # type: ignore[arg-type]
+
+    def test_strict_audio_clip_validation_accepts_existing_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            clip_path = Path(tmp) / "clip.wav"
+            clip_path.touch()
+            record = _valid_low_overlap()
+            record["audio_clip_path"] = str(clip_path)
+
+            self.assertEqual(
+                validate_metadata_segment(record, require_audio_clip=True),
+                record,
+            )
+
+    def test_strict_audio_clip_validation_rejects_missing_file(self) -> None:
+        record = _valid_low_overlap()
+        record["audio_clip_path"] = "missing/clip.wav"
+
+        with self.assertRaisesRegex(ValueError, "does not exist or is not a file"):
+            validate_metadata_segment(record, require_audio_clip=True)
+
+    def test_strict_audio_clip_validation_rejects_empty_path(self) -> None:
+        record = _valid_low_overlap()
+
+        with self.assertRaisesRegex(ValueError, "must be a non-empty string"):
+            validate_metadata_segment(record, require_audio_clip=True)
+
+    def test_strict_audio_clip_validation_rejects_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            record = _valid_low_overlap()
+            record["audio_clip_path"] = tmp
+
+            with self.assertRaisesRegex(ValueError, "does not exist or is not a file"):
+                validate_metadata_segment(record, require_audio_clip=True)
 
     def test_low_overlap_requires_text(self) -> None:
         record = _valid_low_overlap()
