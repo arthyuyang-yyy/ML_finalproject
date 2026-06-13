@@ -187,6 +187,50 @@ class EvidenceSupportTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             evaluate_evidence_support([], [])
 
+    def test_content_support_perfect(self) -> None:
+        """ID correct and claim text is semantically close to evidence text."""
+        text_map = {"e1": "the budget was approved by the entire team"}
+        preds = [{"evidence_ids": ["e1"], "text": "the budget is approved"}]
+        refs = [{"evidence_ids": ["e1"], "text": "the budget is approved"}]
+        result = evaluate_evidence_support(preds, refs, evidence_text_map=text_map)
+        self.assertEqual(result["evidence_precision"], 1.0)
+        self.assertGreater(result["content_precision"], 0.0)
+        self.assertGreater(result["content_hit_rate"], 0.0)
+        self.assertEqual(result["content_unsupported_rate"], 0.0)
+
+    def test_content_support_id_match_but_content_mismatch(self) -> None:
+        """ID is correct but claim text is unrelated to evidence text."""
+        text_map = {"e1": "the budget was approved by the entire team"}
+        preds = [{"evidence_ids": ["e1"], "text": "we will ship next friday"}]
+        refs = [{"evidence_ids": ["e1"], "text": "we will ship next friday"}]
+        result = evaluate_evidence_support(preds, refs, evidence_text_map=text_map)
+        # ID-level should be perfect
+        self.assertEqual(result["evidence_precision"], 1.0)
+        self.assertEqual(result["evidence_hit_rate"], 1.0)
+        # Content-level should drop because texts are unrelated
+        self.assertEqual(result["content_precision"], 0.0)
+        self.assertEqual(result["content_hit_rate"], 0.0)
+        self.assertEqual(result["content_unsupported_rate"], 1.0)
+
+    def test_content_support_backward_compatible(self) -> None:
+        """Without evidence_text_map, no content keys appear and old metrics are unchanged."""
+        preds = [{"evidence_ids": ["e1", "e2"]}, {"evidence_ids": ["e3"]}]
+        refs = [{"evidence_ids": ["e1", "e2"]}, {"evidence_ids": ["e3"]}]
+        result = evaluate_evidence_support(preds, refs)
+        self.assertEqual(result["evidence_precision"], 1.0)
+        for key in result:
+            self.assertFalse(key.startswith("content_"), f"unexpected content key: {key}")
+
+    def test_content_support_missing_text_field(self) -> None:
+        """When text is missing, content metrics fall back to zero/NaN safely."""
+        text_map = {"e1": "some evidence text"}
+        preds = [{"evidence_ids": ["e1"]}]  # no text field
+        refs = [{"evidence_ids": ["e1"]}]   # no text field
+        result = evaluate_evidence_support(preds, refs, evidence_text_map=text_map)
+        self.assertEqual(result["evidence_precision"], 1.0)
+        self.assertEqual(result["content_precision"], 0.0)
+        self.assertEqual(result["content_hit_rate"], 0.0)
+
 
 class UncertaintyPreservationTests(unittest.TestCase):
     def test_preserved_and_collapsed(self) -> None:

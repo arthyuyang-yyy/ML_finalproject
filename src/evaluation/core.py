@@ -2,16 +2,16 @@
 
 This module implements word/character error rate, overlap-routing classification
 metrics, best-mapping speaker-attribution accuracy, evidence-support metrics
-(precision/recall/F1, hit rate, unsupported-claim and hallucination rate, and
-confidence calibration), uncertainty-preservation quality, and candidate
-usefulness, following ``docs/experiment_plan.md`` (Experiments 2 and 5).
-
-These metrics score evidence IDs, uncertainty signals, and candidate text; they
-do not yet judge whether a claim's wording is entailed by the evidence content.
+(precision/recall/F1, hit rate, unsupported-claim and hallucination rate,
+confidence calibration, and optional content-level entailment),
+uncertainty-preservation quality, and candidate usefulness, following
+``docs/experiment_plan.md`` (Experiments 2 and 5).
 """
 
 from itertools import permutations
 from typing import Any
+
+from src.fallbacks.embeddings import HashingEmbeddingBackend
 
 HIGH_OVERLAP = "high_overlap_candidate"
 LOW_OVERLAP = "low_overlap_cluster"
@@ -148,6 +148,35 @@ def speaker_attribution_accuracy(reference: list[str], hypothesis: list[str]) ->
 _CONFIDENCE_VALUES = {"high": 0.9, "medium": 0.6, "low": 0.3}
 
 
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    """Cosine similarity between two equal-length unit vectors."""
+    return sum(x * y for x, y in zip(a, b))
+
+
+def _content_supported(
+    claim_text: str,
+    evidence_text: str,
+    threshold: float = 0.45,
+    backend: HashingEmbeddingBackend | None = None,
+) -> tuple[bool, float]:
+    """Return whether *evidence_text* semantically supports *claim_text*.
+
+    Uses the dependency-free :class:`HashingEmbeddingBackend` (character n-gram
+    + CJK token hashing) so this check works without torch, transformers, or
+    sentence-transformers.  Both texts are normalised and encoded; if either is
+    empty the score is ``0.0``.
+    """
+    claim_text = claim_text.strip()
+    evidence_text = evidence_text.strip()
+    if not claim_text or not evidence_text:
+        return False, 0.0
+    if backend is None:
+        backend = HashingEmbeddingBackend()
+    claim_vec, ev_vec = backend.encode([claim_text, evidence_text])
+    score = _cosine_similarity(claim_vec, ev_vec)
+    return score >= threshold, score
+
+
 def _confidence_value(confidence: Any) -> float | None:
     """Map a confidence label or numeric score to a probability in [0, 1]."""
     if isinstance(confidence, bool):
@@ -161,6 +190,8 @@ def evaluate_evidence_support(
     predictions: list[dict],
     references: list[dict],
     source_evidence_ids: Any = None,
+    evidence_text_map: dict[str, str] | None = None,
+    content_similarity_threshold: float = 0.45,
 ) -> dict[str, Any]:
     """Evaluate evidence traceability for a set of aligned claim/reference pairs.
 
@@ -173,25 +204,34 @@ def evaluate_evidence_support(
       abstention rather than an asserted claim;
     - prediction ``confidence`` (optional): ``"high"``/``"medium"``/``"low"`` or
       a numeric score in [0, 1], used for calibration;
+    - prediction ``text`` (optional): the claim wording, used for content-level
+      support checking when ``evidence_text_map`` is provided;
     - reference ``evidence_ids``: the gold supporting evidence (empty means the
-      claim is not supportable and a faithful system should abstain).
+      claim is not supportable and a faithful system should abstain);
+    - reference ``text`` (optional): fallback claim wording when the prediction
+      lacks a ``text`` field.
 
     ``source_evidence_ids`` is the universe of evidence IDs that actually exist
     in the source segments; a cited ID outside it counts as a hallucination.
+
+    ``evidence_text_map`` maps evidence IDs to their source text. When provided,
+    an additional *content-level* check is performed: a citation counts as
+    content-supported only when its ID is correct **and** its text is
+    semantically similar to the claim text (cosine similarity of
+    :class:`HashingEmbeddingBackend` vectors >= ``content_similarity_threshold``).
+    This addresses the experiment-plan gap where metrics previously checked only
+    evidence IDs, not whether the claim wording is entailed by the evidence.
 
     Caveat: for a meaningful ``hallucination_rate`` callers MUST pass the full
     set of real source evidence IDs. When it is omitted it defaults to the union
     of all gold evidence IDs, which makes any real-but-non-gold citation look
     hallucinated and conflates hallucination with ``unsupported_claim_rate``.
 
-    Scope: these metrics check whether the *cited evidence IDs* are correct; they
-    do not yet verify that the claim *text* is entailed by the evidence content.
-    Uncertainty-preservation and candidate-usefulness metrics are not covered
-    here (see ``docs/experiment_plan.md`` Experiment 5 follow-ups).
-
     Returns evidence precision/recall/F1, evidence hit rate, unsupported-claim
-    rate, hallucination rate, and confidence-calibration error (ECE), following
-    the metric definitions in ``docs/experiment_plan.md`` (Experiment 5).
+    rate, hallucination rate, and confidence-calibration error (ECE).  When
+    ``evidence_text_map`` is provided, additional ``content_*`` metrics are
+    included (content precision/recall/F1, content hit rate, and content
+    unsupported rate).
     """
     if len(predictions) != len(references):
         raise ValueError("predictions and references must have the same length")
@@ -228,7 +268,7 @@ def evaluate_evidence_support(
 
     calibration = _confidence_calibration(predictions, cited_sets, gold_sets)
 
-    return {
+    result = {
         "support": len(predictions),
         "answerable": len(answerable),
         "claims": len(claims),
@@ -240,6 +280,75 @@ def evaluate_evidence_support(
         "hallucination_rate": hallucination_rate,
         **calibration,
     }
+
+    # Content-level support (optional): check whether claim text is semantically
+    # entailed by cited evidence text, not just whether the IDs match.
+    if evidence_text_map is not None:
+        content_cited = 0
+        content_gold = 0
+        content_correct = 0
+        content_hits = 0
+        content_unsupported = 0
+        backend = HashingEmbeddingBackend()
+
+        for i, (pred, ref) in enumerate(zip(predictions, references)):
+            claim_text = str(pred.get("text") or ref.get("text") or "").strip()
+            cited = cited_sets[i]
+            gold = gold_sets[i]
+
+            cited_with_text = {eid for eid in cited if eid in evidence_text_map}
+            gold_with_text = {eid for eid in gold if eid in evidence_text_map}
+
+            content_cited += len(cited_with_text)
+            content_gold += len(gold_with_text)
+
+            has_content_support = False
+            if claim_text and cited_with_text:
+                claim_vec = backend.encode([claim_text])[0]
+                for eid in cited_with_text & gold_with_text:
+                    ev_vec = backend.encode([evidence_text_map[eid]])[0]
+                    score = _cosine_similarity(claim_vec, ev_vec)
+                    if score >= content_similarity_threshold:
+                        content_correct += 1
+                        has_content_support = True
+
+            if gold_with_text and has_content_support:
+                content_hits += 1
+            if not pred.get("insufficient_evidence") and gold_with_text and not has_content_support:
+                content_unsupported += 1
+
+        content_precision = content_correct / content_cited if content_cited else 0.0
+        content_recall = content_correct / content_gold if content_gold else 0.0
+        content_f1 = (
+            2 * content_precision * content_recall / (content_precision + content_recall)
+            if (content_precision + content_recall)
+            else 0.0
+        )
+
+        answerable_text = [
+            i for i, gold in enumerate(gold_sets)
+            if any(eid in evidence_text_map for eid in gold)
+        ]
+        claims_text = [
+            i for i in claims
+            if any(eid in evidence_text_map for eid in gold_sets[i])
+        ]
+
+        result.update({
+            "content_precision": content_precision,
+            "content_recall": content_recall,
+            "content_f1": content_f1,
+            "content_hit_rate": content_hits / len(answerable_text) if answerable_text else 0.0,
+            "content_unsupported_rate": content_unsupported / len(claims_text) if claims_text else 0.0,
+            "content_support": len(predictions),
+            "content_answerable": len(answerable_text),
+            "content_claims": len(claims_text),
+            "content_cited": content_cited,
+            "content_gold": content_gold,
+            "content_correct": content_correct,
+        })
+
+    return result
 
 
 def _confidence_calibration(

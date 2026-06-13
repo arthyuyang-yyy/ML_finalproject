@@ -96,13 +96,15 @@ Evaluate whether answers, decisions, and action items are supported by timestamp
   (callers **must** pass the full `source_evidence_ids` universe; otherwise it defaults to the gold
   union and conflates real-but-non-gold citations with hallucinations)
 - Confidence calibration: Expected Calibration Error between confidence and correctness
+- Content-level precision/recall/F1, hit rate, and unsupported rate: whether the *claim text* is
+  semantically supported by the *evidence text*, using the dependency-free
+  `HashingEmbeddingBackend` (enabled via the `evidence_text_map` argument)
 
-**Status:** Evidence-ID-based metrics, uncertainty-preservation, and candidate-usefulness are
-implemented, unit-tested, and runnable end-to-end via `experiments/evidence_eval/run_experiment.py`
-(which prints a results table over an annotated set). Still pending: content-level support checking
-(whether the claim *text* is entailed by the evidence, not just the cited IDs) and a real
-evaluation corpus — the bundled annotations are a hand-authored seed, not human-labeled pipeline
-outputs.
+**Status:** Evidence-ID-based metrics, uncertainty-preservation, candidate-usefulness, and
+content-level support checking are implemented, unit-tested, and runnable end-to-end via
+`experiments/evidence_eval/run_experiment.py` (which prints a results table over an annotated set).
+Still pending: a real evaluation corpus — the bundled annotations are a hand-authored seed, not
+human-labeled pipeline outputs.
 
 ## Evaluation Functions Reference
 
