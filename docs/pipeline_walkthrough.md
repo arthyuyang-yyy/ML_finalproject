@@ -92,10 +92,11 @@ For high-overlap segments, the main evidence record intentionally avoids a force
 - `speaker_confidence` is low
 - multiple transcript/speaker hypotheses are stored in `candidates`
 
-When `speech_separation_backend="sepformer"` is enabled, the clip first runs
-through the replaceable adapter in `src/speech_separation.py`. Each separated
-source is transcribed into a distinct candidate. Source order is not treated as
-a confirmed speaker identity.
+When `speech_separation_backend` is enabled (`"nmf"` for the dependency-free
+from-scratch baseline, or `"sepformer"` for the heavier SpeechBrain model), the
+clip first runs through the replaceable adapter in `src/speech_separation.py`.
+Each separated source is transcribed into a distinct candidate. Source order is
+not treated as a confirmed speaker identity.
 
 When separation is disabled, unavailable, fails, or produces no usable ASR
 candidates, candidate generation uses `src/candidates/generator.py` and

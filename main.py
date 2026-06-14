@@ -17,7 +17,7 @@ def main() -> None:
     parser.add_argument("--asr-compute-type", default="int8", help="faster-whisper compute type, for example int8 or float16.")
     parser.add_argument("--denoise", action="store_true", help="Enable optional stationary-noise reduction before ASR.")
     parser.add_argument("--denoise-strength", type=float, default=0.5, help="Denoise strength in [0, 1].")
-    parser.add_argument("--speech-separation", default="none", choices=["none", "sepformer"], help="Optional high-overlap speech-separation backend.")
+    parser.add_argument("--speech-separation", default="none", choices=["none", "nmf", "sepformer"], help="Optional high-overlap speech-separation backend (nmf is dependency-free; sepformer needs SpeechBrain).")
     parser.add_argument("--sepformer-model", default="speechbrain/sepformer-whamr16k", help="SpeechBrain SepFormer model source.")
     parser.add_argument("--speech-separation-device", default="cpu", help="Device used by the speech-separation model.")
     parser.add_argument("--language", default="und")

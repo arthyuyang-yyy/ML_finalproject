@@ -11,6 +11,7 @@ import numpy as np
 
 from src.audio.preprocess import TARGET_SAMPLE_RATE, load_audio, resample
 from src.errors import BackendExecutionError, BackendOutputError, BackendUnavailableError
+from src.nmf_separation import DEFAULT_NUM_SOURCES, NmfSeparationBackend
 
 DEFAULT_SEPFORMER_MODEL = "speechbrain/sepformer-whamr16k"
 logger = logging.getLogger(__name__)
@@ -48,6 +49,44 @@ class MockSpeechSeparationAdapter:
             return [np.asarray(source, dtype=np.float32) for source in self.sources]
         waveform = np.asarray(samples, dtype=np.float32)
         return [waveform.copy(), waveform.copy()]
+
+
+class NmfSeparationAdapter:
+    """Dependency-free NMF separation baseline wrapped as a pluggable adapter.
+
+    Wraps the from-scratch numpy ``NmfSeparationBackend`` (see
+    :mod:`src.nmf_separation`) in the :class:`SpeechSeparationAdapter` interface
+    so it can be selected from the CLI/pipeline like any other backend. Unlike
+    SepFormer it needs no heavy dependencies, so it is the default *real*
+    separator that CI can exercise end to end. Source order carries no speaker
+    identity; downstream keeps the neutral ``SEPARATED_SOURCE_0x`` labels.
+    """
+
+    name = "nmf"
+
+    def __init__(
+        self,
+        num_sources: int = DEFAULT_NUM_SOURCES,
+        n_components: int | None = None,
+        n_iter: int = 200,
+        seed: int = 0,
+    ) -> None:
+        if num_sources <= 0:
+            raise ValueError("num_sources must be positive")
+        self.num_sources = num_sources
+        self._backend = NmfSeparationBackend(
+            n_components=n_components, n_iter=n_iter, seed=seed
+        )
+
+    def separate_array(self, samples: np.ndarray, sample_rate: int) -> list[np.ndarray]:
+        waveform = np.asarray(samples, dtype=np.float32).reshape(-1)
+        if waveform.size == 0:
+            return []
+        try:
+            sources = self._backend.separate(waveform, sample_rate, self.num_sources)
+        except Exception as exc:
+            raise BackendExecutionError("NMF separation failed") from exc
+        return [np.asarray(source, dtype=np.float32) for source in sources]
 
 
 class SepFormerAdapter:
@@ -99,6 +138,8 @@ def get_separation_adapter(name: str = "none", **kwargs: Any) -> SpeechSeparatio
         return DisabledSpeechSeparationAdapter()
     if normalized == "mock":
         return MockSpeechSeparationAdapter(**kwargs)
+    if normalized == "nmf":
+        return NmfSeparationAdapter(**kwargs)
     if normalized in {"sepformer", "speechbrain-sepformer"}:
         return SepFormerAdapter(**kwargs)
     raise ValueError(f"unknown speech-separation backend: {name}")
@@ -229,6 +270,7 @@ __all__ = [
     "DEFAULT_SEPFORMER_MODEL",
     "DisabledSpeechSeparationAdapter",
     "MockSpeechSeparationAdapter",
+    "NmfSeparationAdapter",
     "SepFormerAdapter",
     "SpeechSeparationAdapter",
     "get_separation_adapter",

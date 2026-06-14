@@ -47,7 +47,7 @@ See [pipeline_walkthrough.md](pipeline_walkthrough.md) for the complete 14-step 
 | Low-overlap path | `src/low_overlap.py` | Produce stable text, speaker, timestamps, ASR confidence, and speaker confidence for low-overlap segments |
 | ASR | `src/asr/core.py` | Pluggable adapters (Mock/WhisperX/Whisper/Paraformer) with calibrated confidence; WhisperX is the preferred heavy backend for low-overlap segments |
 | Diarization | `src/diarization/core.py` | pyannote speaker turns when configured, otherwise deterministic speaker-labeling fallback |
-| Speech separation | `src/speech_separation.py` | Replaceable adapters with an optional SpeechBrain SepFormer baseline, disabled by default with safe fallback |
+| Speech separation | `src/speech_separation.py`, `src/nmf_separation.py` | Replaceable adapters: a dependency-free from-scratch NMF baseline (`nmf`) and an optional SpeechBrain SepFormer baseline (`sepformer`), disabled by default with safe fallback |
 | High-overlap path | `src/high_overlap.py` | Prefer per-source ASR candidates after optional separation; otherwise use multi-decode candidates while preserving a mixed/empty main record |
 | Candidate generator | `src/candidates/generator.py` | Produce multiple transcript/speaker hypotheses with faster-whisper beam/temperature/language variations, with fallback candidates for lightweight runs |
 | Evidence builder | `src/evidence/builder.py` | Merge low/high-overlap results, normalize candidates, sort by time, and emit the shared evidence schema (17 required + 1 optional field) |

@@ -176,7 +176,8 @@ class SpeechSeparationAdapter:
 
 class DisabledSpeechSeparationAdapter: name = "none"
 class MockSpeechSeparationAdapter:     name = "mock"
-class SepFormerAdapter:                name = "sepformer"
+class NmfSeparationAdapter:            name = "nmf"        # dependency-free, numpy
+class SepFormerAdapter:                name = "sepformer"  # SpeechBrain, heavy
 
 def get_separation_adapter(name: str = "none", **kwargs) -> SpeechSeparationAdapter
 def separate_waveform(samples, sample_rate, adapter=None,
@@ -184,7 +185,15 @@ def separate_waveform(samples, sample_rate, adapter=None,
 def separate_speakers(audio_path: str, output_dir=None, adapter=None) -> list[str]
 ```
 
-The optional Step 11 baseline uses `speechbrain/sepformer-whamr16k`. It is
+```python
+# src/nmf_separation.py — from-scratch numpy NMF backend wrapped by NmfSeparationAdapter
+class NmfSeparationBackend:
+    def separate(self, mixture, sample_rate, num_sources) -> list[np.ndarray]
+```
+
+Step 11 offers two real, replaceable backends: a dependency-free NMF baseline
+(`nmf`, implemented from scratch in `src/nmf_separation.py`) and a heavier
+SpeechBrain `speechbrain/sepformer-whamr16k` baseline (`sepformer`). Both are
 disabled by default. Backend failures return no separated sources to the
 high-overlap path, which then keeps the existing multi-decode candidate fallback.
 
