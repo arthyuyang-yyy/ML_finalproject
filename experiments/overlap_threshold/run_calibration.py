@@ -279,10 +279,12 @@ def build_labeled_dataset(
         meeting_segments = score_meeting_segments(audio_path, detector, window_seconds)
         print(f"  {meeting_id}: {len(meeting_segments)} segments")
         for segment in meeting_segments:
+            true_fraction = segment_overlap_fraction(segment, regions)
             labeled.append({
                 "meeting_id": meeting_id,
                 "overlap_score": float(segment["overlap_score"]),
-                "gt_label": label_segment(segment, regions, gt_fraction),
+                "gt_fraction": round(true_fraction, 4),
+                "gt_label": HIGH_OVERLAP if true_fraction >= gt_fraction else LOW_OVERLAP,
             })
     return labeled
 
@@ -325,8 +327,15 @@ def run(
     gt_fraction: float = 0.5,
     window_seconds: float = 2.0,
     thresholds: list[float] | None = None,
+    dump_dir: str | Path | None = None,
 ) -> dict[str, Any]:
-    """Run threshold calibration for each detector and return a combined report."""
+    """Run threshold calibration for each detector and return a combined report.
+
+    When ``dump_dir`` is set, each detector's per-window scored dataset
+    (``meeting_id``/``overlap_score``/``gt_fraction``) is written there so the
+    expensive detector pass can be reused for offline analysis (stratified split,
+    finer sweeps, per-overlap-level buckets) without re-running the model.
+    """
     records = load_annotation_records(annotations_dir)
     audio_lookup = make_audio_lookup(audio_dir)
     meeting_ids = [str(record["meeting_id"]) for record in records]
@@ -345,12 +354,18 @@ def run(
         "test_meetings": test_ids,
         "detectors": {},
     }
+    if dump_dir is not None:
+        Path(dump_dir).mkdir(parents=True, exist_ok=True)
     for detector in detectors:
         print(f"\n=== detector: {detector} ===")
         labeled = build_labeled_dataset(records, audio_lookup, detector, gt_fraction, window_seconds)
         if not labeled:
             print(f"  [warn] no labeled segments for detector '{detector}'")
             continue
+        if dump_dir is not None:
+            dump_path = Path(dump_dir) / f"{detector}_scored.json"
+            dump_path.write_text(json.dumps(labeled, ensure_ascii=False), encoding="utf-8")
+            print(f"  dumped {len(labeled)} scored windows -> {dump_path}")
         results["detectors"][detector] = calibrate_and_evaluate(
             labeled, train_ids, test_ids, thresholds
         )
@@ -373,6 +388,8 @@ def main() -> None:
                         help="fixed window length for segmentation; <= 0 uses energy VAD")
     parser.add_argument("--out-dir", default="outputs/overlap_threshold",
                         help="where to write results.json (git-ignored by default)")
+    parser.add_argument("--dump-scored", action="store_true",
+                        help="also dump per-window scores to out-dir for offline analysis")
     args = parser.parse_args()
 
     results = run(
@@ -383,6 +400,7 @@ def main() -> None:
         seed=args.seed,
         gt_fraction=args.gt_fraction,
         window_seconds=args.window_seconds,
+        dump_dir=args.out_dir if args.dump_scored else None,
     )
 
     out_dir = Path(args.out_dir)
