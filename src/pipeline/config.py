@@ -22,6 +22,9 @@ class PipelineConfig:
     faster_whisper_compute_type: str = "int8"
     enable_denoise: bool = False
     denoise_strength: float = 0.5
+    speech_separation_backend: str = "none"
+    sepformer_model_source: str = "speechbrain/sepformer-whamr16k"
+    speech_separation_device: str = "cpu"
     gemma_backend: str = "none"
     gemma_model: str = "gemma3:4b"
     gemma_base_url: str = "http://127.0.0.1:11434"

@@ -15,6 +15,7 @@ from src.memory.episodic_store import build_episodes, upsert_episodes
 from src.overlap.detector import estimate_segment_overlap_scores
 from src.audio.preprocess import preprocess_audio, segment_waveform
 from src.evidence import validate_metadata_segment
+from src.speech_separation import get_separation_adapter
 
 from .config import PipelineConfig
 from .io import ensure_meeting_dirs, write_json
@@ -86,6 +87,10 @@ def run_meeting_pipeline(
         sample_rate=sample_rate,
         language=cfg.language,
         diarization_turns=diarization_turns,
+        separation_adapter=get_separation_adapter(
+            cfg.speech_separation_backend,
+            **_separation_adapter_kwargs(cfg),
+        ),
     )
     evidence_segments = build_evidence_segments(
         low_overlap_processed,
@@ -158,3 +163,12 @@ def _adapter_kwargs(config: PipelineConfig) -> dict[str, Any]:
             "compute_type": config.faster_whisper_compute_type,
         })
     return kwargs
+
+
+def _separation_adapter_kwargs(config: PipelineConfig) -> dict[str, Any]:
+    if config.speech_separation_backend.lower() not in {"sepformer", "speechbrain-sepformer"}:
+        return {}
+    return {
+        "model_source": config.sepformer_model_source,
+        "device": config.speech_separation_device,
+    }

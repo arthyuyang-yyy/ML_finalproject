@@ -50,6 +50,70 @@ def generate_high_overlap_candidates(
     return fallback_candidates(segment, configs[:2], speaker_hypotheses)
 
 
+def generate_separated_source_candidates(
+    segment: dict,
+    sources: list[np.ndarray],
+    sample_rate: int = TARGET_SAMPLE_RATE,
+    language: str | None = None,
+    separation_backend: str = "unknown",
+    max_candidates: int = 4,
+) -> list[dict]:
+    """Transcribe separated speaker sources into high-overlap candidates."""
+    if not sources:
+        return []
+    try:
+        import faster_whisper  # noqa: F401 - availability check
+    except ImportError:
+        return []
+
+    model_name = os.environ.get("FASTER_WHISPER_MODEL", "small")
+    device = os.environ.get("FASTER_WHISPER_DEVICE", "cpu")
+    compute_type = os.environ.get("FASTER_WHISPER_COMPUTE_TYPE", "int8")
+    try:
+        model = _load_faster_whisper_model(model_name, device, compute_type)
+    except Exception:
+        return []
+
+    segment_id = str(segment.get("segment_id") or segment.get("evidence_id") or "segment")
+    config = _with_language_override([DEFAULT_DECODE_CONFIGS[0]], language)[0]
+    candidates: list[dict] = []
+    for source_index, source in enumerate(sources[:max_candidates], start=1):
+        waveform = np.asarray(source, dtype=np.float32).reshape(-1)
+        if waveform.size == 0:
+            continue
+        try:
+            decoded_segments, _ = model.transcribe(
+                waveform,
+                beam_size=int(config["beam_size"]),
+                temperature=float(config["temperature"]),
+                language=config.get("language"),
+            )
+            decoded = list(decoded_segments)
+        except Exception:
+            continue
+        text = " ".join(str(item.text).strip() for item in decoded if str(item.text).strip()).strip()
+        if not text:
+            continue
+        candidates.append({
+            "candidate_id": f"{segment_id}_sep{source_index}",
+            "speaker": f"SEPARATED_SOURCE_{source_index:02d}",
+            "text": text,
+            "confidence": _confidence_from_decoded_segments(decoded),
+            "uncertainty_note": (
+                f"High-overlap segment separated by {separation_backend} before ASR; "
+                "source-to-speaker assignment remains uncertain."
+            ),
+            "decode_config": {
+                "backend": separation_backend,
+                "source_index": source_index,
+                "beam_size": int(config["beam_size"]),
+                "temperature": float(config["temperature"]),
+                "language": config.get("language") or "auto",
+            },
+        })
+    return candidates
+
+
 def _generate_with_faster_whisper(
     segment: dict,
     samples: np.ndarray,

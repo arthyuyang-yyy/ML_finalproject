@@ -64,7 +64,9 @@ LLM 是结构化事件抽取和答案组织的可选实验组件。RAG 检索、
   confidence values. / 完成低重叠稳定转写路径。
 - [x] Step 10 - High-overlap path preserving multiple candidates and
   uncertainty instead of forcing one transcript. / 完成高重叠多候选路径。
-- [ ] Step 11 - Optional speech separation baseline for high-overlap segments. / 实现可选语音分离。
+- [x] Step 11 - Optional SpeechBrain SepFormer baseline for high-overlap
+  segments, with replaceable adapters and multi-decode fallback.
+  / 完成可选 SepFormer 高重叠语音分离、可替换接口和多候选回退。
 - [x] Step 12 - Evidence-segment schema builder and validator. / 完成统一 Evidence Schema 构建与校验。
 - [x] Validate that every emitted `audio_clip_path` exists on disk. / 在校验器中检查每个音频路径真实存在。
 

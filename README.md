@@ -176,6 +176,7 @@ Implemented and runnable:
 - configurable ASR adapters (auto/WhisperX/faster-whisper/Whisper/FunASR/mock) with calibrated confidence;
 - overlap scoring that fuses pyannote OSD, diarization overlap, speaker changes, optional ASR instability, and a conservative energy fallback;
 - dual-path routing (threshold 0.4), low-overlap ASR + speaker-attribution path, and high-overlap candidate generation without forcing one transcript;
+- optional SpeechBrain SepFormer separation for high-overlap segments, with per-source ASR candidates and the existing multi-decode fallback;
 - metadata construction, schema validation, evidence-only JSON prompts, LLM output repair/validation, and deterministic evidence-linked event fallback;
 - event-grouped episodic memory creation, atomic JSON persistence, semantic/lexical retrieval, relevance gating, and meeting/speaker/time filters;
 - baseline evidence-backed QA with evidence IDs, timestamps, confidence, uncertainty, and retrieval metadata;

@@ -5,7 +5,11 @@ from typing import Any
 import numpy as np
 
 from .audio.preprocess import TARGET_SAMPLE_RATE
-from .candidates.generator import generate_high_overlap_candidates
+from .candidates.generator import (
+    generate_high_overlap_candidates,
+    generate_separated_source_candidates,
+)
+from .speech_separation import SpeechSeparationAdapter, separate_waveform
 
 HIGH_OVERLAP_PATH = "high_overlap_candidate"
 HIGH_OVERLAP_SPEAKER = "MIXED"
@@ -18,6 +22,7 @@ def process_high_overlap_segments(
     sample_rate: int = TARGET_SAMPLE_RATE,
     language: str | None = None,
     diarization_turns: list[dict[str, Any]] | None = None,
+    separation_adapter: SpeechSeparationAdapter | None = None,
 ) -> list[dict[str, Any]]:
     """Return high-overlap records with empty main text and candidate hypotheses."""
     processed: list[dict[str, Any]] = []
@@ -31,13 +36,23 @@ def process_high_overlap_segments(
             "speaker_confidence": HIGH_OVERLAP_SPEAKER_CONFIDENCE,
             "processing_path": HIGH_OVERLAP_PATH,
         }
-        candidates = generate_high_overlap_candidates(
+        speaker_hypotheses = _speakers_for_segment(segment, diarization_turns or [])
+        sources = separate_waveform(clip, sample_rate, separation_adapter)
+        candidates = generate_separated_source_candidates(
             candidate_source,
-            samples=clip,
+            sources,
             sample_rate=sample_rate,
             language=language,
-            speaker_hypotheses=_speakers_for_segment(segment, diarization_turns or []),
+            separation_backend=getattr(separation_adapter, "name", "none"),
         )
+        if not candidates:
+            candidates = generate_high_overlap_candidates(
+                candidate_source,
+                samples=clip,
+                sample_rate=sample_rate,
+                language=language,
+                speaker_hypotheses=speaker_hypotheses,
+            )
         processed.append({
             **segment,
             "speaker": HIGH_OVERLAP_SPEAKER,

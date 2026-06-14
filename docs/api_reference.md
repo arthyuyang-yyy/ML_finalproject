@@ -163,6 +163,31 @@ The primary Step 4 real-ASR baseline is `FasterWhisperAdapter(model_size="small"
 device="cpu", compute_type="int8")`. CLI and Gradio runs select it by default.
 Library-level `PipelineConfig` keeps `mock` as its deterministic default for tests.
 
+---
+
+## Speech Separation
+
+### `src/speech_separation.py`
+
+```python
+class SpeechSeparationAdapter:
+    name: str
+    def separate_array(self, samples: np.ndarray, sample_rate: int) -> list[np.ndarray]
+
+class DisabledSpeechSeparationAdapter: name = "none"
+class MockSpeechSeparationAdapter:     name = "mock"
+class SepFormerAdapter:                name = "sepformer"
+
+def get_separation_adapter(name: str = "none", **kwargs) -> SpeechSeparationAdapter
+def separate_waveform(samples, sample_rate, adapter=None,
+                      fallback_on_error=True) -> list[np.ndarray]
+def separate_speakers(audio_path: str, output_dir=None, adapter=None) -> list[str]
+```
+
+The optional Step 11 baseline uses `speechbrain/sepformer-whamr16k`. It is
+disabled by default. Backend failures return no separated sources to the
+high-overlap path, which then keeps the existing multi-decode candidate fallback.
+
 **Transcript shape:** `{"text", "language", "model", "asr_confidence", "segments": [{"start_time", "end_time", "text", "asr_confidence"}]}`
 
 ---

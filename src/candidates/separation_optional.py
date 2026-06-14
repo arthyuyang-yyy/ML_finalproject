@@ -1,5 +1,9 @@
-"""Optional speech-separation facade for future model integration."""
+"""Compatibility facade for optional speech separation."""
 
-from src.speech_separation import separate_speakers
+from src.speech_separation import (
+    get_separation_adapter,
+    separate_speakers,
+    separate_waveform,
+)
 
-__all__ = ["separate_speakers"]
+__all__ = ["get_separation_adapter", "separate_speakers", "separate_waveform"]
