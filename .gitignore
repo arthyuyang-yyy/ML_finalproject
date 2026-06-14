@@ -18,6 +18,9 @@ venv/
 # Large input data and generated artifacts
 data/raw_audio/*
 data/processed_audio/*
+# Evaluation corpora (AliMeeting / AISHELL-4 / AMI): audio + derived annotations
+# must never be committed. Keep data/README.md and scripts under version control.
+data/alimeeting/
 outputs/*
 
 # Audio and model files
