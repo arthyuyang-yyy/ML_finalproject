@@ -15,17 +15,17 @@
 | hallucination_rate | 0.1667 |
 | calibration_error | 0.4857 |
 | calibration_samples | 7 |
-| content_precision | 0.6667 |
-| content_recall | 0.8000 |
-| content_f1 | 0.7273 |
-| content_hit_rate | 0.8000 |
-| content_unsupported_rate | 0.2000 |
-| content_support | 7 |
-| content_answerable | 5 |
-| content_claims | 5 |
-| content_cited | 6 |
-| content_gold | 5 |
-| content_correct | 4 |
+| text_similarity_precision | 0.6667 |
+| text_similarity_recall | 0.8000 |
+| text_similarity_f1 | 0.7273 |
+| text_similarity_hit_rate | 0.8000 |
+| text_similarity_unsupported_rate | 0.2000 |
+| text_similarity_support | 7 |
+| text_similarity_answerable | 5 |
+| text_similarity_claims | 5 |
+| text_similarity_cited | 6 |
+| text_similarity_gold | 5 |
+| text_similarity_correct | 4 |
 
 ## Uncertainty preservation
 

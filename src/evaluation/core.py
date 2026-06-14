@@ -153,13 +153,13 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return sum(x * y for x, y in zip(a, b))
 
 
-def _content_supported(
+def _text_similarity(
     claim_text: str,
     evidence_text: str,
     threshold: float = 0.45,
     backend: HashingEmbeddingBackend | None = None,
 ) -> tuple[bool, float]:
-    """Return whether *claim_text* and *evidence_text* are textually similar.
+    """Return the text-similarity score between *claim_text* and *evidence_text*.
 
     Uses the dependency-free :class:`HashingEmbeddingBackend` (character n-gram
     + CJK token hashing) so this check works without torch, transformers, or
@@ -171,7 +171,7 @@ def _content_supported(
        factual correctness.  Opposite statements can obtain high similarity
        scores (e.g. "the budget was approved" vs "the budget was not approved").
        Callers should treat the result as a loose filter, not a guarantee of
-       content support.
+       semantic support.
     """
     claim_text = claim_text.strip()
     evidence_text = evidence_text.strip()
@@ -198,7 +198,7 @@ def evaluate_evidence_support(
     references: list[dict],
     source_evidence_ids: Any = None,
     evidence_text_map: dict[str, str] | None = None,
-    content_similarity_threshold: float = 0.45,
+    text_similarity_threshold: float = 0.45,
 ) -> dict[str, Any]:
     """Evaluate evidence traceability for a set of aligned claim/reference pairs.
 
@@ -222,9 +222,9 @@ def evaluate_evidence_support(
 
     ``evidence_text_map`` maps evidence IDs to their source text. When provided,
     an additional *text-similarity* check is performed: a citation counts as
-    content-supported only when its ID is correct **and** its text has high
+    text-similarity-supported only when its ID is correct **and** its text has high
     surface textual similarity to the claim text (cosine similarity of
-    :class:`HashingEmbeddingBackend` vectors >= ``content_similarity_threshold``).
+    :class:`HashingEmbeddingBackend` vectors >= ``text_similarity_threshold``).
     This is a lightweight proxy, **not** semantic entailment; opposite claims can
     obtain high similarity scores.  Callers requiring true NLI should replace
     this heuristic with a dedicated entailment model.
@@ -236,9 +236,9 @@ def evaluate_evidence_support(
 
     Returns evidence precision/recall/F1, evidence hit rate, unsupported-claim
     rate, hallucination rate, and confidence-calibration error (ECE).  When
-    ``evidence_text_map`` is provided, additional ``content_*`` metrics are
-    included (content precision/recall/F1, content hit rate, and content
-    unsupported rate).  These content metrics measure surface textual
+    ``evidence_text_map`` is provided, additional ``text_similarity_*`` metrics are
+    included (text-similarity precision/recall/F1, text-similarity hit rate, and
+    text-similarity unsupported rate).  These metrics measure surface textual
     similarity, not semantic entailment.
     """
     if len(predictions) != len(references):
@@ -289,14 +289,14 @@ def evaluate_evidence_support(
         **calibration,
     }
 
-    # Content-level support (optional): check whether claim text is semantically
-    # entailed by cited evidence text, not just whether the IDs match.
+    # Text-similarity check (optional): compare claim text with cited evidence
+    # text using surface similarity, not just whether the IDs match.
     if evidence_text_map is not None:
-        content_cited = 0
-        content_gold = 0
-        content_correct = 0
-        content_hits = 0
-        content_unsupported = 0
+        text_similarity_cited = 0
+        text_similarity_gold = 0
+        text_similarity_correct = 0
+        text_similarity_hits = 0
+        text_similarity_unsupported = 0
         backend = HashingEmbeddingBackend()
 
         for i, (pred, ref) in enumerate(zip(predictions, references)):
@@ -307,29 +307,29 @@ def evaluate_evidence_support(
             cited_with_text = {eid for eid in cited if eid in evidence_text_map}
             gold_with_text = {eid for eid in gold if eid in evidence_text_map}
 
-            content_cited += len(cited_with_text)
-            content_gold += len(gold_with_text)
+            text_similarity_cited += len(cited_with_text)
+            text_similarity_gold += len(gold_with_text)
 
-            has_content_support = False
+            has_text_similarity = False
             if claim_text and cited_with_text:
                 claim_vec = backend.encode([claim_text])[0]
                 for eid in cited_with_text & gold_with_text:
                     ev_vec = backend.encode([evidence_text_map[eid]])[0]
                     score = _cosine_similarity(claim_vec, ev_vec)
-                    if score >= content_similarity_threshold:
-                        content_correct += 1
-                        has_content_support = True
+                    if score >= text_similarity_threshold:
+                        text_similarity_correct += 1
+                        has_text_similarity = True
 
-            if gold_with_text and has_content_support:
-                content_hits += 1
-            if not pred.get("insufficient_evidence") and not has_content_support:
-                content_unsupported += 1
+            if gold_with_text and has_text_similarity:
+                text_similarity_hits += 1
+            if not pred.get("insufficient_evidence") and not has_text_similarity:
+                text_similarity_unsupported += 1
 
-        content_precision = content_correct / content_cited if content_cited else 0.0
-        content_recall = content_correct / content_gold if content_gold else 0.0
-        content_f1 = (
-            2 * content_precision * content_recall / (content_precision + content_recall)
-            if (content_precision + content_recall)
+        text_similarity_precision = text_similarity_correct / text_similarity_cited if text_similarity_cited else 0.0
+        text_similarity_recall = text_similarity_correct / text_similarity_gold if text_similarity_gold else 0.0
+        text_similarity_f1 = (
+            2 * text_similarity_precision * text_similarity_recall / (text_similarity_precision + text_similarity_recall)
+            if (text_similarity_precision + text_similarity_recall)
             else 0.0
         )
 
@@ -343,17 +343,17 @@ def evaluate_evidence_support(
         ]
 
         result.update({
-            "content_precision": content_precision,
-            "content_recall": content_recall,
-            "content_f1": content_f1,
-            "content_hit_rate": content_hits / len(answerable_text) if answerable_text else 0.0,
-            "content_unsupported_rate": content_unsupported / len(claims_text) if claims_text else 0.0,
-            "content_support": len(predictions),
-            "content_answerable": len(answerable_text),
-            "content_claims": len(claims_text),
-            "content_cited": content_cited,
-            "content_gold": content_gold,
-            "content_correct": content_correct,
+            "text_similarity_precision": text_similarity_precision,
+            "text_similarity_recall": text_similarity_recall,
+            "text_similarity_f1": text_similarity_f1,
+            "text_similarity_hit_rate": text_similarity_hits / len(answerable_text) if answerable_text else 0.0,
+            "text_similarity_unsupported_rate": text_similarity_unsupported / len(claims_text) if claims_text else 0.0,
+            "text_similarity_support": len(predictions),
+            "text_similarity_answerable": len(answerable_text),
+            "text_similarity_claims": len(claims_text),
+            "text_similarity_cited": text_similarity_cited,
+            "text_similarity_gold": text_similarity_gold,
+            "text_similarity_correct": text_similarity_correct,
         })
 
     return result
