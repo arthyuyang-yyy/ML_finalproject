@@ -63,7 +63,7 @@ class PipelineTests(unittest.TestCase):
                     "event_id": "ev_001",
                     "event_type": "decision",
                     "content": "Use the mock baseline for pipeline testing.",
-                    "speakers": ["UNKNOWN"],
+                    "speakers": ["SPEAKER_00"],
                     "evidence_ids": ["meeting_gemma_seg_001"],
                     "confidence": "high",
                 }],

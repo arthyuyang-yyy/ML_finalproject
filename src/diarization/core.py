@@ -29,11 +29,28 @@ def diarize_audio(audio_path: str) -> list[dict]:
 def assign_speakers_to_segments(
     segments: list[dict[str, Any]],
     diarization_turns: list[dict[str, Any]] | None = None,
+    *,
+    samples: Any | None = None,
+    sample_rate: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Attach speaker labels and confidence to segment timestamps."""
+    """Attach speaker labels and confidence to segment timestamps.
+
+    When pyannote diarization turns are available they remain authoritative.
+    Otherwise, if the waveform is supplied, speakers are recovered by
+    unsupervised speaker-embedding clustering (which also attaches a
+    ``speaker_posterior`` distribution); failing that, the deterministic
+    no-model fallback assigns placeholder labels.
+    """
     if not segments:
         return []
     if not diarization_turns:
+        if samples is not None and len(samples) > 0:
+            from .embedding_cluster import cluster_segments
+
+            from ..audio.preprocess import TARGET_SAMPLE_RATE
+
+            rate = sample_rate or TARGET_SAMPLE_RATE
+            return cluster_segments(samples, segments, rate)
         return cluster_speakers(segments)
 
     assigned: list[dict[str, Any]] = []
