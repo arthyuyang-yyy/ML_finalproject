@@ -142,12 +142,49 @@ def calibrate_threshold(
     return {"best_threshold": best["threshold"], "best_metrics": best, "sweep": sweep}
 
 
+def window_segments(
+    duration: float,
+    window_seconds: float,
+    meeting_id: str = "meeting",
+) -> list[dict[str, Any]]:
+    """Tile ``[0, duration]`` into fixed-length windows.
+
+    Fixed windows are the segmentation unit for overlap calibration: they match
+    the literature's frame-based overlap evaluation and, unlike energy VAD, stay
+    robust on long far-field meeting recordings (whose loud transients can starve
+    a peak-relative VAD into producing no segments at all).
+    """
+    if window_seconds <= 0:
+        raise ValueError("window_seconds must be positive")
+    segments: list[dict[str, Any]] = []
+    start = 0.0
+    index = 0
+    while start < duration:
+        end = min(start + window_seconds, duration)
+        if end > start:
+            segments.append({
+                "meeting_id": meeting_id,
+                "segment_id": f"{meeting_id}_w{index + 1:04d}",
+                "start_time": round(start, 3),
+                "end_time": round(end, 3),
+            })
+        start = end
+        index += 1
+    return segments
+
+
 # --------------------------------------------------------------------------- #
 # I/O layer (audio + pyannote; not unit-tested against real data)
 # --------------------------------------------------------------------------- #
-def score_meeting_segments(audio_path: str | Path, detector: str) -> list[dict[str, Any]]:
+def score_meeting_segments(
+    audio_path: str | Path,
+    detector: str,
+    window_seconds: float = 2.0,
+) -> list[dict[str, Any]]:
     """Segment one meeting's audio and attach an ``overlap_score`` per segment.
 
+    Segmentation uses fixed ``window_seconds`` windows by default; pass
+    ``window_seconds <= 0`` to fall back to the project's energy VAD.
     ``detector='pyannote'`` runs the real OSD model (needs ``HF_TOKEN`` +
     ``pyannote.audio``); ``detector='energy'`` forces the energy fallback. The
     diarization fusion is disabled here so the score is the detector's own signal.
@@ -157,7 +194,11 @@ def score_meeting_segments(audio_path: str | Path, detector: str) -> list[dict[s
 
     samples, sample_rate = load_audio(str(audio_path))
     meeting_id = Path(audio_path).stem
-    segments = segment_waveform(samples, sample_rate, meeting_id=meeting_id)
+    if window_seconds > 0:
+        duration = len(samples) / sample_rate if sample_rate else 0.0
+        segments = window_segments(duration, window_seconds, meeting_id=meeting_id)
+    else:
+        segments = segment_waveform(samples, sample_rate, meeting_id=meeting_id)
     if not segments:
         return []
     use_audio_path = str(audio_path) if detector == "pyannote" else None
@@ -221,6 +262,7 @@ def build_labeled_dataset(
     audio_lookup: Callable[[str], Path | None],
     detector: str,
     gt_fraction: float,
+    window_seconds: float = 2.0,
 ) -> list[LabeledSegment]:
     """Score and ground-truth-label every segment across all meetings."""
     labeled: list[LabeledSegment] = []
@@ -234,7 +276,9 @@ def build_labeled_dataset(
             (float(region["start_time"]), float(region["end_time"]))
             for region in record.get("overlap_regions", [])
         ]
-        for segment in score_meeting_segments(audio_path, detector):
+        meeting_segments = score_meeting_segments(audio_path, detector, window_seconds)
+        print(f"  {meeting_id}: {len(meeting_segments)} segments")
+        for segment in meeting_segments:
             labeled.append({
                 "meeting_id": meeting_id,
                 "overlap_score": float(segment["overlap_score"]),
@@ -279,6 +323,7 @@ def run(
     test_ratio: float = 0.3,
     seed: int = 0,
     gt_fraction: float = 0.5,
+    window_seconds: float = 2.0,
     thresholds: list[float] | None = None,
 ) -> dict[str, Any]:
     """Run threshold calibration for each detector and return a combined report."""
@@ -293,6 +338,7 @@ def run(
             "test_ratio": test_ratio,
             "seed": seed,
             "gt_fraction": gt_fraction,
+            "window_seconds": window_seconds,
             "num_meetings": len(set(meeting_ids)),
         },
         "train_meetings": train_ids,
@@ -301,7 +347,7 @@ def run(
     }
     for detector in detectors:
         print(f"\n=== detector: {detector} ===")
-        labeled = build_labeled_dataset(records, audio_lookup, detector, gt_fraction)
+        labeled = build_labeled_dataset(records, audio_lookup, detector, gt_fraction, window_seconds)
         if not labeled:
             print(f"  [warn] no labeled segments for detector '{detector}'")
             continue
@@ -323,6 +369,8 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--gt-fraction", type=float, default=0.5,
                         help="ground-truth overlap coverage to label a segment high-overlap")
+    parser.add_argument("--window-seconds", type=float, default=2.0,
+                        help="fixed window length for segmentation; <= 0 uses energy VAD")
     parser.add_argument("--out-dir", default="outputs/overlap_threshold",
                         help="where to write results.json (git-ignored by default)")
     args = parser.parse_args()
@@ -334,6 +382,7 @@ def main() -> None:
         test_ratio=args.test_ratio,
         seed=args.seed,
         gt_fraction=args.gt_fraction,
+        window_seconds=args.window_seconds,
     )
 
     out_dir = Path(args.out_dir)

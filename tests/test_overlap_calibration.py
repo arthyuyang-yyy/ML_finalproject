@@ -20,6 +20,7 @@ from experiments.overlap_threshold.run_calibration import (
     label_segment,
     segment_overlap_fraction,
     split_meetings,
+    window_segments,
 )
 
 
@@ -68,6 +69,22 @@ class SplitMeetingsTests(unittest.TestCase):
         train, test = split_meetings(["a", "b"], test_ratio=0.9)
         self.assertTrue(train)
         self.assertTrue(test)
+
+
+class WindowSegmentsTests(unittest.TestCase):
+    def test_tiles_with_partial_final_window(self) -> None:
+        segments = window_segments(5.0, 2.0, meeting_id="m")
+        spans = [(s["start_time"], s["end_time"]) for s in segments]
+        self.assertEqual(spans, [(0.0, 2.0), (2.0, 4.0), (4.0, 5.0)])
+        self.assertEqual(segments[0]["meeting_id"], "m")
+
+    def test_exact_multiple_has_no_extra_window(self) -> None:
+        segments = window_segments(4.0, 2.0)
+        self.assertEqual(len(segments), 2)
+
+    def test_rejects_nonpositive_window(self) -> None:
+        with self.assertRaises(ValueError):
+            window_segments(10.0, 0.0)
 
 
 class AudioMatchTests(unittest.TestCase):

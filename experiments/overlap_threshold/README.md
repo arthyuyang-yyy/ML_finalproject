@@ -26,6 +26,14 @@ never appear on both sides. The threshold is chosen on the **train** meetings an
 all reported numbers come from the **held-out test** meetings — otherwise the
 metrics would be optimistic ("scoring high on questions you studied").
 
+## Segmentation
+
+Routing units are **fixed-length windows** (`--window-seconds`, default `2.0`),
+matching the literature's frame-based overlap evaluation. This is deliberate: the
+project's energy VAD produced *zero* segments on real far-field AliMeeting audio
+(loud transients starve its peak-relative threshold), so VAD is not a reliable
+unit here. Pass `--window-seconds 0` to fall back to VAD.
+
 ## Detector under calibration
 
 `pyannote` OSD is the real detector and the one whose threshold matters for
