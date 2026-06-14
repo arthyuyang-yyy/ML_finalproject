@@ -71,7 +71,7 @@ Each segment receives a `route_reason` string explaining the decision.
 **Module:** `src/low_overlap.py` — `process_low_overlap_segments()`
 
 For low-overlap segments, the pipeline produces a single stable evidence record:
-- `text` via the configured ASR adapter (`WhisperX` is recommended for heavy runs; `MockASRAdapter` remains the default for tests/demo wiring)
+- `text` via the configured ASR adapter (`faster-whisper small` is the first real CLI/UI baseline; `MockASRAdapter` remains the deterministic library/test default)
 - `speaker` and `speaker_confidence` via pyannote/WhisperX-style diarization turns when available, or deterministic fallback labels otherwise
 - original `start_time` / `end_time`, `overlap_score`, and empty `candidates`
 
