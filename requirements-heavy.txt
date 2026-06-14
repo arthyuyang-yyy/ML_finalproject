@@ -1,4 +1,5 @@
 -r requirements-demo.txt
+-r requirements-asr.txt
 
 # Choose and configure heavy backends based on the target machine/GPU.
 # openai-whisper>=20231117
@@ -6,6 +7,7 @@
 # whisperx>=3.1
 # pyannote.audio>=3.1
 # sentence-transformers>=2.7
+# noisereduce>=3.0          # Optional stationary-noise reduction (--denoise)
 
 # LLM backends (pick one or more; all are optional and lazily imported)
 # ollama is used via urllib (stdlib) — no extra Python package needed.
