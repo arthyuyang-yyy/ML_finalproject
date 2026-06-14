@@ -39,6 +39,8 @@ def run_meeting_pipeline(
         input_audio_path,
         str(paths["preprocessed"]),
         target_sample_rate=cfg.target_sample_rate,
+        denoise=cfg.enable_denoise,
+        denoise_strength=cfg.denoise_strength,
     )
     samples = preprocessed_samples
 

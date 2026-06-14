@@ -41,8 +41,10 @@ LLM 是结构化事件抽取和答案组织的可选实验组件。RAG 检索、
 
 ## Phase 2: Audio and Dual-path Baselines / 阶段二：音频与双路径基线
 
-- [x] Step 1 - Audio preprocessing: mono conversion, 16 kHz resampling,
-  normalization, and standard WAV export. / 音频预处理、单声道转换、16 kHz 重采样、归一化和 WAV 导出。
+- [x] Step 1 - Audio preprocessing: soundfile/PyAV demux and decode for common
+  meeting formats, optional denoising, mono conversion, one-time 16 kHz
+  resampling, normalization, and standard WAV export.
+  / 常见会议音频格式解封装与解码、可选降噪、单声道转换、单次 16 kHz 重采样、归一化和 WAV 导出。
 - [x] Step 2 - Energy-based VAD with timestamped segments. / 基于能量的 VAD 与时间戳切段。
 - [x] Step 3 - Per-segment audio clip export with `audio_clip_path`. / 按片段导出音频 clip。
 - [x] Step 4 - Pluggable ASR adapters and confidence normalization:

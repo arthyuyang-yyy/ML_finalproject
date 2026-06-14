@@ -40,7 +40,7 @@ See [pipeline_walkthrough.md](pipeline_walkthrough.md) for the complete 14-step 
 
 | Module | File | Responsibility |
 | --- | --- | --- |
-| Preprocessing | `src/audio/preprocess.py` | Load, mono-convert, polyphase-resample, peak-normalize, VAD-segment, and export float32 WAV |
+| Preprocessing | `src/audio/preprocess.py` | Demux/decode common formats with soundfile/PyAV, optionally denoise, mono-convert, polyphase-resample once, peak-normalize, VAD-segment, and export float32 WAV |
 | Clip export | `src/audio/clipper.py` | Write per-evidence-segment WAV clips to disk |
 | Overlap detection | `src/overlap/detector.py` | Score overlap: pyannote OSD adapter (priority), explicit region coverage, or energy fallback (max 0.39) |
 | Dual-path router | `src/overlap/router.py` | Route segments by overlap threshold (default 0.4) |

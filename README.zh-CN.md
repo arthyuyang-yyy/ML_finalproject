@@ -127,7 +127,7 @@ LLM 接入本身不是创新点。项目会把它作为可选实验变量，比�
 
 - 双语研究设计、系统架构、创新点阐述和实验计划；
 - 统一的 evidence-packet 元信息 Schema（17 字段）、校验规则和示例会议 fixture；
-- 音频加载、单声道转换、polyphase 重采样、峰值归一化和基于能量的 VAD 分段（含段落合并与分割）；
+- 音频加载：常规格式优先使用 soundfile，M4A/AAC/MP4/WMA 等容器回退到 PyAV 解封装与解码；随后执行可选降噪、单声道转换、单次 polyphase 重采样、峰值归一化和基于能量的 VAD 分段（含段落合并与分割）；
 - 音频 clip 导出（`src/audio/clipper.py`）；
 - 双说话人可控重叠语音合成，支持 SNR 控制和重叠真值标注；
 - WER、CER、重叠路由分类、最优映射说话人归属、引用率和时间戳引用率等基础评估指标；
@@ -184,6 +184,11 @@ python -m pip install -r requirements-asr.txt
 ```bash
 python main.py data/raw_audio/meeting_001.wav --meeting-id meeting_001
 ```
+
+输入可以是 WAV、FLAC、OGG、MP3、M4A、AAC、MP4 或 WMA。所有格式都会先统一为
+16 kHz 单声道 float32 WAV，因此 Step 4 的 ASR 后端不需要针对每种文件格式分别适配。
+可使用 `--denoise --denoise-strength 0.5` 开启可选静态噪声抑制；该功能默认关闭，
+需要另外安装 `noisereduce`。
 
 仅验证软件流程时可使用 `--asr mock`。详细配置见
 [`docs/asr_baseline.zh-CN.md`](docs/asr_baseline.zh-CN.md)。

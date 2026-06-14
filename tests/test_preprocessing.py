@@ -7,15 +7,18 @@ Run with::
 
 import unittest
 from inspect import signature
+from unittest.mock import patch
 
 import numpy as np
 
 from src.audio.preprocess import (
+    decode_audio_with_pyav,
     energy_vad,
     frame_rms,
     load_audio,
     peak_normalize,
     preprocess_audio,
+    reduce_stationary_noise,
     resample,
     resample_linear,
     segment_audio,
@@ -55,6 +58,21 @@ def _short_gap_signal() -> np.ndarray:
         _tone(0.4),
         _silence(0.5),
     ])
+
+
+def _write_aac_container(path, samples: np.ndarray, sample_rate: int = SAMPLE_RATE, container_format=None) -> None:
+    import av
+
+    output = av.open(str(path), "w", format=container_format)
+    stream = output.add_stream("aac", rate=sample_rate)
+    stream.layout = "mono"
+    frame = av.AudioFrame.from_ndarray(samples[np.newaxis, :], format="fltp", layout="mono")
+    frame.sample_rate = sample_rate
+    for packet in stream.encode(frame):
+        output.mux(packet)
+    for packet in stream.encode(None):
+        output.mux(packet)
+    output.close()
 
 
 class HelperTests(unittest.TestCase):
@@ -116,6 +134,7 @@ class HelperTests(unittest.TestCase):
     def test_audio_package_wrapper_uses_shared_preprocess(self) -> None:
         self.assertIn("target_sample_rate", signature(preprocess_audio).parameters)
         self.assertIn("target_sr", signature(preprocess_audio).parameters)
+        self.assertIn("denoise", signature(preprocess_audio).parameters)
 
     def test_load_audio_respects_normalize_flag(self) -> None:
         try:
@@ -130,6 +149,103 @@ class HelperTests(unittest.TestCase):
             sf.write(wav_path, raw, SAMPLE_RATE, subtype="FLOAT")
             loaded, _ = load_audio(str(wav_path), normalize=False)
             np.testing.assert_array_almost_equal(loaded, raw)
+
+    def test_load_audio_uses_soundfile_without_pyav_for_wav(self) -> None:
+        import soundfile as sf
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "test.wav"
+            sf.write(path, _tone(1.0), SAMPLE_RATE)
+            with patch("src.audio.preprocess.decode_audio_with_pyav") as mocked_decode:
+                loaded, sample_rate = load_audio(str(path))
+            mocked_decode.assert_not_called()
+            self.assertEqual(sample_rate, SAMPLE_RATE)
+            self.assertEqual(loaded.ndim, 1)
+
+
+class AudioDecodeTests(unittest.TestCase):
+    def test_pyav_decodes_m4a_to_native_rate_pcm(self) -> None:
+        try:
+            import av  # noqa: F401
+        except ImportError:
+            self.skipTest("PyAV is not installed")
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "meeting.m4a"
+            _write_aac_container(path, _tone(2.0))
+            samples, sample_rate = decode_audio_with_pyav(path)
+            self.assertEqual(sample_rate, SAMPLE_RATE)
+            self.assertEqual(samples.ndim, 2)
+            self.assertEqual(samples.shape[1], 1)
+            self.assertGreater(samples.size, 0)
+
+    def test_load_audio_decodes_mp4_and_standardizes_for_asr(self) -> None:
+        try:
+            import av  # noqa: F401
+        except ImportError:
+            self.skipTest("PyAV is not installed")
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "meeting.mp4"
+            _write_aac_container(path, _tone(2.0), container_format="mp4")
+            samples, sample_rate = load_audio(str(path))
+            self.assertEqual(sample_rate, SAMPLE_RATE)
+            self.assertEqual(samples.ndim, 1)
+            self.assertEqual(samples.dtype, np.float32)
+            self.assertAlmostEqual(float(np.max(np.abs(samples))), 0.97, places=4)
+
+    def test_load_audio_resamples_only_after_native_rate_decode(self) -> None:
+        decoded = np.ones((8000, 1), dtype=np.float32) * 0.2
+        with patch("src.audio.preprocess.Path.is_file", return_value=True):
+            with patch("src.audio.preprocess._decode_audio", return_value=(decoded, 8000)):
+                with patch("src.audio.preprocess.resample", wraps=resample) as mocked_resample:
+                    samples, sample_rate = load_audio("ignored.wav", target_sample_rate=16000)
+        mocked_resample.assert_called_once()
+        self.assertEqual(sample_rate, 16000)
+        self.assertEqual(samples.size, 16000)
+
+    def test_load_audio_reports_invalid_container_clearly(self) -> None:
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "broken.m4a"
+            path.write_text("not audio", encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "unable to decode audio file"):
+                load_audio(str(path))
+
+    def test_load_audio_rejects_missing_path(self) -> None:
+        with self.assertRaisesRegex(FileNotFoundError, "does not exist"):
+            load_audio("/definitely/missing/audio.m4a")
+
+    def test_optional_denoise_is_disabled_by_default(self) -> None:
+        decoded = np.ones((16000, 1), dtype=np.float32) * 0.2
+        with patch("src.audio.preprocess.Path.is_file", return_value=True):
+            with patch("src.audio.preprocess._decode_audio", return_value=(decoded, SAMPLE_RATE)):
+                with patch("src.audio.preprocess.reduce_stationary_noise") as mocked_denoise:
+                    load_audio("ignored.wav")
+        mocked_denoise.assert_not_called()
+
+    def test_optional_denoise_runs_when_enabled(self) -> None:
+        decoded = np.ones((16000, 1), dtype=np.float32) * 0.2
+        with patch("src.audio.preprocess.Path.is_file", return_value=True):
+            with patch("src.audio.preprocess._decode_audio", return_value=(decoded, SAMPLE_RATE)):
+                with patch(
+                    "src.audio.preprocess.reduce_stationary_noise",
+                    return_value=np.ones(16000, dtype=np.float32) * 0.1,
+                ) as mocked_denoise:
+                    load_audio("ignored.wav", denoise=True, denoise_strength=0.4)
+        mocked_denoise.assert_called_once()
+
+    def test_denoise_rejects_invalid_strength_before_loading_backend(self) -> None:
+        with self.assertRaisesRegex(ValueError, "strength"):
+            reduce_stationary_noise(_tone(1.0), SAMPLE_RATE, strength=1.5)
 
 
 class EnergyVadTests(unittest.TestCase):
