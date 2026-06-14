@@ -113,8 +113,8 @@ class OllamaGemmaClient(GemmaClient):
 
 def create_gemma_client(
     backend: str = "none",
-    model: str = "gemma3:4b",
-    base_url: str = "http://127.0.0.1:11434",
+    model: str | None = None,
+    base_url: str | None = None,
 ) -> GemmaClient | None:
     """Build a configured Gemma backend."""
     normalized = backend.lower()
@@ -123,7 +123,7 @@ def create_gemma_client(
     if normalized == "ollama":
         return OllamaGemmaClient(model=model, base_url=base_url)
     if normalized == "openai":
-        return GemmaClient(backend=OpenAIBackend())
+        return GemmaClient(backend=OpenAIBackend(model=model, base_url=base_url))
     if normalized == "transformers":
         return GemmaClient(backend=TransformersBackend(model_name=model))
     raise ValueError("gemma backend must be one of: none, ollama, openai, transformers")
@@ -141,8 +141,8 @@ def run_gemma(prompt: str, client: GemmaClient | None = None) -> str:
 
     configured = client or create_gemma_client(
         os.environ.get("GEMMA_BACKEND", "none"),
-        model=os.environ.get("GEMMA_MODEL", "gemma3:4b"),
-        base_url=os.environ.get("GEMMA_BASE_URL", "http://127.0.0.1:11434"),
+        model=os.environ.get("GEMMA_MODEL") or None,
+        base_url=os.environ.get("GEMMA_BASE_URL") or None,
     )
     if configured is None:
         return "{}"

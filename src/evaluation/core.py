@@ -3,9 +3,13 @@
 This module implements word/character error rate, overlap-routing classification
 metrics, best-mapping speaker-attribution accuracy, evidence-support metrics
 (precision/recall/F1, hit rate, unsupported-claim and hallucination rate,
-confidence calibration, and optional content-level entailment),
+confidence calibration, and optional text-similarity proxy),
 uncertainty-preservation quality, and candidate usefulness, following
 ``docs/experiment_plan.md`` (Experiments 2 and 5).
+
+The optional text-similarity check (enabled via ``evidence_text_map``) measures
+surface textual similarity, not semantic entailment. True content-level support
+(NLI) is future work.
 """
 
 from itertools import permutations

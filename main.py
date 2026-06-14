@@ -18,9 +18,9 @@ def main() -> None:
     parser.add_argument("--denoise", action="store_true", help="Enable optional stationary-noise reduction before ASR.")
     parser.add_argument("--denoise-strength", type=float, default=0.5, help="Denoise strength in [0, 1].")
     parser.add_argument("--language", default="und")
-    parser.add_argument("--gemma-backend", default="none", choices=["none", "ollama"])
+    parser.add_argument("--gemma-backend", default="none", choices=["none", "ollama", "openai", "transformers"])
     parser.add_argument("--gemma-model", default="gemma3:4b")
-    parser.add_argument("--gemma-base-url", default="http://127.0.0.1:11434")
+    parser.add_argument("--gemma-base-url", default=None)
     args = parser.parse_args()
     config = PipelineConfig(
         low_overlap_asr_model=args.asr,

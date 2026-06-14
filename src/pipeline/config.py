@@ -24,7 +24,7 @@ class PipelineConfig:
     denoise_strength: float = 0.5
     gemma_backend: str = "none"
     gemma_model: str = "gemma3:4b"
-    gemma_base_url: str = "http://127.0.0.1:11434"
+    gemma_base_url: str | None = None
     memory_root: Path | None = None
 
     def meeting_dir(self, meeting_id: str) -> Path:
