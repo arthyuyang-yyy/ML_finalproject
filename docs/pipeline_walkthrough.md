@@ -102,7 +102,7 @@ If faster-whisper is unavailable, explicit fallback candidates are emitted so do
 ### Step 8: Evidence Segment Construction
 **Module:** `src/evidence/builder.py` — `build_evidence_segments()`
 
-Merges low-overlap and high-overlap results into one timestamp-sorted list. It verifies that each record is supplied through the correct route, normalizes simplified high-overlap candidates, rejects duplicate IDs, and builds a 17-field evidence record containing timing, routing, confidence, candidate, and provenance data.
+Merges low-overlap and high-overlap results into one timestamp-sorted list. It verifies that each record is supplied through the correct route, normalizes simplified high-overlap candidates, rejects duplicate IDs, and builds an evidence record (17 required + 1 optional field) containing timing, routing, confidence, candidate, and provenance data.
 
 Fields: `meeting_id`, `segment_id`, `evidence_id`, `speaker`, `start_time`, `end_time`, `text`, `processing_path`, `route_reason`, `overlap_score`, `asr_confidence`, `speaker_confidence`, `audio_clip_path`, `source_audio_path`, `language`, `candidates`, `uncertainty_note`.
 

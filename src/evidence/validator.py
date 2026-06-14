@@ -89,6 +89,8 @@ def validate_metadata_segment(
     for name in ("overlap_score", "asr_confidence", "speaker_confidence"):
         validate_score(record[name], f"segment.{name}")
 
+    _validate_cluster_similarity_distribution(record.get("cluster_similarity_distribution"))
+
     for index, candidate in enumerate(record["candidates"]):
         validate_candidate(candidate, index)
 
@@ -162,6 +164,33 @@ def validate_evidence_segments(
         except ValueError as exc:
             errors.append(f"segment[{index}]: {exc}")
     return errors
+
+
+def _validate_cluster_similarity_distribution(distribution: Any) -> None:
+    """Validate the optional cluster-similarity distribution when present.
+
+    The field is optional; an empty/absent value is accepted. When supplied it
+    must be a mapping of speaker label to a value in ``[0, 1]`` whose mass sums
+    to one (it is a softmax over cluster similarities). It is a relative signal,
+    not a calibrated posterior — see ``cluster_segments``.
+    """
+    if distribution is None or distribution == {}:
+        return
+    if not isinstance(distribution, dict):
+        raise ValueError("segment.cluster_similarity_distribution must be a mapping if present")
+    for label, value in distribution.items():
+        if not isinstance(label, str) or not label.strip():
+            raise ValueError(
+                "segment.cluster_similarity_distribution keys must be non-empty speaker labels"
+            )
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"segment.cluster_similarity_distribution['{label}'] must be a number")
+        validate_score(value, f"segment.cluster_similarity_distribution['{label}']")
+    total = sum(float(value) for value in distribution.values())
+    if abs(total - 1.0) > 1e-2:
+        raise ValueError(
+            f"segment.cluster_similarity_distribution must sum to 1.0, got {total:.4f}"
+        )
 
 
 def _validate_audio_clip_path(audio_clip_path: str) -> None:
