@@ -1,0 +1,341 @@
+"""Phase 2 / Step 7b: overlap routing-threshold calibration with train/test split.
+
+What this does
+--------------
+1. Reads prepared AliMeeting annotations (run ``scripts/prepare_alimeeting.py``
+   first) to get per-meeting ground-truth overlap regions.
+2. For each meeting, segments the audio (VAD) and scores every segment with an
+   overlap detector — ``pyannote`` (the real overlapped-speech model) or the
+   ``energy`` fallback baseline.
+3. Labels each segment as truly high-overlap when ground-truth overlap covers at
+   least ``gt_fraction`` of its duration (the label definition, fixed/reported).
+4. **Splits meetings (not segments) into train and test** so segments from one
+   meeting never straddle the split.
+5. **Calibrates** the routing threshold on the *train* meetings (the threshold
+   that maximizes F1), then **reports** accuracy / precision / recall / F1 on the
+   held-out *test* meetings — both at the calibrated threshold and at the current
+   default (0.4).
+
+The threshold being calibrated (``route_threshold``) is distinct from the label
+definition (``gt_fraction``); only the former is learned from data.
+
+Pure functions (labeling, splitting, sweeping, evaluation) are dependency-free
+and unit-tested. Audio loading and pyannote inference live in the I/O layer and
+require the optional backends + ``HF_TOKEN`` (see the main README).
+
+Usage::
+
+    export ALIMEETING_ROOT=/path/to/Eval_Ali
+    python scripts/prepare_alimeeting.py
+    python experiments/overlap_threshold/run_calibration.py \
+        --annotations data/alimeeting/annotations \
+        --audio-dir data/alimeeting/audio
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import random
+import sys
+from pathlib import Path
+from typing import Any, Callable
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from src.evaluation.core import HIGH_OVERLAP, LOW_OVERLAP, evaluate_overlap_routing  # noqa: E402
+from src.overlap.detector import DEFAULT_OVERLAP_THRESHOLD  # noqa: E402
+
+Region = tuple[float, float]
+LabeledSegment = dict[str, Any]
+
+
+# --------------------------------------------------------------------------- #
+# Pure functions (unit-tested, no audio / no pyannote)
+# --------------------------------------------------------------------------- #
+def segment_overlap_fraction(segment: dict[str, Any], regions: list[Region]) -> float:
+    """Fraction of a segment's duration covered by ground-truth overlap regions."""
+    start = float(segment["start_time"])
+    end = float(segment["end_time"])
+    duration = max(0.0, end - start)
+    if duration == 0.0:
+        return 0.0
+    covered = 0.0
+    for region_start, region_end in regions:
+        lo = max(start, float(region_start))
+        hi = min(end, float(region_end))
+        if hi > lo:
+            covered += hi - lo
+    return min(1.0, covered / duration)
+
+
+def label_segment(segment: dict[str, Any], regions: list[Region], gt_fraction: float) -> str:
+    """``HIGH_OVERLAP`` when ground-truth overlap covers >= ``gt_fraction``."""
+    return HIGH_OVERLAP if segment_overlap_fraction(segment, regions) >= gt_fraction else LOW_OVERLAP
+
+
+def split_meetings(
+    meeting_ids: list[str],
+    test_ratio: float = 0.3,
+    seed: int = 0,
+) -> tuple[list[str], list[str]]:
+    """Split unique meeting IDs into (train, test) by meeting, deterministically.
+
+    Splitting by meeting (not by segment) prevents leakage between correlated
+    segments of the same meeting. With fewer than two meetings everything goes to
+    train and test is empty (calibration is then not meaningfully held out).
+    """
+    if not 0.0 <= test_ratio < 1.0:
+        raise ValueError("test_ratio must be in [0, 1)")
+    ids = sorted(set(meeting_ids))
+    if len(ids) < 2:
+        return ids, []
+    shuffled = list(ids)
+    random.Random(seed).shuffle(shuffled)
+    n_test = max(1, round(len(shuffled) * test_ratio))
+    n_test = min(n_test, len(shuffled) - 1)  # keep at least one train meeting
+    test = set(shuffled[:n_test])
+    return sorted(i for i in ids if i not in test), sorted(test)
+
+
+def evaluate_at_threshold(labeled: list[LabeledSegment], threshold: float) -> dict[str, Any]:
+    """Route every segment at ``threshold`` and score against ground-truth labels."""
+    predictions = [
+        HIGH_OVERLAP if float(item["overlap_score"]) >= threshold else LOW_OVERLAP
+        for item in labeled
+    ]
+    references = [item["gt_label"] for item in labeled]
+    return evaluate_overlap_routing(predictions, references)
+
+
+def default_thresholds(step: float = 0.05) -> list[float]:
+    """Candidate routing thresholds in (0, 1), e.g. 0.05, 0.10, ... 0.95."""
+    if not 0.0 < step < 1.0:
+        raise ValueError("step must be in (0, 1)")
+    count = int(round(1.0 / step))
+    return [round(step * i, 4) for i in range(1, count)]
+
+
+def calibrate_threshold(
+    labeled: list[LabeledSegment],
+    thresholds: list[float] | None = None,
+    metric: str = "f1",
+) -> dict[str, Any]:
+    """Pick the threshold maximizing ``metric`` (tie-broken by accuracy) on ``labeled``."""
+    if not labeled:
+        raise ValueError("cannot calibrate on an empty segment set")
+    candidates = thresholds or default_thresholds()
+    sweep: list[dict[str, Any]] = []
+    best: dict[str, Any] | None = None
+    best_key = (-1.0, -1.0)
+    for threshold in candidates:
+        metrics = evaluate_at_threshold(labeled, threshold)
+        row = {"threshold": threshold, **metrics}
+        sweep.append(row)
+        key = (float(metrics[metric]), float(metrics["accuracy"]))
+        if key > best_key:
+            best_key = key
+            best = row
+    assert best is not None
+    return {"best_threshold": best["threshold"], "best_metrics": best, "sweep": sweep}
+
+
+# --------------------------------------------------------------------------- #
+# I/O layer (audio + pyannote; not unit-tested against real data)
+# --------------------------------------------------------------------------- #
+def score_meeting_segments(audio_path: str | Path, detector: str) -> list[dict[str, Any]]:
+    """Segment one meeting's audio and attach an ``overlap_score`` per segment.
+
+    ``detector='pyannote'`` runs the real OSD model (needs ``HF_TOKEN`` +
+    ``pyannote.audio``); ``detector='energy'`` forces the energy fallback. The
+    diarization fusion is disabled here so the score is the detector's own signal.
+    """
+    from src.audio.preprocess import load_audio, segment_waveform
+    from src.overlap.detector import estimate_segment_overlap_scores
+
+    samples, sample_rate = load_audio(str(audio_path))
+    meeting_id = Path(audio_path).stem
+    segments = segment_waveform(samples, sample_rate, meeting_id=meeting_id)
+    if not segments:
+        return []
+    use_audio_path = str(audio_path) if detector == "pyannote" else None
+    scored = estimate_segment_overlap_scores(
+        samples, segments, sample_rate, audio_path=use_audio_path, diarization_turns=None
+    )
+    if detector == "pyannote" and scored and scored[0].get("overlap_detector") != "pyannote":
+        raise RuntimeError(
+            "pyannote detector requested but the scorer fell back to "
+            f"'{scored[0].get('overlap_detector')}'. Install pyannote.audio and set HF_TOKEN "
+            "(see the Enable pyannote steps in the README)."
+        )
+    return scored
+
+
+def load_annotation_records(annotations_dir: str | Path) -> list[dict[str, Any]]:
+    """Load every prepared per-meeting annotation JSON."""
+    paths = sorted(Path(annotations_dir).glob("*.json"))
+    if not paths:
+        raise FileNotFoundError(
+            f"no prepared annotations in {annotations_dir}; run scripts/prepare_alimeeting.py first"
+        )
+    return [json.loads(path.read_text(encoding="utf-8")) for path in paths]
+
+
+def make_audio_lookup(audio_dir: str | Path) -> Callable[[str], Path | None]:
+    """Return a function mapping a meeting_id to its audio file under ``audio_dir``."""
+    root = Path(audio_dir)
+
+    def lookup(meeting_id: str) -> Path | None:
+        for suffix in (".wav", ".flac", ".WAV"):
+            matches = sorted(root.rglob(f"{meeting_id}{suffix}"))
+            if matches:
+                return matches[0]
+        return None
+
+    return lookup
+
+
+def build_labeled_dataset(
+    records: list[dict[str, Any]],
+    audio_lookup: Callable[[str], Path | None],
+    detector: str,
+    gt_fraction: float,
+) -> list[LabeledSegment]:
+    """Score and ground-truth-label every segment across all meetings."""
+    labeled: list[LabeledSegment] = []
+    for record in records:
+        meeting_id = str(record["meeting_id"])
+        audio_path = audio_lookup(meeting_id)
+        if audio_path is None:
+            print(f"  [skip] no audio found for meeting '{meeting_id}'")
+            continue
+        regions = [
+            (float(region["start_time"]), float(region["end_time"]))
+            for region in record.get("overlap_regions", [])
+        ]
+        for segment in score_meeting_segments(audio_path, detector):
+            labeled.append({
+                "meeting_id": meeting_id,
+                "overlap_score": float(segment["overlap_score"]),
+                "gt_label": label_segment(segment, regions, gt_fraction),
+            })
+    return labeled
+
+
+def calibrate_and_evaluate(
+    labeled: list[LabeledSegment],
+    train_ids: list[str],
+    test_ids: list[str],
+    thresholds: list[float] | None = None,
+    default_threshold: float = DEFAULT_OVERLAP_THRESHOLD,
+) -> dict[str, Any]:
+    """Calibrate on train meetings, report on held-out test meetings."""
+    train = [item for item in labeled if item["meeting_id"] in set(train_ids)]
+    test = [item for item in labeled if item["meeting_id"] in set(test_ids)]
+    if not train:
+        raise ValueError("no training segments after the split")
+
+    calibration = calibrate_threshold(train, thresholds)
+    best_threshold = calibration["best_threshold"]
+    report: dict[str, Any] = {
+        "num_train_segments": len(train),
+        "num_test_segments": len(test),
+        "calibrated_threshold": best_threshold,
+        "default_threshold": default_threshold,
+        "train_metrics_at_calibrated": calibration["best_metrics"],
+        "sweep": calibration["sweep"],
+    }
+    if test:
+        report["test_metrics_at_calibrated"] = evaluate_at_threshold(test, best_threshold)
+        report["test_metrics_at_default"] = evaluate_at_threshold(test, default_threshold)
+    return report
+
+
+def run(
+    annotations_dir: str | Path,
+    audio_dir: str | Path,
+    detectors: tuple[str, ...] = ("pyannote", "energy"),
+    test_ratio: float = 0.3,
+    seed: int = 0,
+    gt_fraction: float = 0.5,
+    thresholds: list[float] | None = None,
+) -> dict[str, Any]:
+    """Run threshold calibration for each detector and return a combined report."""
+    records = load_annotation_records(annotations_dir)
+    audio_lookup = make_audio_lookup(audio_dir)
+    meeting_ids = [str(record["meeting_id"]) for record in records]
+    train_ids, test_ids = split_meetings(meeting_ids, test_ratio, seed)
+
+    results: dict[str, Any] = {
+        "config": {
+            "detectors": list(detectors),
+            "test_ratio": test_ratio,
+            "seed": seed,
+            "gt_fraction": gt_fraction,
+            "num_meetings": len(set(meeting_ids)),
+        },
+        "train_meetings": train_ids,
+        "test_meetings": test_ids,
+        "detectors": {},
+    }
+    for detector in detectors:
+        print(f"\n=== detector: {detector} ===")
+        labeled = build_labeled_dataset(records, audio_lookup, detector, gt_fraction)
+        if not labeled:
+            print(f"  [warn] no labeled segments for detector '{detector}'")
+            continue
+        results["detectors"][detector] = calibrate_and_evaluate(
+            labeled, train_ids, test_ids, thresholds
+        )
+    return results
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--annotations", default="data/alimeeting/annotations",
+                        help="directory of prepared per-meeting annotation JSON")
+    parser.add_argument("--audio-dir", default="data/alimeeting/audio",
+                        help="directory containing the meeting audio files")
+    parser.add_argument("--detectors", nargs="+", default=["pyannote", "energy"],
+                        choices=["pyannote", "energy"], help="overlap detectors to calibrate")
+    parser.add_argument("--test-ratio", type=float, default=0.3)
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--gt-fraction", type=float, default=0.5,
+                        help="ground-truth overlap coverage to label a segment high-overlap")
+    parser.add_argument("--out-dir", default="outputs/overlap_threshold",
+                        help="where to write results.json (git-ignored by default)")
+    args = parser.parse_args()
+
+    results = run(
+        annotations_dir=args.annotations,
+        audio_dir=args.audio_dir,
+        detectors=tuple(args.detectors),
+        test_ratio=args.test_ratio,
+        seed=args.seed,
+        gt_fraction=args.gt_fraction,
+    )
+
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / "results.json"
+    out_path.write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    print("\n================ summary ================")
+    for detector, report in results["detectors"].items():
+        cal = report["calibrated_threshold"]
+        print(f"[{detector}] calibrated threshold = {cal} "
+              f"(default {report['default_threshold']})")
+        test_cal = report.get("test_metrics_at_calibrated")
+        test_def = report.get("test_metrics_at_default")
+        if test_cal and test_def:
+            print(f"    test F1  @calibrated={test_cal['f1']:.3f}  @default={test_def['f1']:.3f}")
+            print(f"    test P/R @calibrated={test_cal['precision']:.3f}/{test_cal['recall']:.3f}")
+        else:
+            print("    (no held-out test meetings; need >= 2 meetings)")
+    print(f"\nwrote {out_path}")
+
+
+if __name__ == "__main__":
+    main()
