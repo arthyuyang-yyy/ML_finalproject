@@ -282,6 +282,28 @@ class DegeneracyTests(unittest.TestCase):
         self.assertTrue(by_id["b"]["speaker"].startswith("SPEAKER_"))
         self.assertNotEqual(by_id["a"]["speaker"], by_id["b"]["speaker"])
 
+    def test_silence_does_not_consume_a_speaker_slot(self) -> None:
+        # The reviewer's follow-up: with num_speakers=2 fixed, the silence zero
+        # vector must not occupy a cluster and force A and B to merge.
+        silence = np.zeros(int(1.0 * SAMPLE_RATE), dtype=np.float32)
+        samples = np.concatenate([silence, _voice(110.0, 1.0, seed=1), _voice(240.0, 1.0, seed=2)])
+        segments = [
+            {"segment_id": "sil", "start_time": 0.0, "end_time": 1.0},
+            {"segment_id": "a", "start_time": 1.0, "end_time": 2.0},
+            {"segment_id": "b", "start_time": 2.0, "end_time": 3.0},
+        ]
+        result = cluster_segments(samples, segments, SAMPLE_RATE, num_speakers=2)
+        by_id = {item["segment_id"]: item for item in result}
+        self.assertEqual(by_id["sil"]["speaker"], "UNKNOWN")
+        # Silence carries no phantom SPEAKER_xx in its distribution.
+        self.assertEqual(by_id["sil"]["cluster_similarity_distribution"], {})
+        # A and B keep distinct labels instead of being merged into one.
+        self.assertNotEqual(by_id["a"]["speaker"], by_id["b"]["speaker"])
+        self.assertNotIn("UNKNOWN", {by_id["a"]["speaker"], by_id["b"]["speaker"]})
+        # The phantom SPEAKER_00 from silence never appears anywhere.
+        all_labels = {item["speaker"] for item in result if item["speaker"] != "UNKNOWN"}
+        self.assertEqual(len(all_labels), 2)
+
     def test_zero_vector_embedding_is_unknown(self) -> None:
         segments = [
             {"segment_id": "s0", "start_time": 0.0, "end_time": 1.0, "embedding": [0.0, 0.0, 0.0]},

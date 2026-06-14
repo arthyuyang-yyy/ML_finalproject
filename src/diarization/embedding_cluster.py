@@ -338,6 +338,11 @@ def cluster_segments(
     * ``embedding`` — the raw vector (only when ``attach_embeddings`` is set;
       useful for cross-meeting global speaker re-identification / memory).
 
+    Voiceprint-free segments (silence / zero vectors) are excluded from the
+    clustering itself, so they never occupy a speaker slot or split real speakers
+    apart under a fixed ``num_speakers``; they are backfilled afterwards as
+    ``UNKNOWN`` with an empty distribution.
+
     A segment is labelled ``UNKNOWN`` (and given confidence ``0.0``) when:
 
     * its embedding has no usable voiceprint (e.g. silence / a zero vector); or
@@ -352,24 +357,48 @@ def cluster_segments(
         return []
 
     embeddings = _resolve_embeddings(samples, segments, sample_rate, backend)
-    labels = agglomerative_cluster(
-        embeddings, distance_threshold=distance_threshold, num_speakers=num_speakers
-    )
-    similarities, _ = _centroid_similarities(embeddings, labels)
-    distributions, _ = cluster_similarity_distributions(embeddings, labels, temperature=temperature)
     norms = np.linalg.norm(embeddings, axis=1)
-    num_clusters = similarities.shape[1] if similarities.size else 0
+
+    # Voiceprint-free segments (silence / zero vectors) must not take part in
+    # clustering: a zero vector would otherwise occupy a speaker slot and, under a
+    # fixed ``num_speakers``, force real speakers to be merged. Cluster only the
+    # valid embeddings, then backfill the invalid ones as UNKNOWN with an empty
+    # distribution.
+    valid_index = np.flatnonzero(norms > MIN_VOICEPRINT_NORM)
+    valid_position = {int(global_idx): pos for pos, global_idx in enumerate(valid_index)}
+
+    num_clusters = 0
+    valid_similarities = np.empty((0, 0))
+    valid_distributions = np.empty((0, 0))
+    if valid_index.size:
+        valid_embeddings = embeddings[valid_index]
+        valid_labels = agglomerative_cluster(
+            valid_embeddings, distance_threshold=distance_threshold, num_speakers=num_speakers
+        )
+        valid_similarities, _ = _centroid_similarities(valid_embeddings, valid_labels)
+        valid_distributions, _ = cluster_similarity_distributions(
+            valid_embeddings, valid_labels, temperature=temperature
+        )
+        num_clusters = valid_similarities.shape[1] if valid_similarities.size else 0
     discriminative = num_clusters >= 2
 
     enriched: list[dict[str, Any]] = []
     for index, segment in enumerate(segments):
-        distribution_map = {
-            f"{speaker_prefix}{k:02d}": round(float(distributions[index][k]), 4)
-            for k in range(num_clusters)
-        }
-        speaker, confidence = _attribute_speaker(
-            similarities[index], float(norms[index]), discriminative, min_confidence, speaker_prefix
-        )
+        pos = valid_position.get(index)
+        if pos is None:
+            speaker, confidence, distribution_map = UNKNOWN_SPEAKER, 0.0, {}
+        else:
+            distribution_map = {
+                f"{speaker_prefix}{k:02d}": round(float(valid_distributions[pos][k]), 4)
+                for k in range(num_clusters)
+            }
+            speaker, confidence = _attribute_speaker(
+                valid_similarities[pos],
+                float(norms[index]),
+                discriminative,
+                min_confidence,
+                speaker_prefix,
+            )
         attributed = {
             **segment,
             "speaker": speaker,
