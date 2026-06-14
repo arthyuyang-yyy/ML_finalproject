@@ -4,6 +4,15 @@ First end-to-end run on real data. **Preliminary**: 8 meetings, 2 in the test
 split, so absolute numbers are noisy. Raw audio/annotations are not committed
 (see `../../data/README.md`); only metrics are recorded here.
 
+> **Scope — this is an exploratory, fixed-window, OSD-only experiment.** It uses
+> fixed 2 s windows and the pyannote OSD score with diarization fusion **disabled**.
+> The real Pipeline (`run_meeting_pipeline`) routes **VAD segments** using the
+> **fused** overlap score, so segment length and score composition differ and the
+> same threshold value does not carry over. Treat the calibrated value as an
+> exploratory finding — **not** as a finished Step 7b, and **not** as a drop-in
+> replacement of the default `0.4`. A proper routing-threshold calibration must
+> rerun on the same VAD segments and fused scores the Pipeline actually uses.
+
 ## Setup
 
 - **Dataset:** AliMeeting Eval, far-field mix (`Eval_Ali_far/audio_dir`), 8 meetings (~34 min each).
@@ -57,8 +66,11 @@ buckets by true overlap level) on the dumped scores:
 | **pyannote** | 0.06 | **0.591** | 0.757 | 0.485 |
 | energy | 0.11 | 0.469 | 0.307 | 0.998 |
 
-pyannote's test F1 rises from 0.346 (random split) to **0.591** — the earlier low
-number was split noise, not the detector's real quality.
+pyannote's test F1 rises from 0.346 (random split) to **0.591** under the stratified
+split. Read this cautiously: with only 8 meetings / 2 test, and the stratified split
+added *after* seeing the first result, **0.591 is a preliminary figure**, not proof
+that the earlier number was pure split noise. It suggests the random split was
+unfavourable, but a clean conclusion needs more meetings and a pre-registered split.
 
 **Detection (flagged-high) rate by true overlap level — the decisive view:**
 
