@@ -41,9 +41,13 @@ DEFAULT_TEMPERATURE = 0.1
 # similarities. Below this margin a segment cannot be confidently attributed and
 # is labelled UNKNOWN, honouring Step 6's "no clear match" rule.
 DEFAULT_MIN_CONFIDENCE = 0.3
-# Embeddings with an L2 norm at or below this are treated as having no usable
-# voiceprint (e.g. silence) and are never given a confident speaker label.
+# Embeddings with an L2 norm at or below this carry no usable voiceprint (e.g. a
+# zero vector from an empty/silent clip, or a missing precomputed embedding) and
+# are never given a confident speaker label.
 MIN_VOICEPRINT_NORM = 1e-6
+# Raw waveform clips with an RMS at or below this are treated as silence by the
+# acoustic backend, which then emits a zero embedding so the guard above fires.
+MIN_VOICEPRINT_RMS = 1e-4
 DEFAULT_SPEAKER_PREFIX = "SPEAKER_"
 UNKNOWN_SPEAKER = "UNKNOWN"
 EPSILON = 1e-10
@@ -82,6 +86,7 @@ class AcousticEmbeddingBackend:
         hop_ms: float = 10.0,
         fmin: float = 20.0,
         fmax: float | None = None,
+        min_rms: float = MIN_VOICEPRINT_RMS,
     ) -> None:
         if n_mels <= 0:
             raise ValueError("n_mels must be positive")
@@ -90,6 +95,7 @@ class AcousticEmbeddingBackend:
         self.hop_ms = hop_ms
         self.fmin = fmin
         self.fmax = fmax
+        self.min_rms = min_rms
 
     def encode_segments(
         self,
@@ -105,6 +111,11 @@ class AcousticEmbeddingBackend:
 
     def _encode_one(self, clip: np.ndarray, sample_rate: int) -> np.ndarray:
         dimension = 2 * self.n_mels
+        # Silence has a constant log-mel that would otherwise normalize to a unit
+        # vector and masquerade as a real voiceprint. Emit a zero embedding so the
+        # downstream norm guard labels it UNKNOWN instead.
+        if clip.size == 0 or float(np.sqrt(np.mean(np.square(clip)))) <= self.min_rms:
+            return np.zeros(dimension, dtype=np.float64)
         log_mel = self._log_mel(clip, sample_rate)
         if log_mel.size == 0:
             return np.zeros(dimension, dtype=np.float64)
@@ -262,25 +273,39 @@ def cluster_similarity_distributions(
     centroids.
 
     This is deliberately **not** called a speaker posterior: segments take part
-    in their own centroid, so the values are optimistic, and a single cluster
-    trivially yields 1.0. It is a relative, uncalibrated signal — confidence and
-    UNKNOWN decisions in :func:`cluster_segments` use the top-1/top-2 margin and
-    explicit degeneracy checks rather than this raw value.
+    in their own centroid, so the values are optimistic, a single cluster
+    trivially yields 1.0, and the softmax sharpness is governed by
+    ``temperature``. It is a relative, display-only signal. Confidence and
+    UNKNOWN decisions in :func:`cluster_segments` instead use the raw,
+    temperature-free cosine-similarity margin from :func:`_centroid_similarities`
+    plus explicit degeneracy checks.
     """
     if temperature <= 0:
         raise ValueError("temperature must be positive")
-    n = len(embeddings)
-    if n == 0:
+    if len(embeddings) == 0:
         return np.empty((0, 0)), np.empty((0, 0))
 
+    similarity, centroids = _centroid_similarities(embeddings, labels)
+    distributions = _softmax(similarity / temperature, axis=1)
+    return distributions, centroids
+
+
+def _centroid_similarities(
+    embeddings: np.ndarray,
+    labels: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return raw ``[N, K]`` cosine similarities to each centroid and the centroids.
+
+    These cosine similarities are temperature-free, so any confidence derived
+    from them is a property of the embeddings rather than of a softmax knob.
+    """
     normalized = _l2_normalize_rows(embeddings)
     num_clusters = int(labels.max()) + 1
     centroids = np.stack(
         [_l2_normalize(normalized[labels == k].mean(axis=0)) for k in range(num_clusters)]
     )
     similarity = np.clip(normalized @ centroids.T, -1.0, 1.0)
-    posteriors = _softmax(similarity / temperature, axis=1)
-    return posteriors, centroids
+    return similarity, centroids
 
 
 # --------------------------------------------------------------------------- #
@@ -330,20 +355,20 @@ def cluster_segments(
     labels = agglomerative_cluster(
         embeddings, distance_threshold=distance_threshold, num_speakers=num_speakers
     )
+    similarities, _ = _centroid_similarities(embeddings, labels)
     distributions, _ = cluster_similarity_distributions(embeddings, labels, temperature=temperature)
     norms = np.linalg.norm(embeddings, axis=1)
-    num_clusters = distributions.shape[1] if distributions.size else 0
+    num_clusters = similarities.shape[1] if similarities.size else 0
     discriminative = num_clusters >= 2
 
     enriched: list[dict[str, Any]] = []
     for index, segment in enumerate(segments):
-        distribution = distributions[index]
         distribution_map = {
-            f"{speaker_prefix}{k:02d}": round(float(distribution[k]), 4)
+            f"{speaker_prefix}{k:02d}": round(float(distributions[index][k]), 4)
             for k in range(num_clusters)
         }
         speaker, confidence = _attribute_speaker(
-            distribution, float(norms[index]), discriminative, min_confidence, speaker_prefix
+            similarities[index], float(norms[index]), discriminative, min_confidence, speaker_prefix
         )
         attributed = {
             **segment,
@@ -358,7 +383,7 @@ def cluster_segments(
 
 
 def _attribute_speaker(
-    distribution: np.ndarray,
+    similarities: np.ndarray,
     norm: float,
     discriminative: bool,
     min_confidence: float,
@@ -366,17 +391,19 @@ def _attribute_speaker(
 ) -> tuple[str, float]:
     """Pick a speaker label and an honest confidence for one segment.
 
-    Confidence is the top-1/top-2 similarity margin, and is forced to ``0.0``
-    for inputs that carry no discriminative evidence (silence, or a single
-    cluster), so a lone softmax value of ``1.0`` is never sold as certainty.
+    Confidence is the top-1/top-2 margin of the **raw cosine similarities** to
+    the cluster centroids — a temperature-free property of the embeddings, not
+    of the softmax distribution. It is forced to ``0.0`` for inputs with no
+    discriminative evidence (silence / no voiceprint, or a single cluster), so a
+    degenerate value is never sold as certainty.
     """
     if norm <= MIN_VOICEPRINT_NORM or not discriminative:
         return UNKNOWN_SPEAKER, 0.0
-    ordered = np.sort(distribution)[::-1]
-    margin = float(ordered[0] - ordered[1])
+    ordered = np.sort(similarities)[::-1]
+    margin = float(np.clip(ordered[0] - ordered[1], 0.0, 1.0))
     if margin < min_confidence:
         return UNKNOWN_SPEAKER, margin
-    winner = int(np.argmax(distribution))
+    winner = int(np.argmax(similarities))
     return f"{speaker_prefix}{winner:02d}", margin
 
 
@@ -479,6 +506,7 @@ __all__ = [
     "DEFAULT_MIN_CONFIDENCE",
     "DEFAULT_TEMPERATURE",
     "MIN_VOICEPRINT_NORM",
+    "MIN_VOICEPRINT_RMS",
     "UNKNOWN_SPEAKER",
     "AcousticEmbeddingBackend",
     "ResemblyzerEmbeddingBackend",

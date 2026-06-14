@@ -88,11 +88,14 @@ class AcousticEmbeddingBackendTests(unittest.TestCase):
         embeddings = AcousticEmbeddingBackend(n_mels=32).encode_segments(samples, segments, SAMPLE_RATE)
         self.assertEqual(embeddings.shape, (1, 64))
 
-    def test_silent_clip_yields_finite_zero_vector(self) -> None:
+    def test_silent_clip_yields_zero_vector(self) -> None:
+        # Silence must NOT be normalized into a unit vector that masquerades as a
+        # real voiceprint; it has to come back as a zero embedding.
         segments = [{"segment_id": "s0", "start_time": 0.0, "end_time": 1.0}]
         silence = np.zeros(SAMPLE_RATE, dtype=np.float32)
         embeddings = AcousticEmbeddingBackend().encode_segments(silence, segments, SAMPLE_RATE)
         self.assertTrue(np.isfinite(embeddings).all())
+        self.assertAlmostEqual(float(np.linalg.norm(embeddings[0])), 0.0)
 
 
 class AgglomerativeClusterTests(unittest.TestCase):
@@ -174,13 +177,26 @@ class ClusterSegmentsTests(unittest.TestCase):
             self.assertGreaterEqual(item["speaker_confidence"], 0.0)
             self.assertLessEqual(item["speaker_confidence"], 1.0)
 
-    def test_confidence_is_top1_top2_margin(self) -> None:
-        samples, segments = _two_speaker_meeting("ABABAB")
-        result = cluster_segments(samples, segments, SAMPLE_RATE)
-        for item in result:
-            values = sorted(item["cluster_similarity_distribution"].values(), reverse=True)
-            expected = round(values[0] - values[1], 3)
-            self.assertAlmostEqual(item["speaker_confidence"], expected, places=3)
+    def test_confidence_is_temperature_invariant(self) -> None:
+        # Confidence comes from the raw cosine margin, not the softmax, so the
+        # temperature knob must not move labels or confidence values.
+        embeddings = [[1.0, 0.0, 0.0], [0.9, 0.1, 0.0], [0.0, 1.0, 0.0], [0.0, 0.9, 0.1]]
+        segments = [
+            {"segment_id": f"s{i}", "start_time": float(i), "end_time": float(i + 1), "embedding": vec}
+            for i, vec in enumerate(embeddings)
+        ]
+        baseline = cluster_segments(np.zeros(0, dtype=np.float32), segments, num_speakers=2, temperature=0.1)
+        for temperature in (1.0, 5.0):
+            other = cluster_segments(
+                np.zeros(0, dtype=np.float32), segments, num_speakers=2, temperature=temperature
+            )
+            self.assertEqual(
+                [s["speaker"] for s in other], [s["speaker"] for s in baseline]
+            )
+            self.assertEqual(
+                [s["speaker_confidence"] for s in other],
+                [s["speaker_confidence"] for s in baseline],
+            )
 
     def test_preserves_original_segment_fields(self) -> None:
         samples, segments = _two_speaker_meeting("AB")
@@ -247,6 +263,24 @@ class DegeneracyTests(unittest.TestCase):
         for item in result:
             self.assertEqual(item["speaker"], "UNKNOWN")
             self.assertEqual(item["speaker_confidence"], 0.0)
+
+    def test_silence_among_real_speakers_is_unknown(self) -> None:
+        # The reviewer's scenario: silence + speaker A + speaker B in one meeting.
+        # Real speakers stay labelled; silence must not borrow a confident label.
+        silence = np.zeros(int(1.0 * SAMPLE_RATE), dtype=np.float32)
+        samples = np.concatenate([silence, _voice(110.0, 1.0, seed=1), _voice(240.0, 1.0, seed=2)])
+        segments = [
+            {"segment_id": "sil", "start_time": 0.0, "end_time": 1.0},
+            {"segment_id": "a", "start_time": 1.0, "end_time": 2.0},
+            {"segment_id": "b", "start_time": 2.0, "end_time": 3.0},
+        ]
+        result = cluster_segments(samples, segments, SAMPLE_RATE)
+        by_id = {item["segment_id"]: item for item in result}
+        self.assertEqual(by_id["sil"]["speaker"], "UNKNOWN")
+        self.assertEqual(by_id["sil"]["speaker_confidence"], 0.0)
+        self.assertTrue(by_id["a"]["speaker"].startswith("SPEAKER_"))
+        self.assertTrue(by_id["b"]["speaker"].startswith("SPEAKER_"))
+        self.assertNotEqual(by_id["a"]["speaker"], by_id["b"]["speaker"])
 
     def test_zero_vector_embedding_is_unknown(self) -> None:
         segments = [
