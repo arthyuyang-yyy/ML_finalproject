@@ -1,5 +1,22 @@
-"""Optional speech-separation facade for future model integration."""
+"""Optional speech-separation facade for the high-overlap path.
 
-from src.speech_separation import separate_speakers
+Re-exports the dependency-free NMF separation baseline and its pluggable
+backends from :mod:`src.speech_separation`. The high-overlap path consumes these
+through ``process_high_overlap_segments(..., separate=True)``.
+"""
 
-__all__ = ["separate_speakers"]
+from src.speech_separation import (
+    AsteroidSeparationBackend,
+    NmfSeparationBackend,
+    SpeechSeparator,
+    separate_speakers,
+    separate_waveform,
+)
+
+__all__ = [
+    "AsteroidSeparationBackend",
+    "NmfSeparationBackend",
+    "SpeechSeparator",
+    "separate_speakers",
+    "separate_waveform",
+]
