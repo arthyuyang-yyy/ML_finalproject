@@ -159,12 +159,19 @@ def _content_supported(
     threshold: float = 0.45,
     backend: HashingEmbeddingBackend | None = None,
 ) -> tuple[bool, float]:
-    """Return whether *evidence_text* semantically supports *claim_text*.
+    """Return whether *claim_text* and *evidence_text* are textually similar.
 
     Uses the dependency-free :class:`HashingEmbeddingBackend` (character n-gram
     + CJK token hashing) so this check works without torch, transformers, or
     sentence-transformers.  Both texts are normalised and encoded; if either is
     empty the score is ``0.0``.
+
+    .. note::
+       This measures *surface textual similarity*, not semantic entailment or
+       factual correctness.  Opposite statements can obtain high similarity
+       scores (e.g. "the budget was approved" vs "the budget was not approved").
+       Callers should treat the result as a loose filter, not a guarantee of
+       content support.
     """
     claim_text = claim_text.strip()
     evidence_text = evidence_text.strip()
@@ -205,22 +212,22 @@ def evaluate_evidence_support(
     - prediction ``confidence`` (optional): ``"high"``/``"medium"``/``"low"`` or
       a numeric score in [0, 1], used for calibration;
     - prediction ``text`` (optional): the claim wording, used for content-level
-      support checking when ``evidence_text_map`` is provided;
+      support checking when ``evidence_text_map`` is provided.  If missing,
+      content-level similarity is scored as ``0.0``;
     - reference ``evidence_ids``: the gold supporting evidence (empty means the
       claim is not supportable and a faithful system should abstain);
-    - reference ``text`` (optional): fallback claim wording when the prediction
-      lacks a ``text`` field.
 
     ``source_evidence_ids`` is the universe of evidence IDs that actually exist
     in the source segments; a cited ID outside it counts as a hallucination.
 
     ``evidence_text_map`` maps evidence IDs to their source text. When provided,
-    an additional *content-level* check is performed: a citation counts as
-    content-supported only when its ID is correct **and** its text is
-    semantically similar to the claim text (cosine similarity of
+    an additional *text-similarity* check is performed: a citation counts as
+    content-supported only when its ID is correct **and** its text has high
+    surface textual similarity to the claim text (cosine similarity of
     :class:`HashingEmbeddingBackend` vectors >= ``content_similarity_threshold``).
-    This addresses the experiment-plan gap where metrics previously checked only
-    evidence IDs, not whether the claim wording is entailed by the evidence.
+    This is a lightweight proxy, **not** semantic entailment; opposite claims can
+    obtain high similarity scores.  Callers requiring true NLI should replace
+    this heuristic with a dedicated entailment model.
 
     Caveat: for a meaningful ``hallucination_rate`` callers MUST pass the full
     set of real source evidence IDs. When it is omitted it defaults to the union
@@ -231,7 +238,8 @@ def evaluate_evidence_support(
     rate, hallucination rate, and confidence-calibration error (ECE).  When
     ``evidence_text_map`` is provided, additional ``content_*`` metrics are
     included (content precision/recall/F1, content hit rate, and content
-    unsupported rate).
+    unsupported rate).  These content metrics measure surface textual
+    similarity, not semantic entailment.
     """
     if len(predictions) != len(references):
         raise ValueError("predictions and references must have the same length")
@@ -292,7 +300,7 @@ def evaluate_evidence_support(
         backend = HashingEmbeddingBackend()
 
         for i, (pred, ref) in enumerate(zip(predictions, references)):
-            claim_text = str(pred.get("text") or ref.get("text") or "").strip()
+            claim_text = str(pred.get("text") or "").strip()
             cited = cited_sets[i]
             gold = gold_sets[i]
 
@@ -314,7 +322,7 @@ def evaluate_evidence_support(
 
             if gold_with_text and has_content_support:
                 content_hits += 1
-            if not pred.get("insufficient_evidence") and gold_with_text and not has_content_support:
+            if not pred.get("insufficient_evidence") and not has_content_support:
                 content_unsupported += 1
 
         content_precision = content_correct / content_cited if content_cited else 0.0
@@ -331,7 +339,7 @@ def evaluate_evidence_support(
         ]
         claims_text = [
             i for i in claims
-            if any(eid in evidence_text_map for eid in gold_sets[i])
+            if any(eid in evidence_text_map for eid in gold_sets[i]) or not gold_sets[i]
         ]
 
         result.update({

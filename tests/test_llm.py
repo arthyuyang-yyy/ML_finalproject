@@ -285,6 +285,21 @@ class GemmaClientTests(unittest.TestCase):
     def test_run_gemma_falls_back_when_backend_fails(self) -> None:
         self.assertEqual(run_gemma("hello", client=FailingClient()), "{}")
 
+    def test_run_gemma_without_client_uses_env(self) -> None:
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {"GEMMA_BACKEND": "none"}, clear=False):
+            self.assertEqual(run_gemma("hello"), "{}")
+
+    def test_run_gemma_env_invalid_raises(self) -> None:
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {"GEMMA_BACKEND": "invalid"}, clear=False):
+            with self.assertRaises(ValueError):
+                run_gemma("hello")
+
 
 class PromptTests(unittest.TestCase):
     def test_prompt_includes_schema_and_evidence(self) -> None:

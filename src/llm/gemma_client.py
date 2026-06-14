@@ -23,10 +23,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from collections.abc import Callable
 from typing import Any
 
-from .backends import LLMBackend, OllamaBackend, auto_backend
+from .backends import LLMBackend, OllamaBackend, OpenAIBackend, TransformersBackend, auto_backend
 from .json_repair import parse_or_repair_json
 
 GemmaGenerator = Callable[[str], dict[str, Any] | str]
@@ -121,7 +122,11 @@ def create_gemma_client(
         return None
     if normalized == "ollama":
         return OllamaGemmaClient(model=model, base_url=base_url)
-    raise ValueError("gemma backend must be one of: none, ollama")
+    if normalized == "openai":
+        return GemmaClient(backend=OpenAIBackend())
+    if normalized == "transformers":
+        return GemmaClient(backend=TransformersBackend(model_name=model))
+    raise ValueError("gemma backend must be one of: none, ollama, openai, transformers")
 
 
 def run_gemma(prompt: str, client: GemmaClient | None = None) -> str:

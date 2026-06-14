@@ -222,14 +222,23 @@ class EvidenceSupportTests(unittest.TestCase):
             self.assertFalse(key.startswith("content_"), f"unexpected content key: {key}")
 
     def test_content_support_missing_text_field(self) -> None:
-        """When text is missing, content metrics fall back to zero/NaN safely."""
+        """When prediction text is missing, content metrics are zero (no fallback to ref)."""
         text_map = {"e1": "some evidence text"}
         preds = [{"evidence_ids": ["e1"]}]  # no text field
-        refs = [{"evidence_ids": ["e1"]}]   # no text field
+        refs = [{"evidence_ids": ["e1"], "text": "ref text"}]
         result = evaluate_evidence_support(preds, refs, evidence_text_map=text_map)
         self.assertEqual(result["evidence_precision"], 1.0)
         self.assertEqual(result["content_precision"], 0.0)
         self.assertEqual(result["content_hit_rate"], 0.0)
+
+    def test_content_unsupported_counts_forced_answer_without_gold(self) -> None:
+        """When gold evidence is empty but the system still answers, content_unsupported_rate=1.0."""
+        text_map = {"e1": "some evidence text"}
+        preds = [{"evidence_ids": ["e1"], "text": "claim"}]
+        refs = [{"evidence_ids": [], "text": "claim"}]
+        result = evaluate_evidence_support(preds, refs, evidence_text_map=text_map)
+        self.assertEqual(result["unsupported_claim_rate"], 1.0)
+        self.assertEqual(result["content_unsupported_rate"], 1.0)
 
 
 class UncertaintyPreservationTests(unittest.TestCase):
