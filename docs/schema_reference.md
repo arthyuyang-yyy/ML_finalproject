@@ -4,7 +4,7 @@ This document compares the three schema structures used across the project, thei
 
 ---
 
-## 1. Evidence Segment Schema (17 fields)
+## 1. Evidence Segment Schema (17 required + 1 optional field)
 
 Defined by `src/evidence/builder.py` and `src/evidence/schema.py`, then validated by `src/evidence/validator.py`. This is the **canonical in-memory schema** used throughout the pipeline. `src/metadata_builder.py` and `src/schema_validation.py` remain backward-compatible import facades.
 
@@ -15,7 +15,9 @@ The 13 fields in the project task document are the domain-facing core. The imple
 - `source_audio_path`
 - `language`
 
-`build_evidence_segments()` accepts the low-overlap and high-overlap result lists, normalizes simplified candidate objects, sorts all records by timestamp, rejects duplicate IDs, and emits this complete 17-field representation. `build_evidence_file()` provides the equivalent JSON-file-to-JSON-file workflow.
+`build_evidence_segments()` accepts the low-overlap and high-overlap result lists, normalizes simplified candidate objects, sorts all records by timestamp, rejects duplicate IDs, and emits this representation. `build_evidence_file()` provides the equivalent JSON-file-to-JSON-file workflow.
+
+Field 18 (`cluster_similarity_distribution`) is **optional** (`NotRequired`): the builder always writes it for forward compatibility, defaulting to `{}`. Records produced before its introduction (and fixtures that omit it) still validate.
 
 | # | Field | Type | Description |
 |---|-------|------|-------------|
@@ -30,12 +32,13 @@ The 13 fields in the project task document are the domain-facing core. The imple
 | 9 | `route_reason` | `str` | Human-readable routing decision explanation |
 | 10 | `overlap_score` | `float` | Estimated overlap likelihood [0, 1] |
 | 11 | `asr_confidence` | `float` | ASR confidence estimate [0, 1] |
-| 12 | `speaker_confidence` | `float` | Speaker-attribution confidence [0, 1] |
+| 12 | `speaker_confidence` | `float` | Speaker-attribution confidence [0, 1]. For the clustering fallback this is the top-1/top-2 discrimination margin, and `0.0` for degenerate inputs (silence, a single cluster) |
 | 13 | `audio_clip_path` | `str` | Path to exported audio clip file |
 | 14 | `source_audio_path` | `str` | Original input audio path |
 | 15 | `language` | `str` | Language code (default `"und"`) |
 | 16 | `candidates` | `list[dict]` | Alternative transcript/speaker interpretations |
 | 17 | `uncertainty_note` | `str` | Human-readable reason for uncertainty |
+| 18 | `cluster_similarity_distribution` | `dict[str, float]` | *Optional.* Relative, uncalibrated `{speaker_label: similarity}` softmax over cluster centroids from the embedding-clustering fallback. Not a calibrated posterior; defaults to `{}` |
 
 ### Candidate sub-schema
 
@@ -242,7 +245,7 @@ Annotation CSV (11 cols)
 
 ASR Transcript (5 fields)
     └── input to ── Evidence Segment Builder
-                         └── produces ── Evidence Segment (17 fields)
+                         └── produces ── Evidence Segment (17 required + 1 optional field)
                                               ├── input to ── Event Extractor → Meeting Event (6 fields)
                                               └── input to ── Episode Creator → Episodic Memory (11 fields)
                                                                                       └── input to ── QA → validated QA Answer

@@ -17,23 +17,52 @@ logger = logging.getLogger(__name__)
 
 
 def diarize_audio(audio_path: str) -> list[dict]:
-    """Return timestamped speaker labels and attribution confidence."""
+    """Return timestamped speaker labels and attribution confidence.
+
+    pyannote remains authoritative when configured. Otherwise the audio is
+    segmented and run through unsupervised speaker-embedding clustering, so the
+    public Step 5 interface recovers real speakers in the lightweight mode
+    instead of always returning placeholder labels.
+    """
     pyannote_turns = diarize_with_pyannote(audio_path)
     if pyannote_turns:
         return pyannote_turns
 
-    from ..audio.preprocess import segment_audio
-    return cluster_speakers(segment_audio(audio_path))
+    from ..audio.preprocess import load_audio, segment_waveform
+    from .embedding_cluster import cluster_segments
+
+    samples, sample_rate = load_audio(audio_path)
+    segments = segment_waveform(samples, sample_rate)
+    if not segments:
+        return []
+    return cluster_segments(samples, segments, sample_rate)
 
 
 def assign_speakers_to_segments(
     segments: list[dict[str, Any]],
     diarization_turns: list[dict[str, Any]] | None = None,
+    *,
+    samples: Any | None = None,
+    sample_rate: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Attach speaker labels and confidence to segment timestamps."""
+    """Attach speaker labels and confidence to segment timestamps.
+
+    When pyannote diarization turns are available they remain authoritative.
+    Otherwise, if the waveform is supplied, speakers are recovered by
+    unsupervised speaker-embedding clustering (which also attaches a
+    ``cluster_similarity_distribution``); failing that, the deterministic
+    no-model fallback assigns placeholder labels.
+    """
     if not segments:
         return []
     if not diarization_turns:
+        if samples is not None and len(samples) > 0:
+            from .embedding_cluster import cluster_segments
+
+            from ..audio.preprocess import TARGET_SAMPLE_RATE
+
+            rate = sample_rate or TARGET_SAMPLE_RATE
+            return cluster_segments(samples, segments, rate)
         return cluster_speakers(segments)
 
     assigned: list[dict[str, Any]] = []

@@ -15,6 +15,69 @@ from src.llm.gemma_client import GemmaClient
 
 
 class PipelineTests(unittest.TestCase):
+    def test_pipeline_accepts_m4a_and_keeps_asr_input_standardized(self) -> None:
+        try:
+            import av
+        except ImportError:
+            self.skipTest("PyAV is not installed")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sample_rate = 16000
+            samples = (0.5 * np.sin(2 * np.pi * 220 * np.arange(sample_rate * 2) / sample_rate)).astype(np.float32)
+            input_path = root / "input.m4a"
+            output = av.open(str(input_path), "w")
+            stream = output.add_stream("aac", rate=sample_rate)
+            stream.layout = "mono"
+            frame = av.AudioFrame.from_ndarray(samples[np.newaxis, :], format="fltp", layout="mono")
+            frame.sample_rate = sample_rate
+            for packet in stream.encode(frame):
+                output.mux(packet)
+            for packet in stream.encode(None):
+                output.mux(packet)
+            output.close()
+
+            result = run_meeting_pipeline(
+                str(input_path),
+                "meeting_m4a",
+                PipelineConfig(outputs_root=root / "outputs", low_overlap_asr_model="mock"),
+            )
+
+            evidence = read_json(Path(result["output_dir"]) / "evidence_segments.json")
+            self.assertGreaterEqual(len(evidence), 1)
+            self.assertTrue(all(segment["text"].startswith("[mock transcript") for segment in evidence))
+            preprocessed, rate = load_audio(result["artifacts"]["preprocessed"])
+            self.assertEqual(rate, 16000)
+            self.assertEqual(preprocessed.ndim, 1)
+
+    @patch("src.pipeline.run_pipeline.write_segment_clips")
+    def test_pipeline_rejects_missing_exported_audio_clip(self, mocked_write_clips) -> None:
+        try:
+            import soundfile as sf
+        except ImportError:
+            self.skipTest("soundfile is not installed")
+
+        def missing_clip_paths(samples, sample_rate, segments, output_dir):
+            return [
+                {**segment, "audio_clip_path": str(Path(output_dir) / "missing.wav")}
+                for segment in segments
+            ]
+
+        mocked_write_clips.side_effect = missing_clip_paths
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sample_rate = 16000
+            t = np.arange(sample_rate) / sample_rate
+            input_path = root / "input.wav"
+            sf.write(input_path, (0.5 * np.sin(2 * np.pi * 220 * t)).astype(np.float32), sample_rate)
+
+            with self.assertRaisesRegex(ValueError, "does not exist or is not a file"):
+                run_meeting_pipeline(
+                    str(input_path),
+                    "meeting_missing_clip",
+                    PipelineConfig(outputs_root=root / "outputs"),
+                )
+
     def test_pipeline_accepts_structured_gemma_client(self) -> None:
         try:
             import soundfile as sf
@@ -35,6 +98,7 @@ class PipelineTests(unittest.TestCase):
                     "event_id": "ev_001",
                     "event_type": "decision",
                     "content": "Use the mock baseline for pipeline testing.",
+                    # Single-speaker tone -> one cluster -> honest UNKNOWN label.
                     "speakers": ["UNKNOWN"],
                     "evidence_ids": ["meeting_gemma_seg_001"],
                     "confidence": "high",

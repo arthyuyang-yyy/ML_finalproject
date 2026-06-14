@@ -23,7 +23,7 @@
        -> high_overlap_candidate
           -> process_high_overlap_segments
              -> faster-whisper 多参数解码候选或显式 fallback 候选
-  -> build_metadata_segment（17 字段证据记录）
+  -> build_metadata_segment（17 必填字段 + 1 可选的证据记录）
   -> write_segment_clips（导出每段 WAV）
   -> validate_metadata_segment
   -> extract_meeting_events（LLM 或 fallback）
@@ -40,7 +40,7 @@
 
 | 模块 | 文件 | 职责 |
 | --- | --- | --- |
-| 预处理 | `src/audio/preprocess.py` | 加载、单声道转换、polyphase 重采样、峰值归一化、VAD 分段、导出 float32 WAV |
+| 预处理 | `src/audio/preprocess.py` | 使用 soundfile/PyAV 解封装与解码常见格式、可选降噪、单声道转换、单次 polyphase 重采样、峰值归一化、VAD 分段、导出 float32 WAV |
 | Clip 导出 | `src/audio/clipper.py` | 将每个证据片段导出为 WAV clip |
 | 重叠检测 | `src/overlap/detector.py` | 评分重叠：pyannote OSD 适配器（优先）、显式区域覆盖或能量 fallback（上限 0.39） |
 | 双路径路由 | `src/overlap/router.py` | 按重叠阈值（默认 0.4）路由片段 |
@@ -50,7 +50,7 @@
 | 语音分离 | `src/speech_separation.py` | 兼容接口与占位实现，等待模型集成 |
 | 高重叠路径 | `src/high_overlap.py` | 保留 mixed-speaker 记录，主转写为空，并保存多个候选 |
 | 候选生成 | `src/candidates/generator.py` | 使用 faster-whisper beam/temperature/language 变化生成多个转写/说话人假设；轻量运行时使用 fallback 候选 |
-| Evidence 构建 | `src/evidence/builder.py` | 合并低/高重叠结果，规范化候选，按时间排序并输出共享的 17 字段证据 schema |
+| Evidence 构建 | `src/evidence/builder.py` | 合并低/高重叠结果，规范化候选，按时间排序并输出共享的证据 schema（17 必填 + 1 可选） |
 | Schema 验证 | `src/evidence/validator.py` | 验证证据记录、候选结构和 meeting 列表 |
 ### 回退后端（确定性轻量级后端）
 

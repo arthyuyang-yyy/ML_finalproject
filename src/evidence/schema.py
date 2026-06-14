@@ -60,6 +60,7 @@ class EvidenceSegment(TypedDict):
     language: str
     candidates: list[Candidate]
     uncertainty_note: str
+    cluster_similarity_distribution: NotRequired[dict[str, float]]
 
 
 EVIDENCE_SEGMENT_FIELDS = tuple(EvidenceSegment.__annotations__)

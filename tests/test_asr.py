@@ -10,16 +10,20 @@ Run with::
 """
 
 import unittest
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 
 from src.asr import (
+    FasterWhisperAdapter,
     FunASRAdapter,
     MockASRAdapter,
     get_adapter,
     logprob_to_confidence,
     transcribe_segments,
 )
+from src.errors import BackendUnavailableError
 from src.asr.core import (
     _aggregate_confidence,
     _from_funasr_result,
@@ -76,6 +80,40 @@ class MockAdapterTests(unittest.TestCase):
         result = adapter.transcribe_array(_tone(2.5), SAMPLE_RATE)
         self.assertEqual(result["language"], "en")
         self.assertGreaterEqual(result["segments"][0]["end_time"], 2.0)
+
+
+class FasterWhisperAdapterTests(unittest.TestCase):
+    @patch("src.candidates.generator._load_faster_whisper_model")
+    def test_transcribes_with_stable_baseline_settings(self, mocked_load) -> None:
+        model = MagicMock()
+        model.transcribe.return_value = (
+            iter([
+                SimpleNamespace(
+                    start=0.0,
+                    end=1.0,
+                    text=" hello",
+                    avg_logprob=-0.1,
+                    no_speech_prob=0.0,
+                )
+            ]),
+            SimpleNamespace(language="en"),
+        )
+        mocked_load.return_value = model
+
+        result = FasterWhisperAdapter(model_size="small").transcribe_array(_tone(1.0))
+
+        self.assertEqual(result["text"], "hello")
+        self.assertEqual(result["language"], "en")
+        model.transcribe.assert_called_once()
+        kwargs = model.transcribe.call_args.kwargs
+        self.assertEqual(kwargs["beam_size"], 5)
+        self.assertEqual(kwargs["temperature"], 0.0)
+        self.assertFalse(kwargs["condition_on_previous_text"])
+
+    @patch("src.candidates.generator._load_faster_whisper_model", side_effect=ImportError)
+    def test_missing_backend_has_install_instruction(self, mocked_load) -> None:
+        with self.assertRaisesRegex(BackendUnavailableError, "requirements-asr.txt"):
+            FasterWhisperAdapter().transcribe_array(_tone(1.0))
 
 
 class FactoryTests(unittest.TestCase):
