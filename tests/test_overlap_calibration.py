@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.evaluation.core import HIGH_OVERLAP, LOW_OVERLAP
 from experiments.overlap_threshold.run_calibration import (
+    audio_matches_meeting,
     calibrate_threshold,
     default_thresholds,
     evaluate_at_threshold,
@@ -67,6 +68,17 @@ class SplitMeetingsTests(unittest.TestCase):
         train, test = split_meetings(["a", "b"], test_ratio=0.9)
         self.assertTrue(train)
         self.assertTrue(test)
+
+
+class AudioMatchTests(unittest.TestCase):
+    def test_exact_and_suffix_match(self) -> None:
+        self.assertTrue(audio_matches_meeting("R8001_M8004", "R8001_M8004"))
+        self.assertTrue(audio_matches_meeting("R8001_M8004_MS801", "R8001_M8004"))
+        self.assertTrue(audio_matches_meeting("R8001_M8004_N_SPK8013", "R8001_M8004"))
+
+    def test_rejects_partial_and_other_meetings(self) -> None:
+        self.assertFalse(audio_matches_meeting("R8001_M80040", "R8001_M8004"))
+        self.assertFalse(audio_matches_meeting("R8002_M8004_MS801", "R8001_M8004"))
 
 
 class ThresholdSweepTests(unittest.TestCase):

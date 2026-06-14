@@ -183,16 +183,35 @@ def load_annotation_records(annotations_dir: str | Path) -> list[dict[str, Any]]
     return [json.loads(path.read_text(encoding="utf-8")) for path in paths]
 
 
+def audio_matches_meeting(stem: str, meeting_id: str) -> bool:
+    """Whether an audio file stem belongs to a meeting.
+
+    AliMeeting audio appends a mic/speaker suffix to the meeting id used by the
+    TextGrid — e.g. far ``R8001_M8004_MS801`` or near ``R8001_M8004_N_SPK8013``
+    for meeting ``R8001_M8004`` — so match the id exactly or as a ``<id>_*``
+    prefix (the trailing underscore prevents ``R8001_M8004`` matching
+    ``R8001_M80040``).
+    """
+    return stem == meeting_id or stem.startswith(f"{meeting_id}_")
+
+
 def make_audio_lookup(audio_dir: str | Path) -> Callable[[str], Path | None]:
-    """Return a function mapping a meeting_id to its audio file under ``audio_dir``."""
+    """Return a function mapping a meeting_id to its audio file under ``audio_dir``.
+
+    Point ``audio_dir`` at the far-field ``audio_dir`` (one mixed file per
+    meeting) for overlap detection; the per-speaker near-field files would
+    otherwise match the same meeting id several times.
+    """
     root = Path(audio_dir)
 
     def lookup(meeting_id: str) -> Path | None:
-        for suffix in (".wav", ".flac", ".WAV"):
-            matches = sorted(root.rglob(f"{meeting_id}{suffix}"))
-            if matches:
-                return matches[0]
-        return None
+        candidates = sorted(
+            path
+            for pattern in ("*.wav", "*.flac")
+            for path in root.rglob(pattern)
+            if audio_matches_meeting(path.stem, meeting_id)
+        )
+        return candidates[0] if candidates else None
 
     return lookup
 
