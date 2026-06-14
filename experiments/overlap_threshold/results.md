@@ -44,9 +44,49 @@ Both detectors calibrated to threshold **0.05**.
 - Threshold hit the sweep boundary; re-run with a finer/lower grid before quoting a
   final routing threshold.
 
+## Follow-up: stratified split + per-overlap-level buckets
+
+The random split above unluckily put two low-overlap meetings in test. Re-run with
+`analyze_scores.py` (stratified split by meeting overlap intensity, fine 0.01 sweep,
+buckets by true overlap level) on the dumped scores:
+
+- **Test now spans the range:** R8007_M8010 (56% overlap) + R8008_M8013 (14%).
+
+| Detector | calibrated | test F1 | P | R |
+| --- | --- | --- | --- | --- |
+| **pyannote** | 0.06 | **0.591** | 0.757 | 0.485 |
+| energy | 0.11 | 0.469 | 0.307 | 0.998 |
+
+pyannote's test F1 rises from 0.346 (random split) to **0.591** — the earlier low
+number was split noise, not the detector's real quality.
+
+**Detection (flagged-high) rate by true overlap level — the decisive view:**
+
+| True overlap level | pyannote | energy |
+| --- | --- | --- |
+| heavy (≥50%) | **0.485** | 0.998 |
+| moderate (30–50%) | 0.242 | 1.000 |
+| light (10–30%) | 0.086 | 1.000 |
+| trace (0–10%) | 0.068 | 1.000 |
+| **none (0%) → false alarm** | **0.007** | **1.000** |
+
+1. **pyannote is a genuine detector:** detection rate increases monotonically with
+   overlap severity (0.7% on clean windows → 48.5% on heavy overlap) and it barely
+   false-alarms on clean audio (0.7%).
+2. **energy is degenerate:** it flags ~everything (false-alarm rate 1.0). Its F1
+   (0.469) looks close to pyannote only because this test set is overlap-heavy, so
+   "label all positive" scores well. The buckets expose that it does not
+   discriminate at all — which a single F1 number hides.
+3. pyannote still misses ~half of even heavy overlap (recall headroom): OSD is
+   conservative and a 2 s window dilutes short overlaps. Smaller windows or a
+   different score aggregation are worth trying.
+
+Scores are dumped once (`run_calibration.py --dump-scored`) and reused by
+`analyze_scores.py`, so split/sweep/bucket changes need no pyannote re-run.
+
 ## Next steps
 
-- Finer low-end threshold sweep (0.01–0.10).
+- Smaller windows / alternative score aggregation to lift recall on heavy overlap.
 - Sensitivity analysis over `gt_fraction` and `window_seconds`.
 - More test meetings (use AISHELL-4 Test or more of AliMeeting) for stable numbers.
 
