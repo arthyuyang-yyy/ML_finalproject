@@ -173,11 +173,20 @@ python -m pip install -r requirements.txt
 python -m unittest discover -s tests -v
 ```
 
-运行端到端 pipeline：
+安装 Step 4 选定的真实 ASR baseline：
+
+```bash
+python -m pip install -r requirements-asr.txt
+```
+
+运行端到端 pipeline。CLI 默认使用 `faster-whisper small`，首次运行会下载模型：
 
 ```bash
 python main.py data/raw_audio/meeting_001.wav --meeting-id meeting_001
 ```
+
+仅验证软件流程时可使用 `--asr mock`。详细配置见
+[`docs/asr_baseline.zh-CN.md`](docs/asr_baseline.zh-CN.md)。
 
 启动 Gradio 交互演示：
 

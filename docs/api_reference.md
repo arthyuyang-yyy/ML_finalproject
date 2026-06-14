@@ -137,6 +137,7 @@ class ASRAdapter:
 
 class MockASRAdapter(ASRAdapter):    name = "mock"
 class WhisperXAdapter(ASRAdapter):   name = "whisperx"
+class FasterWhisperAdapter(ASRAdapter): name = "faster-whisper"
 class WhisperAdapter(ASRAdapter):    name = "whisper"
 class FunASRAdapter(ASRAdapter):     name = "funasr"
 
@@ -144,6 +145,10 @@ def get_adapter(name: str = "mock", **kwargs) -> ASRAdapter
 def transcribe_audio(audio_path: str, adapter=None, model="mock") -> dict
 def transcribe_segments(samples, segments, adapter, sample_rate=16000) -> list[dict]
 ```
+
+The primary Step 4 real-ASR baseline is `FasterWhisperAdapter(model_size="small",
+device="cpu", compute_type="int8")`. CLI and Gradio runs select it by default.
+Library-level `PipelineConfig` keeps `mock` as its deterministic default for tests.
 
 **Transcript shape:** `{"text", "language", "model", "asr_confidence", "segments": [{"start_time", "end_time", "text", "asr_confidence"}]}`
 
