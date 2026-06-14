@@ -31,7 +31,7 @@ def build_metadata_segment(
     source_audio_path: str = "",
     language: str = "und",
     route_reason: str = "",
-    speaker_posterior: dict[str, float] | None = None,
+    cluster_similarity_distribution: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """Build and validate one canonical evidence segment."""
     normalized_candidates = _normalize_candidates(candidates or [], segment_id, uncertainty_note)
@@ -53,7 +53,7 @@ def build_metadata_segment(
         "language": str(language or "und"),
         "candidates": normalized_candidates,
         "uncertainty_note": str(uncertainty_note),
-        "speaker_posterior": _normalize_posterior(speaker_posterior),
+        "cluster_similarity_distribution": _normalize_distribution(cluster_similarity_distribution),
     }
     return validate_metadata_segment(record)
 
@@ -155,17 +155,19 @@ def _build_from_processed_segment(
         audio_clip_path=str(segment.get("audio_clip_path", "")),
         source_audio_path=str(segment.get("source_audio_path") or source_audio_path),
         language=str(segment.get("language") or language),
-        speaker_posterior=segment.get("speaker_posterior"),
+        cluster_similarity_distribution=segment.get("cluster_similarity_distribution"),
     )
 
 
-def _normalize_posterior(posterior: dict[str, float] | None) -> dict[str, float]:
-    """Coerce a speaker posterior into a ``{label: probability}`` float map."""
-    if not posterior:
+def _normalize_distribution(distribution: dict[str, float] | None) -> dict[str, float]:
+    """Coerce a cluster-similarity distribution into a ``{label: value}`` map."""
+    if not distribution:
         return {}
-    if not isinstance(posterior, dict):
-        raise ValueError("speaker_posterior must be a mapping of speaker label to probability")
-    return {str(label): float(probability) for label, probability in posterior.items()}
+    if not isinstance(distribution, dict):
+        raise ValueError(
+            "cluster_similarity_distribution must be a mapping of speaker label to value"
+        )
+    return {str(label): float(value) for label, value in distribution.items()}
 
 
 def _normalize_candidates(

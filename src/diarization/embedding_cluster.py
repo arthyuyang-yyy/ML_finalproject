@@ -3,10 +3,11 @@
 This module is the project's genuine *unsupervised machine-learning* component.
 It reproduces the senior thesis's "voiceprint clustering" idea (extract a
 speaker embedding per segment, then cluster segments that belong to the same
-speaker) and extends it in one direction the thesis did not take: instead of a
-single hard label per segment, it emits a **soft posterior distribution over
-speakers**, which is exactly the ``speaker_posterior`` field the Evidence
-Packet needs for downstream LLM joint decoding and cross-meeting re-ID.
+speaker). Beyond a hard label, each segment also carries a
+``cluster_similarity_distribution`` (a relative, uncalibrated similarity signal)
+and an honest confidence based on the top-1/top-2 margin, with explicit UNKNOWN
+handling for degenerate inputs — useful for downstream LLM joint decoding and
+cross-meeting re-ID.
 
 Design notes
 ------------
@@ -33,11 +34,16 @@ from ..audio.preprocess import TARGET_SAMPLE_RATE
 # Calibrated for the acoustic backend, where same-speaker pairs sit near 0 and
 # different-speaker pairs sit around 0.4; learned d-vectors may want retuning.
 DEFAULT_DISTANCE_THRESHOLD = 0.30
-# Softmax temperature converting centroid similarities into speaker posteriors.
+# Softmax temperature converting centroid similarities into a relative
+# cluster-similarity distribution (NOT a calibrated speaker posterior).
 DEFAULT_TEMPERATURE = 0.1
-# A segment whose best speaker posterior falls below this is labelled UNKNOWN,
-# honouring Step 6's "no clear match" rule for the clustering fallback path.
-DEFAULT_MIN_CONFIDENCE = 0.5
+# Confidence is the *discrimination margin* between the top-1 and top-2 cluster
+# similarities. Below this margin a segment cannot be confidently attributed and
+# is labelled UNKNOWN, honouring Step 6's "no clear match" rule.
+DEFAULT_MIN_CONFIDENCE = 0.3
+# Embeddings with an L2 norm at or below this are treated as having no usable
+# voiceprint (e.g. silence) and are never given a confident speaker label.
+MIN_VOICEPRINT_NORM = 1e-6
 DEFAULT_SPEAKER_PREFIX = "SPEAKER_"
 UNKNOWN_SPEAKER = "UNKNOWN"
 EPSILON = 1e-10
@@ -196,7 +202,9 @@ def agglomerative_cluster(
         if target is not None:
             if len(members) <= target:
                 break
-        elif linkage > distance_threshold:
+        # Auto mode: the threshold stops merging, but ``max_speakers`` is a hard
+        # cap that keeps merging the closest pair even past the threshold.
+        elif linkage > distance_threshold and len(members) <= max_speakers:
             break
         members[left].extend(members[right])
         del members[right]
@@ -238,21 +246,26 @@ def _clamp_target(num_speakers: int | None, n: int, max_speakers: int) -> int | 
 
 
 # --------------------------------------------------------------------------- #
-# Soft posteriors — the extension beyond hard-label clustering
+# Cluster-similarity distribution (a relative signal, not a calibrated posterior)
 # --------------------------------------------------------------------------- #
-def soft_speaker_posteriors(
+def cluster_similarity_distributions(
     embeddings: np.ndarray,
     labels: np.ndarray,
     *,
     temperature: float = DEFAULT_TEMPERATURE,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Turn cluster assignments into a per-segment posterior over speakers.
+    """Return each segment's relative similarity to every cluster centroid.
 
     Each cluster centroid is the mean of its (normalized) member embeddings.
     Segment-to-centroid cosine similarities are scaled by ``temperature`` and
-    softmaxed, yielding an ``[N, K]`` posterior matrix plus the ``[K, D]``
-    centroids. The posterior — not just the argmax — is what the Evidence
-    Packet carries forward so uncertainty stays explicit.
+    softmaxed, yielding an ``[N, K]`` distribution matrix plus the ``[K, D]``
+    centroids.
+
+    This is deliberately **not** called a speaker posterior: segments take part
+    in their own centroid, so the values are optimistic, and a single cluster
+    trivially yields 1.0. It is a relative, uncalibrated signal — confidence and
+    UNKNOWN decisions in :func:`cluster_segments` use the top-1/top-2 margin and
+    explicit degeneracy checks rather than this raw value.
     """
     if temperature <= 0:
         raise ValueError("temperature must be positive")
@@ -286,18 +299,26 @@ def cluster_segments(
     speaker_prefix: str = DEFAULT_SPEAKER_PREFIX,
     attach_embeddings: bool = False,
 ) -> list[dict[str, Any]]:
-    """Assign speakers to segments by embedding + clustering, with soft posteriors.
+    """Assign speakers to segments by embedding + clustering, honestly.
 
     Returns each input segment enriched with:
 
-    * ``speaker`` — the argmax speaker label, e.g. ``"SPEAKER_00"``; or
-      ``"UNKNOWN"`` when the best posterior is below ``min_confidence`` (the
-      segment sits ambiguously between speakers), per Step 6's no-match rule.
-    * ``speaker_confidence`` — the winning posterior probability.
-    * ``speaker_posterior`` — the full ``{label: probability}`` distribution,
-      kept even for UNKNOWN segments so the ambiguity stays inspectable.
+    * ``speaker`` — the assigned label, e.g. ``"SPEAKER_00"``, or ``"UNKNOWN"``.
+    * ``speaker_confidence`` — the **discrimination margin** between the top-1
+      and top-2 cluster similarities, in ``[0, 1]``. It is ``0.0`` whenever the
+      attribution carries no real evidence (see below), so degenerate inputs are
+      never dressed up as certain.
+    * ``cluster_similarity_distribution`` — the relative, uncalibrated
+      ``{label: value}`` similarity distribution, kept for inspection.
     * ``embedding`` — the raw vector (only when ``attach_embeddings`` is set;
       useful for cross-meeting global speaker re-identification / memory).
+
+    A segment is labelled ``UNKNOWN`` (and given confidence ``0.0``) when:
+
+    * its embedding has no usable voiceprint (e.g. silence / a zero vector); or
+    * clustering produced a single group, so no speaker discrimination was
+      actually performed (this includes the single-segment case); or
+    * the top-1/top-2 similarity margin is below ``min_confidence``.
 
     Segments that already carry a precomputed ``"embedding"`` are reused as-is,
     so embeddings stored across meetings can be re-clustered without audio.
@@ -309,28 +330,54 @@ def cluster_segments(
     labels = agglomerative_cluster(
         embeddings, distance_threshold=distance_threshold, num_speakers=num_speakers
     )
-    posteriors, _ = soft_speaker_posteriors(embeddings, labels, temperature=temperature)
+    distributions, _ = cluster_similarity_distributions(embeddings, labels, temperature=temperature)
+    norms = np.linalg.norm(embeddings, axis=1)
+    num_clusters = distributions.shape[1] if distributions.size else 0
+    discriminative = num_clusters >= 2
 
     enriched: list[dict[str, Any]] = []
     for index, segment in enumerate(segments):
-        posterior = posteriors[index]
-        winner = int(np.argmax(posterior))
-        confidence = float(posterior[winner])
-        posterior_map = {
-            f"{speaker_prefix}{k:02d}": round(float(posterior[k]), 4)
-            for k in range(len(posterior))
+        distribution = distributions[index]
+        distribution_map = {
+            f"{speaker_prefix}{k:02d}": round(float(distribution[k]), 4)
+            for k in range(num_clusters)
         }
-        speaker = UNKNOWN_SPEAKER if confidence < min_confidence else f"{speaker_prefix}{winner:02d}"
+        speaker, confidence = _attribute_speaker(
+            distribution, float(norms[index]), discriminative, min_confidence, speaker_prefix
+        )
         attributed = {
             **segment,
             "speaker": speaker,
             "speaker_confidence": round(confidence, 3),
-            "speaker_posterior": posterior_map,
+            "cluster_similarity_distribution": distribution_map,
         }
         if attach_embeddings:
             attributed["embedding"] = embeddings[index].tolist()
         enriched.append(attributed)
     return enriched
+
+
+def _attribute_speaker(
+    distribution: np.ndarray,
+    norm: float,
+    discriminative: bool,
+    min_confidence: float,
+    speaker_prefix: str,
+) -> tuple[str, float]:
+    """Pick a speaker label and an honest confidence for one segment.
+
+    Confidence is the top-1/top-2 similarity margin, and is forced to ``0.0``
+    for inputs that carry no discriminative evidence (silence, or a single
+    cluster), so a lone softmax value of ``1.0`` is never sold as certainty.
+    """
+    if norm <= MIN_VOICEPRINT_NORM or not discriminative:
+        return UNKNOWN_SPEAKER, 0.0
+    ordered = np.sort(distribution)[::-1]
+    margin = float(ordered[0] - ordered[1])
+    if margin < min_confidence:
+        return UNKNOWN_SPEAKER, margin
+    winner = int(np.argmax(distribution))
+    return f"{speaker_prefix}{winner:02d}", margin
 
 
 def _resolve_embeddings(
@@ -431,12 +478,13 @@ __all__ = [
     "DEFAULT_DISTANCE_THRESHOLD",
     "DEFAULT_MIN_CONFIDENCE",
     "DEFAULT_TEMPERATURE",
+    "MIN_VOICEPRINT_NORM",
     "UNKNOWN_SPEAKER",
     "AcousticEmbeddingBackend",
     "ResemblyzerEmbeddingBackend",
     "SpeakerEmbeddingBackend",
     "agglomerative_cluster",
     "cluster_segments",
+    "cluster_similarity_distributions",
     "cosine_distance_matrix",
-    "soft_speaker_posteriors",
 ]

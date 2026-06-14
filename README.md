@@ -76,7 +76,7 @@ LLM integration is not itself an innovation. It is an optional experimental vari
 1. Preprocess audio and create timestamped VAD segments.
 2. Estimate overlap scores and route segments to low- or high-overlap processing.
 3. Produce one stable ASR result for low-overlap segments and multiple confidence-bearing candidates for high-overlap segments.
-4. Build and validate the shared 17-field Evidence representation.
+4. Build and validate the shared Evidence representation (17 required + 1 optional field).
 5. Extract structured events with deterministic rules or an optional evidence-constrained LLM.
 6. Convert events into persistent, traceable Episodic Memory.
 7. Retrieve episodes with BM25 + embeddings, then answer with templates or an optional LLM. Every supported answer must cite real evidence IDs and timestamps.
@@ -133,6 +133,7 @@ Each processed segment uses a shared schema:
 | `language` | Language code (default `"und"`) |
 | `candidates` | Alternative transcript/speaker interpretations |
 | `uncertainty_note` | Human-readable reason for uncertainty |
+| `cluster_similarity_distribution` | *Optional.* Relative, uncalibrated `{speaker: similarity}` distribution from the embedding-clustering fallback (defaults to `{}`) |
 
 ## Episodic Memory Design
 
@@ -167,7 +168,7 @@ The project is currently in the **runnable infrastructure, pending real high-ove
 Implemented and runnable:
 
 - bilingual research design, architecture, innovation points, and experiment plan;
-- shared evidence-packet metadata schema (17 fields), validation rules, and sample meeting fixture;
+- shared evidence-packet metadata schema (17 required + 1 optional field), validation rules, and sample meeting fixture;
 - audio loading, mono conversion, polyphase resampling, peak normalization, and energy-based VAD segmentation (with merging and splitting);
 - audio clip export per evidence segment (`src/audio/clipper.py`);
 - controlled two-speaker overlap synthesis with SNR control and ground-truth overlap annotations;
@@ -247,12 +248,12 @@ Keep large audio files, model weights, and generated outputs outside Git.
 1. 预处理音频并创建带时间戳的片段。
 2. 估计每个片段的重叠分数（优先 pyannote OSD，不可用时使用能量 fallback）。
 3. 对每个片段进行路由（阈值 0.4）：低重叠路径或高重叠候选路径。
-4. 为每个片段构建统一的元信息记录（17 字段）。
+4. 为每个片段构建统一的元信息记录（17 必填字段 + 1 可选）。
 5. 导出每段音频 clip 并完成 schema 验证。
 6. 使用规则或可选的证据约束 LLM 提取结构化事件。
 7. 将事件转换为 Episodic Memory，并通过模板或可选 LLM 基于检索证据回答问题。
 
-## 元信息 Schema（17 字段）
+## 元信息 Schema（17 必填字段 + 1 可选）
 
 | 字段 | 含义 |
 | --- | --- |
@@ -272,6 +273,7 @@ Keep large audio files, model weights, and generated outputs outside Git.
 | `language` | 语言代码 |
 | `candidates` | 备选转写和说话人解释 |
 | `uncertainty_note` | 对不确定原因的可读说明 |
+| `cluster_similarity_distribution` | *可选。* 聚类 fallback 的相对相似度分布（未校准信号，默认 `{}`） |
 
 ## 当前进度
 
