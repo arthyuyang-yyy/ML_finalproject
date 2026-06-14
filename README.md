@@ -225,6 +225,20 @@ Launch the Gradio interactive demo:
 python app.py
 ```
 
+### Enable pyannote (optional, 3 steps)
+
+Without this the pipeline still runs, but diarization and overlap detection use the lightweight fallbacks. To turn on the real pyannote models:
+
+1. **Install:** `pip install pyannote.audio`
+2. **Accept the terms** (one-time, per Hugging Face account) for [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1) and [pyannote/overlapped-speech-detection](https://huggingface.co/pyannote/overlapped-speech-detection).
+3. **Set your token** as an environment variable (never commit it):
+
+   ```bash
+   export HF_TOKEN=hf_xxx          # Windows PowerShell: $env:HF_TOKEN="hf_xxx"
+   ```
+
+The code reads `HF_TOKEN` (or `HUGGINGFACE_TOKEN`) at runtime; no token is stored in the repo.
+
 Keep large audio files, model weights, and generated outputs outside Git.
 
 ---
@@ -303,5 +317,19 @@ python -m unittest discover -s tests -v
 python main.py data/raw_audio/meeting_001.wav --meeting-id meeting_001
 python app.py
 ```
+
+### 启用 pyannote（可选，三步）
+
+不做这三步也能运行，但 diarization 和重叠检测会走轻量 fallback。启用真实 pyannote 模型：
+
+1. **安装：** `pip install pyannote.audio`
+2. **接受模型条款**（每个 Hugging Face 账号一次）：[pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1) 与 [pyannote/overlapped-speech-detection](https://huggingface.co/pyannote/overlapped-speech-detection)。
+3. **设置 token** 为环境变量（切勿提交到 Git）：
+
+   ```bash
+   export HF_TOKEN=hf_xxx          # Windows PowerShell：$env:HF_TOKEN="hf_xxx"
+   ```
+
+代码运行时从 `HF_TOKEN`（或 `HUGGINGFACE_TOKEN`）读取；仓库内不保存任何 token。
 
 独立中文版详见 [README.zh-CN.md](README.zh-CN.md)。大型音频文件、模型权重和生成结果不应提交到 Git。
