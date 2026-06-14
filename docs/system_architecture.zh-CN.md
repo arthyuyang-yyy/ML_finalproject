@@ -40,7 +40,7 @@
 
 | 模块 | 文件 | 职责 |
 | --- | --- | --- |
-| 预处理 | `src/audio/preprocess.py` | 加载、单声道转换、polyphase 重采样、峰值归一化、VAD 分段、导出 float32 WAV |
+| 预处理 | `src/audio/preprocess.py` | 使用 soundfile/PyAV 解封装与解码常见格式、可选降噪、单声道转换、单次 polyphase 重采样、峰值归一化、VAD 分段、导出 float32 WAV |
 | Clip 导出 | `src/audio/clipper.py` | 将每个证据片段导出为 WAV clip |
 | 重叠检测 | `src/overlap/detector.py` | 评分重叠：pyannote OSD 适配器（优先）、显式区域覆盖或能量 fallback（上限 0.39） |
 | 双路径路由 | `src/overlap/router.py` | 按重叠阈值（默认 0.4）路由片段 |

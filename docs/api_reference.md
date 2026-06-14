@@ -46,7 +46,14 @@ def read_json(path: str | Path) -> Any
 TARGET_SAMPLE_RATE = 16000
 
 def load_audio(audio_path: str, target_sample_rate: int = 16000,
-               normalize: bool = True, target_peak: float = 0.97) -> tuple[np.ndarray, int]
+               normalize: bool = True, target_peak: float = 0.97,
+               denoise: bool = False, denoise_strength: float = 0.5
+               ) -> tuple[np.ndarray, int]
+
+def decode_audio_with_pyav(audio_path: str | Path) -> tuple[np.ndarray, int]
+
+def reduce_stationary_noise(samples: np.ndarray, sample_rate: int,
+                            strength: float = 0.5) -> np.ndarray
 
 def to_mono(samples: np.ndarray) -> np.ndarray
 
@@ -74,8 +81,14 @@ def segment_audio(audio_path: str, meeting_id: str = "meeting", **vad_kwargs) ->
 
 def preprocess_audio(input_path: str, output_path: str,
                      target_sample_rate: int = 16000, target_peak: float = 0.97,
-                     target_sr: int | None = None) -> tuple[np.ndarray, int]
+                     target_sr: int | None = None, denoise: bool = False,
+                     denoise_strength: float = 0.5) -> tuple[np.ndarray, int]
 ```
+
+`soundfile` is used first for native formats. PyAV is the demux/decode fallback
+for common meeting containers such as M4A, AAC, MP4, and WMA. Decoding preserves
+the native sample rate so the shared preprocessing path performs resampling only
+once. Optional stationary-noise reduction is disabled by default.
 
 ### `src/audio/clipper.py`
 
