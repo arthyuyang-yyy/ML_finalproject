@@ -5,6 +5,7 @@ ground-truth overlap-region logic are validated without downloading the dataset.
 """
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from scripts.prepare_alimeeting import (
     convert_meeting,
     overlap_regions_from_turns,
     parse_textgrid,
+    prepare_root,
     textgrid_to_turns,
 )
 
@@ -124,6 +126,14 @@ class OverlapRegionTests(unittest.TestCase):
         ]
         self.assertEqual(overlap_regions_from_turns(turns), [])
 
+    def test_same_speaker_overlapping_turns_are_not_overlap(self) -> None:
+        # Two concurrent turns from the SAME speaker must not count as multi-speaker overlap.
+        turns = [
+            {"speaker": "A", "start_time": 0.0, "end_time": 2.0},
+            {"speaker": "A", "start_time": 1.0, "end_time": 3.0},
+        ]
+        self.assertEqual(overlap_regions_from_turns(turns), [])
+
 
 class ConvertMeetingTests(unittest.TestCase):
     def test_record_summary_fields(self) -> None:
@@ -140,6 +150,20 @@ class ConvertMeetingTests(unittest.TestCase):
         self.assertEqual(len(record["turns"]), 2)
         self.assertEqual(record["overlap_regions"], [{"start_time": 1.0, "end_time": 1.5}])
         self.assertEqual(record["overlap_seconds"], 0.5)
+
+
+class PrepareRootTests(unittest.TestCase):
+    def test_duplicate_meeting_id_raises(self) -> None:
+        # The same meeting id under two subdirs (e.g. far/ and near/) must error
+        # instead of one silently overwriting the other.
+        text = make_textgrid({"A": [(0.0, 1.0, "x")]}, xmax=1.0)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for sub in ("far", "near"):
+                (root / sub).mkdir()
+                (root / sub / "R0001_M0001.TextGrid").write_text(text, encoding="utf-8")
+            with self.assertRaises(ValueError):
+                prepare_root(root, root / "out")
 
 
 if __name__ == "__main__":
