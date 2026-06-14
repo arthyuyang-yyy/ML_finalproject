@@ -4,7 +4,9 @@ This document traces the exact 14-step call chain executed by `run_meeting_pipel
 
 ## Input
 
-- `input_audio_path`: path to a raw meeting audio file (any format supported by `soundfile`)
+- `input_audio_path`: path to a raw meeting audio file. `soundfile` handles
+  native formats first; PyAV falls back for containers/codecs such as M4A, AAC,
+  MP4, and WMA.
 - `meeting_id`: stable identifier used for output directory naming
 
 ## Pre-flight
@@ -26,7 +28,11 @@ paths = ensure_meeting_dirs(cfg.meeting_dir(meeting_id))
 ### Step 1: Preprocess Audio
 **Module:** `src/audio/preprocess.py` — `preprocess_audio()`
 
-Reads raw audio, averages channels to mono, resamples to 16 kHz (polyphase if SciPy is available, linear interpolation otherwise), peak-normalizes to 0.97, and writes a float32 WAV file.
+Demuxes and decodes raw audio, optionally reduces stationary noise, averages
+channels to mono, resamples exactly once to 16 kHz (polyphase if SciPy is
+available, linear interpolation otherwise), peak-normalizes to 0.97, and writes
+a float32 WAV file. All ASR adapters therefore receive the same standardized
+audio regardless of the original file format.
 
 **Output:** `outputs/{meeting_id}/preprocessed.wav`
 
@@ -71,7 +77,7 @@ Each segment receives a `route_reason` string explaining the decision.
 **Module:** `src/low_overlap.py` — `process_low_overlap_segments()`
 
 For low-overlap segments, the pipeline produces a single stable evidence record:
-- `text` via the configured ASR adapter (`WhisperX` is recommended for heavy runs; `MockASRAdapter` remains the default for tests/demo wiring)
+- `text` via the configured ASR adapter (`faster-whisper small` is the first real CLI/UI baseline; `MockASRAdapter` remains the deterministic library/test default)
 - `speaker` and `speaker_confidence` via pyannote/WhisperX-style diarization turns when available, or deterministic fallback labels otherwise
 - original `start_time` / `end_time`, `overlap_score`, and empty `candidates`
 

@@ -41,12 +41,17 @@ LLM 是结构化事件抽取和答案组织的可选实验组件。RAG 检索、
 
 ## Phase 2: Audio and Dual-path Baselines / 阶段二：音频与双路径基线
 
-- [x] Step 1 - Audio preprocessing: mono conversion, 16 kHz resampling,
-  normalization, and standard WAV export. / 音频预处理、单声道转换、16 kHz 重采样、归一化和 WAV 导出。
+- [x] Step 1 - Audio preprocessing: soundfile/PyAV demux and decode for common
+  meeting formats, optional denoising, mono conversion, one-time 16 kHz
+  resampling, normalization, and standard WAV export.
+  / 常见会议音频格式解封装与解码、可选降噪、单声道转换、单次 16 kHz 重采样、归一化和 WAV 导出。
 - [x] Step 2 - Energy-based VAD with timestamped segments. / 基于能量的 VAD 与时间戳切段。
 - [x] Step 3 - Per-segment audio clip export with `audio_clip_path`. / 按片段导出音频 clip。
 - [x] Step 4 - Pluggable ASR adapters and confidence normalization:
   Mock, WhisperX, faster-whisper, Whisper, and FunASR. / 可插拔 ASR 与置信度规范化。
+  `faster-whisper small` is the selected first real baseline and has passed a
+  real-audio smoke run; other adapters remain available for later comparisons.
+  / 第一版真实 ASR 已选择 `faster-whisper small` 并通过真实音频 smoke run，其他适配器保留用于后续对比。
 - [x] Step 5 - Optional pyannote diarization adapter. / 可选 pyannote 说话人日志接口。
 - [x] Step 6 - Integrate diarization and speaker assignment into the pipeline,
   including dominant speaker, `MIXED`, and `UNKNOWN` rules. / 集成说话人归属规则。
@@ -127,10 +132,11 @@ LLM 是结构化事件抽取和答案组织的可选实验组件。RAG 检索、
 - [x] Add deterministic event-extraction and QA fallbacks. / 完成确定性事件抽取与问答 fallback。
 - [x] Validate emitted audio clip paths and add seed evidence-evaluation experiments.
   / 完成音频片段路径校验与种子证据评估实验。
-- [x] Verify the lightweight environment on June 13, 2026: 280 tests passed,
+- [x] Verify the environment on June 14, 2026: 282 tests passed,
   1 optional Gradio test skipped, seed evidence evaluation passed, and the
-  existing lightweight smoke run remains valid. / 轻量环境验证完成：280 个测试通过，
-  1 个可选 Gradio 测试跳过，证据种子实验通过，已有轻量 smoke run 仍有效。
+  lightweight pipeline and real faster-whisper ASR smoke runs passed.
+  / 环境验证完成：282 个测试通过，1 个可选 Gradio 测试跳过，证据种子实验、
+  轻量 Pipeline 与真实 faster-whisper ASR smoke run 均通过。
 
 ## Project Goal / 项目最终要实现什么
 

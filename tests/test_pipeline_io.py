@@ -50,7 +50,7 @@ class ConfigTests(unittest.TestCase):
         cfg = PipelineConfig()
         self.assertEqual(cfg.target_sample_rate, 16000)
         self.assertEqual(cfg.language, "und")
-        self.assertEqual(cfg.low_overlap_asr_model, "auto")
+        self.assertEqual(cfg.low_overlap_asr_model, "mock")
         self.assertGreaterEqual(cfg.overlap_threshold, 0.0)
         self.assertLessEqual(cfg.overlap_threshold, 1.0)
 
