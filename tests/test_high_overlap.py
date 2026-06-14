@@ -51,6 +51,7 @@ class HighOverlapPathTests(unittest.TestCase):
         self.assertGreaterEqual(len(segment["candidates"]), 2)
         self.assertIn("speaker attribution is uncertain", segment["uncertainty_note"])
 
+    @patch.dict("sys.modules", {"faster_whisper": MagicMock()})
     @patch("src.candidates.generator._load_faster_whisper_model")
     def test_separated_sources_become_distinct_asr_candidates(self, mocked_load) -> None:
         model = MagicMock()
