@@ -156,7 +156,7 @@ class GradioAdapterTests(unittest.TestCase):
         result = run_demo_pipeline("meeting.wav", "meeting_001")
         mocked_run.assert_called_once()
         self.assertEqual(mocked_run.call_args.args, ("meeting.wav", "meeting_001"))
-        self.assertEqual(mocked_run.call_args.kwargs["config"].low_overlap_asr_model, "auto")
+        self.assertEqual(mocked_run.call_args.kwargs["config"].low_overlap_asr_model, "faster-whisper")
         self.assertEqual(result["meeting_id"], "meeting_001")
 
     @unittest.skipUnless(_HAS_GRADIO, "gradio not installed (optional demo dependency)")

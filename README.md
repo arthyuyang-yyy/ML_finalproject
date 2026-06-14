@@ -59,29 +59,27 @@ The reference thesis already combines ASR, speaker diarization, low-overlap clus
 
 **Our system**
 
-`ASR + overlap-aware routing -> uncertainty-aware candidate generation -> metadata-aware LLM post-processing -> Episodic Memory -> traceable QA and meeting recall`
+`audio preprocessing -> overlap-aware dual paths -> Evidence -> structured events -> Episodic Memory -> traceable retrieval and QA`
 
-The key change is that high-overlap speech is not forced into one confident transcript. Candidate interpretations and confidence metadata remain available to downstream reasoning and retrieval.
+The key change is not merely adding an LLM. High-overlap speech is not forced into one confident transcript: candidates, confidence, and uncertainty remain available to structured events, memory, and final answers. LLMs are optional, replaceable components for event extraction and answer wording; the core pipeline remains runnable and testable without them.
 
 ## Core Innovations
 
-1. **Overlap-aware routing:** route low-overlap audio to lightweight speaker clustering and high-overlap audio to separation or candidate generation.
-2. **Uncertainty-aware candidate generation:** preserve multiple plausible transcripts and speaker hypotheses for ambiguous regions.
-3. **Metadata-aware LLM post-processing:** reason over timestamps, confidence, overlap, candidates, and prior memory rather than plain text alone.
-4. **Episodic Memory:** store meaningful meeting events with evidence for traceable QA, action-item retrieval, and cross-meeting recall.
-5. **Evaluation beyond WER and DER:** measure routing, candidate usefulness, uncertainty preservation, evidence quality, and hallucination.
+1. **Uncertainty propagation for overlapped speech:** low-overlap segments produce stable transcripts, while high-overlap segments retain multiple transcript and speaker candidates with confidence. Later stages must not silently turn uncertain candidates into confirmed facts.
+2. **Traceable event-level meeting memory and RAG:** episodes bind meeting events to speakers, timestamps, confidence, evidence IDs, and playable audio clips. Retrieval and QA can trace claims back to exact evidence.
+3. **Trust-oriented evaluation:** evaluate routing, candidate usefulness, uncertainty preservation, evidence hits, content support, and unsupported claims in addition to WER and DER.
+
+LLM integration is not itself an innovation. It is an optional experimental variable for comparing deterministic rules, plain LLM extraction, and evidence-constrained LLM extraction.
 
 ## System Pipeline
 
-1. Preprocess audio and create timestamped segments.
-2. Estimate overlap scores.
-3. Route each segment:
-   - Low overlap: VAD, speaker embedding, clustering, and ASR.
-   - High overlap: speech separation or multiple candidate interpretations.
-4. Build a common metadata record for every segment.
-5. Use an LLM to correct text, preserve uncertainty, and extract evidence-backed meeting events.
-6. Convert related segments into Episodic Memory records.
-7. Retrieve episodes to answer questions with speakers, timestamps, confidence, and uncertainty notes.
+1. Preprocess audio and create timestamped VAD segments.
+2. Estimate overlap scores and route segments to low- or high-overlap processing.
+3. Produce one stable ASR result for low-overlap segments and multiple confidence-bearing candidates for high-overlap segments.
+4. Build and validate the shared Evidence representation (17 required + 1 optional field).
+5. Extract structured events with deterministic rules or an optional evidence-constrained LLM.
+6. Convert events into persistent, traceable Episodic Memory.
+7. Retrieve episodes with BM25 + embeddings, then answer with templates or an optional LLM. Every supported answer must cite real evidence IDs and timestamps.
 
 See [docs/system_architecture.md](docs/system_architecture.md) for the module-level design.
 
@@ -135,6 +133,7 @@ Each processed segment uses a shared schema:
 | `language` | Language code (default `"und"`) |
 | `candidates` | Alternative transcript/speaker interpretations |
 | `uncertainty_note` | Human-readable reason for uncertainty |
+| `cluster_similarity_distribution` | *Optional.* Relative, uncalibrated `{speaker: similarity}` distribution from the embedding-clustering fallback (defaults to `{}`) |
 
 ## Episodic Memory Design
 
@@ -155,21 +154,21 @@ Episodes support:
 | Experiment | Goal | Status |
 | --- | --- | --- |
 | 1. Overlap routing | Compare predicted overlap routes with manual labels | Infrastructure ready; pyannote adapter and energy fallback implemented; annotation set pending |
-| 2. High-overlap candidates | Compare candidate generation with forced single-output transcription | Candidate interface implemented; formal experiment pending |
-| 3. Metadata-aware LLM | Compare plain-text, speaker-aware, and full-metadata LLM post-processing | LLM event extraction implemented; metadata-input ablation pending |
+| 2. High-overlap candidates | Compare candidate generation with forced single-output transcription | Candidate interface and metrics implemented; real high-overlap runs and separation pending |
+| 3. Structured event extraction | Compare rules, plain LLMs, and Evidence-constrained LLMs | Rule fallback, LLM interface, and validation implemented; real-model ablation pending |
 | 4. Episodic Memory QA | Compare summary QA, transcript RAG, and speaker-aware memory QA | Event-grouped storage, hybrid retrieval, filters, and baseline evidence-backed QA implemented; formal experiment pending |
-| 5. Hallucination and evidence | Measure hallucination rate and timestamped evidence hit rate | Basic citation-rate metrics exist; full evidence-support and hallucination scoring remains a stub |
+| 5. Evidence and uncertainty | Measure evidence hits, content support, unsupported claims, and uncertainty preservation | Core metrics and a seed experiment exist; annotated real pipeline outputs are pending |
 
 Full details are in [docs/experiment_plan.md](docs/experiment_plan.md).
 
 ## Current Status
 
-The project is currently in the **runnable baseline and formal-experiment preparation stage**. Formal experiment results have not been produced yet.
+The project is currently in the **runnable infrastructure, pending real high-overlap processing and formal experiments** stage. The lightweight pipeline validates software integration, but its Mock ASR and deterministic fallbacks do not demonstrate real meeting quality.
 
 Implemented and runnable:
 
 - bilingual research design, architecture, innovation points, and experiment plan;
-- shared evidence-packet metadata schema (17 fields), validation rules, and sample meeting fixture;
+- shared evidence-packet metadata schema (17 required + 1 optional field), validation rules, and sample meeting fixture;
 - audio loading, mono conversion, polyphase resampling, peak normalization, and energy-based VAD segmentation (with merging and splitting);
 - audio clip export per evidence segment (`src/audio/clipper.py`);
 - controlled two-speaker overlap synthesis with SNR control and ground-truth overlap annotations;
@@ -194,13 +193,13 @@ Pending before the project can claim full experimental completion:
 
 - manually annotated evaluation split;
 - overlap-threshold calibration and routing experiments against human labels;
-- optional speech-separation implementation and validation that every emitted clip path exists;
+- real high-overlap processing and an optional speech-separation baseline;
 - real heavy-model runs and accuracy comparisons for WhisperX, faster-whisper, Whisper, FunASR, pyannote, and Ollama Gemma;
 - formal validation of decision/action-item/deadline extraction;
-- full evidence-support, hallucination, uncertainty-preservation, and candidate-usefulness metrics;
-- metadata-input ablations, Episodic Memory QA comparisons, and the planned formal experiments.
+- an annotated set built from real pipeline outputs for content support, uncertainty preservation, and candidate usefulness;
+- rules/plain-LLM/Evidence-constrained-LLM ablations and Summary QA/Transcript RAG/Episodic Memory QA comparisons.
 
-Verified on June 12, 2026 with the lightweight virtual environment: `258` unit/integration tests passed and `1` optional Gradio component test was skipped because Gradio was not installed. A lightweight end-to-end smoke run completed successfully. Heavy models remain optional and are loaded lazily.
+Verified on June 13, 2026 with the lightweight virtual environment: `280` unit/integration tests passed and `1` optional Gradio component test was skipped because Gradio was not installed. The seed evidence-evaluation experiment and a lightweight end-to-end smoke run completed successfully. Heavy models remain optional and are loaded lazily.
 
 ## How to Run
 
@@ -249,12 +248,12 @@ Keep large audio files, model weights, and generated outputs outside Git.
 1. 预处理音频并创建带时间戳的片段。
 2. 估计每个片段的重叠分数（优先 pyannote OSD，不可用时使用能量 fallback）。
 3. 对每个片段进行路由（阈值 0.4）：低重叠路径或高重叠候选路径。
-4. 为每个片段构建统一的元信息记录（17 字段）。
-5. 导出每段音频 clip，schema 验证，LLM 事件提取。
-6. 相关片段转换为 Episodic Memory 记录并持久化。
-7. 检索 episode 回答问题。
+4. 为每个片段构建统一的元信息记录（17 必填字段 + 1 可选）。
+5. 导出每段音频 clip 并完成 schema 验证。
+6. 使用规则或可选的证据约束 LLM 提取结构化事件。
+7. 将事件转换为 Episodic Memory，并通过模板或可选 LLM 基于检索证据回答问题。
 
-## 元信息 Schema（17 字段）
+## 元信息 Schema（17 必填字段 + 1 可选）
 
 | 字段 | 含义 |
 | --- | --- |
@@ -274,6 +273,7 @@ Keep large audio files, model weights, and generated outputs outside Git.
 | `language` | 语言代码 |
 | `candidates` | 备选转写和说话人解释 |
 | `uncertainty_note` | 对不确定原因的可读说明 |
+| `cluster_similarity_distribution` | *可选。* 聚类 fallback 的相对相似度分布（未校准信号，默认 `{}`） |
 
 ## 当前进度
 
@@ -291,9 +291,9 @@ Keep large audio files, model weights, and generated outputs outside Git.
 - 仅安装轻量依赖时可以完整运行 Pipeline，但会使用 Mock ASR 与确定性 fallback，适合验证系统流程，不代表真实识别效果；
 - 配置可选依赖、模型、Hugging Face token 和 Ollama 服务后，可切换真实 ASR、pyannote、Gemma 与 Gradio。
 
-正式实验前仍需：人工标注评估集、重叠阈值校准、语音分离、音频 clip 路径存在性校验、真实重模型对比、正式事件抽取验证、完整证据支持/幻觉指标，以及计划中的消融和对比实验。
+正式实验前仍需：人工标注评估集、重叠阈值校准、真实高重叠处理与语音分离、真实重模型对比、正式事件抽取验证，以及计划中的消融和对比实验。
 
-2026 年 6 月 12 日验证：轻量环境下 `258` 个测试通过，`1` 个可选 Gradio 组件测试因未安装 Gradio 跳过；轻量端到端 smoke run 成功。
+2026 年 6 月 13 日验证：轻量环境下 `280` 个测试通过，`1` 个可选 Gradio 组件测试因未安装 Gradio 跳过；证据评估种子实验和轻量端到端 smoke run 成功。
 
 ## 运行方式
 

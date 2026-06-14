@@ -9,6 +9,29 @@ acceptance criteria, schemas, and final deliverables are defined in
 - `[x]` 已实现并有基础测试 / implemented with baseline tests
 - `[ ]` 尚未完成或仍需正式实验验证 / pending or awaiting formal validation
 
+## Confirmed Research Route / 已确认研究路线
+
+The core project must remain runnable without an LLM:
+
+`preprocessing -> overlap detection and routing -> low/high-overlap processing -> Evidence -> structured events -> Episodic Memory -> retrieval and QA`
+
+项目主线必须在不接入 LLM 时也能够运行：
+
+`预处理 -> 重叠检测与分流 -> 低/高重叠处理 -> Evidence -> 结构化事件 -> Episodic Memory -> 检索与问答`
+
+Core contributions / 核心贡献：
+
+- propagate uncertainty from high-overlap candidates into events, memory, and answers;
+- store traceable event-level memory linked to evidence IDs, timestamps, and audio clips;
+- evaluate evidence support, unsupported claims, and uncertainty preservation beyond WER/DER.
+
+LLMs are optional experimental components for structured event extraction and
+answer wording. RAG retrieval, evidence validation, memory storage, and the
+uncertainty rules must not depend on an external LLM.
+
+LLM 是结构化事件抽取和答案组织的可选实验组件。RAG 检索、证据校验、记忆存储和不确定性
+规则不能依赖外部 LLM。
+
 ## Phase 1: Interfaces and Data / 阶段一：接口与数据
 
 - [x] Define bilingual research positioning and system architecture. / 完成双语研究定位和系统架构。
@@ -18,12 +41,17 @@ acceptance criteria, schemas, and final deliverables are defined in
 
 ## Phase 2: Audio and Dual-path Baselines / 阶段二：音频与双路径基线
 
-- [x] Step 1 - Audio preprocessing: mono conversion, 16 kHz resampling,
-  normalization, and standard WAV export. / 音频预处理、单声道转换、16 kHz 重采样、归一化和 WAV 导出。
+- [x] Step 1 - Audio preprocessing: soundfile/PyAV demux and decode for common
+  meeting formats, optional denoising, mono conversion, one-time 16 kHz
+  resampling, normalization, and standard WAV export.
+  / 常见会议音频格式解封装与解码、可选降噪、单声道转换、单次 16 kHz 重采样、归一化和 WAV 导出。
 - [x] Step 2 - Energy-based VAD with timestamped segments. / 基于能量的 VAD 与时间戳切段。
 - [x] Step 3 - Per-segment audio clip export with `audio_clip_path`. / 按片段导出音频 clip。
 - [x] Step 4 - Pluggable ASR adapters and confidence normalization:
   Mock, WhisperX, faster-whisper, Whisper, and FunASR. / 可插拔 ASR 与置信度规范化。
+  `faster-whisper small` is the selected first real baseline and has passed a
+  real-audio smoke run; other adapters remain available for later comparisons.
+  / 第一版真实 ASR 已选择 `faster-whisper small` 并通过真实音频 smoke run，其他适配器保留用于后续对比。
 - [x] Step 5 - Optional pyannote diarization adapter. / 可选 pyannote 说话人日志接口。
 - [x] Step 6 - Integrate diarization and speaker assignment into the pipeline,
   including dominant speaker, `MIXED`, and `UNKNOWN` rules. / 集成说话人归属规则。
@@ -38,26 +66,31 @@ acceptance criteria, schemas, and final deliverables are defined in
   uncertainty instead of forcing one transcript. / 完成高重叠多候选路径。
 - [ ] Step 11 - Optional speech separation baseline for high-overlap segments. / 实现可选语音分离。
 - [x] Step 12 - Evidence-segment schema builder and validator. / 完成统一 Evidence Schema 构建与校验。
-- [ ] Validate that every emitted `audio_clip_path` exists on disk. / 在校验器中检查每个音频路径真实存在。
+- [x] Validate that every emitted `audio_clip_path` exists on disk. / 在校验器中检查每个音频路径真实存在。
 
-## Phase 3: LLM, Memory, and QA / 阶段三：LLM、记忆与问答
+## Phase 3: Evidence, Memory, and QA / 阶段三：证据、记忆与问答
 
-- [x] Step 13 - Connect an Ollama Gemma-compatible backend while retaining the
-  deterministic offline fallback. / 接入 Ollama Gemma 接口并保留离线 fallback。
-- [x] Step 14 - Implement evidence-only, JSON-only prompts, evidence citations,
+- [x] Step 13 - Implement deterministic structured-event fallback so the core
+  pipeline does not require an LLM. / 完成确定性结构化事件 fallback，确保主线不依赖 LLM。
+- [x] Step 14 - Implement optional evidence-only, JSON-only LLM prompts, evidence citations,
   owner uncertainty, small-talk exclusion, and high-overlap confidence rules. / 完成证据约束 Prompt 和不确定性规则。
 - [x] Step 15 - Add LLM JSON parse, repair, regeneration, and evidence-ID
   validation. / 完成 LLM JSON 修复、重试和证据 ID 校验。
-- [ ] Step 16 - Validate real Gemma meeting-event extraction for decisions,
-  action items, deadlines, open questions, disagreements, and uncertainty.
-  The extraction interface and deterministic fallback exist, but formal
-  real-meeting validation is pending. / 接口与 fallback 已完成，真实会议事件抽取效果仍需验证。
+- [ ] Step 16a - Define and evaluate a deterministic/rule-based structured-event
+  baseline for decisions, action items, deadlines, open questions, and uncertainty.
+  / 定义并评估规则式结构化事件抽取基线。
+- [ ] Step 16b - Compare rule extraction, plain LLM extraction, and full-Evidence
+  constrained LLM extraction on the same annotated meetings.
+  / 在同一标注集上比较规则、普通 LLM 和完整 Evidence 约束 LLM。
 - [x] Step 17 - Create event-grouped Episodic Memory and atomically persist it
   as JSON. / 完成事件级情景记忆与原子 JSON 持久化。
 - [x] Step 18 - Add keyword and semantic/hybrid retrieval with relevance gating
   and meeting, speaker, and time filters. / 完成关键词与混合检索。
 - [x] Step 19 - Implement evidence-backed QA that cites evidence IDs and
   timestamps, refuses unsupported answers, and surfaces uncertainty. / 完成可追溯证据问答。
+- [ ] Step 20 - Compare template QA, transcript RAG, and Episodic Memory RAG;
+  use an LLM only as an optional answer-writing condition.
+  / 比较模板问答、Transcript RAG 和 Episodic Memory RAG；LLM 仅作为可选答案生成条件。
 - [x] Emit unified per-meeting pipeline artifacts under `outputs/<meeting_id>/`.
   / 按会议输出统一 Pipeline 产物。
 
@@ -78,12 +111,15 @@ acceptance criteria, schemas, and final deliverables are defined in
   precision, recall, F1, and cost/quality trade-offs. / 完成重叠路由阈值实验。
 - [ ] Experiment 2 - Compare multi-candidate high-overlap processing with a
   forced single transcript. / 完成高重叠多候选对比实验。
-- [ ] Experiment 3 - Run metadata-aware LLM ablations. / 完成元信息感知 LLM 消融实验。
+- [ ] Experiment 3 - Compare deterministic rules, plain LLM extraction, and
+  full-Evidence constrained LLM extraction. / 比较规则、普通 LLM 和完整 Evidence 约束 LLM。
 - [ ] Experiment 4 - Compare Episodic Memory QA with summary QA and transcript
   RAG. / 完成 Episodic Memory QA 对比实验。
-- [ ] Finalize and run evidence-support, hallucination, uncertainty-preservation,
-  and candidate-usefulness metrics. Basic citation-rate metrics exist; full
-  evidence-support scoring remains a stub. / 完成证据支持、幻觉、不确定性和候选有效性指标。
+- [x] Implement evidence-ID support, uncertainty-preservation, candidate-usefulness,
+  and seed experiment infrastructure. / 完成证据 ID、不确定性保留、候选有效性和种子实验基础设施。
+- [ ] Build annotations from real pipeline outputs and run content-support,
+  unsupported-claim, uncertainty-preservation, and candidate-usefulness evaluation.
+  / 基于真实 Pipeline 输出构建标注并完成内容支持、无支持声明、不确定性和候选有效性实验。
 
 ## Shared Infrastructure / 共享基础设施
 
@@ -94,9 +130,13 @@ acceptance criteria, schemas, and final deliverables are defined in
 - [x] Add pipeline orchestration, configuration, I/O helpers, and package
   facades. / 完成 Pipeline 编排、配置和 I/O。
 - [x] Add deterministic event-extraction and QA fallbacks. / 完成确定性事件抽取与问答 fallback。
-- [x] Verify the lightweight environment: 258 tests passed, 1 optional Gradio
-  test skipped, and an end-to-end smoke run completed on June 12, 2026.
-  / 已验证轻量环境：258 个测试通过，1 个可选 Gradio 测试跳过，端到端 smoke run 成功。
+- [x] Validate emitted audio clip paths and add seed evidence-evaluation experiments.
+  / 完成音频片段路径校验与种子证据评估实验。
+- [x] Verify the environment on June 14, 2026: 282 tests passed,
+  1 optional Gradio test skipped, seed evidence evaluation passed, and the
+  lightweight pipeline and real faster-whisper ASR smoke runs passed.
+  / 环境验证完成：282 个测试通过，1 个可选 Gradio 测试跳过，证据种子实验、
+  轻量 Pipeline 与真实 faster-whisper ASR smoke run 均通过。
 
 ## Project Goal / 项目最终要实现什么
 

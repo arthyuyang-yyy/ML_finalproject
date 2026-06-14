@@ -6,6 +6,10 @@ numpy>=1.26,<3
 # Audio backend used by preprocessing, clipping, and the lightweight pipeline.
 soundfile>=0.12
 
+# Container demuxing and codec decoding fallback for M4A/AAC/MP4/WMA and other
+# common meeting-recording formats. Native WAV/FLAC/OGG still use soundfile.
+av>=11
+
 # Optional high-quality resampler used by preprocessing.resample. The code falls
 # back to linear interpolation when SciPy is unavailable.
 # scipy>=1.11

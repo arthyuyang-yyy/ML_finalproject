@@ -4,7 +4,9 @@ This document traces the exact 14-step call chain executed by `run_meeting_pipel
 
 ## Input
 
-- `input_audio_path`: path to a raw meeting audio file (any format supported by `soundfile`)
+- `input_audio_path`: path to a raw meeting audio file. `soundfile` handles
+  native formats first; PyAV falls back for containers/codecs such as M4A, AAC,
+  MP4, and WMA.
 - `meeting_id`: stable identifier used for output directory naming
 
 ## Pre-flight
@@ -26,7 +28,11 @@ paths = ensure_meeting_dirs(cfg.meeting_dir(meeting_id))
 ### Step 1: Preprocess Audio
 **Module:** `src/audio/preprocess.py` — `preprocess_audio()`
 
-Reads raw audio, averages channels to mono, resamples to 16 kHz (polyphase if SciPy is available, linear interpolation otherwise), peak-normalizes to 0.97, and writes a float32 WAV file.
+Demuxes and decodes raw audio, optionally reduces stationary noise, averages
+channels to mono, resamples exactly once to 16 kHz (polyphase if SciPy is
+available, linear interpolation otherwise), peak-normalizes to 0.97, and writes
+a float32 WAV file. All ASR adapters therefore receive the same standardized
+audio regardless of the original file format.
 
 **Output:** `outputs/{meeting_id}/preprocessed.wav`
 
@@ -71,7 +77,7 @@ Each segment receives a `route_reason` string explaining the decision.
 **Module:** `src/low_overlap.py` — `process_low_overlap_segments()`
 
 For low-overlap segments, the pipeline produces a single stable evidence record:
-- `text` via the configured ASR adapter (`WhisperX` is recommended for heavy runs; `MockASRAdapter` remains the default for tests/demo wiring)
+- `text` via the configured ASR adapter (`faster-whisper small` is the first real CLI/UI baseline; `MockASRAdapter` remains the deterministic library/test default)
 - `speaker` and `speaker_confidence` via pyannote/WhisperX-style diarization turns when available, or deterministic fallback labels otherwise
 - original `start_time` / `end_time`, `overlap_score`, and empty `candidates`
 
@@ -96,7 +102,7 @@ If faster-whisper is unavailable, explicit fallback candidates are emitted so do
 ### Step 8: Evidence Segment Construction
 **Module:** `src/evidence/builder.py` — `build_evidence_segments()`
 
-Merges low-overlap and high-overlap results into one timestamp-sorted list. It verifies that each record is supplied through the correct route, normalizes simplified high-overlap candidates, rejects duplicate IDs, and builds a 17-field evidence record containing timing, routing, confidence, candidate, and provenance data.
+Merges low-overlap and high-overlap results into one timestamp-sorted list. It verifies that each record is supplied through the correct route, normalizes simplified high-overlap candidates, rejects duplicate IDs, and builds an evidence record (17 required + 1 optional field) containing timing, routing, confidence, candidate, and provenance data.
 
 Fields: `meeting_id`, `segment_id`, `evidence_id`, `speaker`, `start_time`, `end_time`, `text`, `processing_path`, `route_reason`, `overlap_score`, `asr_confidence`, `speaker_confidence`, `audio_clip_path`, `source_audio_path`, `language`, `candidates`, `uncertainty_note`.
 

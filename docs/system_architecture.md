@@ -23,7 +23,7 @@ Audio
        -> high_overlap_candidate
           -> process_high_overlap_segments
              -> faster-whisper multi-decode candidates or explicit fallback candidates
-  -> build_metadata_segment (17-field evidence record)
+  -> build_metadata_segment (17 required + 1 optional field evidence record)
   -> write_segment_clips (export per-segment WAV)
   -> validate_metadata_segment
   -> extract_meeting_events (LLM or fallback)
@@ -40,7 +40,7 @@ See [pipeline_walkthrough.md](pipeline_walkthrough.md) for the complete 14-step 
 
 | Module | File | Responsibility |
 | --- | --- | --- |
-| Preprocessing | `src/audio/preprocess.py` | Load, mono-convert, polyphase-resample, peak-normalize, VAD-segment, and export float32 WAV |
+| Preprocessing | `src/audio/preprocess.py` | Demux/decode common formats with soundfile/PyAV, optionally denoise, mono-convert, polyphase-resample once, peak-normalize, VAD-segment, and export float32 WAV |
 | Clip export | `src/audio/clipper.py` | Write per-evidence-segment WAV clips to disk |
 | Overlap detection | `src/overlap/detector.py` | Score overlap: pyannote OSD adapter (priority), explicit region coverage, or energy fallback (max 0.39) |
 | Dual-path router | `src/overlap/router.py` | Route segments by overlap threshold (default 0.4) |
@@ -50,7 +50,7 @@ See [pipeline_walkthrough.md](pipeline_walkthrough.md) for the complete 14-step 
 | Speech separation | `src/speech_separation.py` | Compatibility interface and placeholder pending model integration |
 | High-overlap path | `src/high_overlap.py` | Preserve mixed-speaker records with empty main transcript and multiple candidates |
 | Candidate generator | `src/candidates/generator.py` | Produce multiple transcript/speaker hypotheses with faster-whisper beam/temperature/language variations, with fallback candidates for lightweight runs |
-| Evidence builder | `src/evidence/builder.py` | Merge low/high-overlap results, normalize candidates, sort by time, and emit the shared 17-field evidence schema |
+| Evidence builder | `src/evidence/builder.py` | Merge low/high-overlap results, normalize candidates, sort by time, and emit the shared evidence schema (17 required + 1 optional field) |
 | Schema validation | `src/evidence/validator.py` | Validates evidence-packet records, candidate structure, and per-meeting lists |
 ### Fallbacks (Deterministic Lightweight Backends)
 

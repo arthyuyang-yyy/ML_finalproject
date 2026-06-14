@@ -142,7 +142,7 @@ def answer_demo_question(
 def run_demo_pipeline(
     audio_path: str | None,
     meeting_id: str,
-    asr_backend: str = "auto",
+    asr_backend: str = "faster-whisper",
     gemma_backend: str = "none",
     gemma_model: str = "gemma3:4b",
 ) -> dict[str, Any]:
@@ -221,7 +221,7 @@ def build_app():
                     asr_backend = gr.Dropdown(
                         label="ASR backend",
                         choices=["auto", "whisperx", "faster-whisper", "whisper", "funasr", "mock"],
-                        value="auto",
+                        value="faster-whisper",
                     )
                     gemma_backend = gr.Dropdown(
                         label="Gemma backend",

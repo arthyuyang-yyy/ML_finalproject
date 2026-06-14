@@ -3,7 +3,6 @@
 
 # Choose and configure heavy backends based on the target machine/GPU.
 # openai-whisper>=20231117
-# faster-whisper>=1.0
 # whisperx>=3.1
 # pyannote.audio>=3.1
 # sentence-transformers>=2.7

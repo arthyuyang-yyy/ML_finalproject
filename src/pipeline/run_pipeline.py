@@ -39,6 +39,8 @@ def run_meeting_pipeline(
         input_audio_path,
         str(paths["preprocessed"]),
         target_sample_rate=cfg.target_sample_rate,
+        denoise=cfg.enable_denoise,
+        denoise_strength=cfg.denoise_strength,
     )
     samples = preprocessed_samples
 
@@ -74,7 +76,7 @@ def run_meeting_pipeline(
     low_overlap_processed = process_low_overlap_segments(
         samples,
         low_overlap_input,
-        asr_adapter=get_adapter(cfg.low_overlap_asr_model, **_adapter_kwargs(cfg.low_overlap_asr_model, cfg.language)),
+        asr_adapter=get_adapter(cfg.low_overlap_asr_model, **_adapter_kwargs(cfg)),
         sample_rate=sample_rate,
         diarization_turns=diarization_turns,
     )
@@ -95,7 +97,10 @@ def run_meeting_pipeline(
     )
 
     evidence_segments = write_segment_clips(samples, sample_rate, evidence_segments, paths["clips"])
-    evidence_segments = [validate_metadata_segment(segment) for segment in evidence_segments]
+    evidence_segments = [
+        validate_metadata_segment(segment, require_audio_clip=True)
+        for segment in evidence_segments
+    ]
     low_overlap_segments = [
         segment for segment in evidence_segments if segment["processing_path"] == "low_overlap_cluster"
     ]
@@ -140,8 +145,16 @@ def _adapter_language(language: str) -> str | None:
     return None if language in {"", "und", "unknown"} else language
 
 
-def _adapter_kwargs(model: str, language: str) -> dict[str, str | None]:
+def _adapter_kwargs(config: PipelineConfig) -> dict[str, Any]:
     """Return ASR adapter kwargs without breaking dependency-free mock runs."""
-    if model.lower() == "mock":
-        return {"language": language}
-    return {"language": _adapter_language(language)}
+    model = config.low_overlap_asr_model.lower()
+    if model == "mock":
+        return {"language": config.language}
+    kwargs: dict[str, Any] = {"language": _adapter_language(config.language)}
+    if model == "faster-whisper":
+        kwargs.update({
+            "model_size": config.faster_whisper_model_size,
+            "device": config.faster_whisper_device,
+            "compute_type": config.faster_whisper_compute_type,
+        })
+    return kwargs
