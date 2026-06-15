@@ -225,7 +225,7 @@ def build_app():
                     )
                     gemma_backend = gr.Dropdown(
                         label="Gemma backend",
-                        choices=["none", "ollama"],
+                        choices=["none", "ollama", "openai", "transformers"],
                         value="none",
                     )
                     gemma_model = gr.Textbox(label="Gemma model", value="gemma3:4b")

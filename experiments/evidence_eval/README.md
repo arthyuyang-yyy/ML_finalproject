@@ -70,4 +70,4 @@ Before reporting final paper numbers:
    evaluation split.
 2. These metrics check cited evidence IDs, uncertainty signals, and candidate
    text — they do **not** yet verify that a claim's wording is entailed by the
-   evidence content. Content-level support checking is future work.
+   evidence content. True semantic entailment (NLI) is future work.

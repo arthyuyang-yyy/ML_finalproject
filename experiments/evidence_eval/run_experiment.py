@@ -40,6 +40,7 @@ def run(annotations_path: str | Path = DEFAULT_ANNOTATIONS) -> dict:
     predictions = [item["prediction"] for item in qa_items]
     references = [item["reference"] for item in qa_items]
     source_evidence_ids = data.get("source_evidence_ids")
+    evidence_text_map = data.get("evidence_texts")
 
     candidate_segments = data.get("candidate_segments", [])
     segments = [item["segment"] for item in candidate_segments]
@@ -48,7 +49,10 @@ def run(annotations_path: str | Path = DEFAULT_ANNOTATIONS) -> dict:
     results: dict = {}
     if predictions:
         results["evidence_support"] = evaluate_evidence_support(
-            predictions, references, source_evidence_ids=source_evidence_ids
+            predictions,
+            references,
+            source_evidence_ids=source_evidence_ids,
+            evidence_text_map=evidence_text_map,
         )
         results["uncertainty_preservation"] = evaluate_uncertainty_preservation(
             predictions, references
