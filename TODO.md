@@ -79,8 +79,10 @@ LLM 是结构化事件抽取和答案组织的可选实验组件。RAG 检索、
   owner uncertainty, small-talk exclusion, and high-overlap confidence rules. / 完成证据约束 Prompt 和不确定性规则。
 - [x] Step 15 - Add LLM JSON parse, repair, regeneration, and evidence-ID
   validation. / 完成 LLM JSON 修复、重试和证据 ID 校验。
-- [ ] Step 16a - Define and evaluate a deterministic/rule-based structured-event
+- [x] Step 16a - Define and evaluate a deterministic/rule-based structured-event
   baseline for decisions, action items, deadlines, open questions, and uncertainty.
+  / 完成规则式结构化事件抽取基线(src/events/rule_extractor.py)与 per-type 评估
+  (evaluate_event_extraction),含 experiments/event_extraction 种子标注与结果。
   / 定义并评估规则式结构化事件抽取基线。
 - [ ] Step 16b - Compare rule extraction, plain LLM extraction, and full-Evidence
   constrained LLM extraction on the same annotated meetings.
