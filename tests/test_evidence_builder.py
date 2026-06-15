@@ -194,6 +194,104 @@ class NoneCoercionTests(unittest.TestCase):
             evidence = build_evidence_segments([], [high])
             self.assertEqual(evidence[0]["text"], "")
 
+    def test_segment_id_null_vs_missing_same_error(self) -> None:
+        """Missing key and explicit None must both be rejected with the same message."""
+        null_seg = _low_segment()
+        null_seg["segment_id"] = None
+        missing_seg = _low_segment()
+        del missing_seg["segment_id"]
+
+        with self.subTest(scenario="null"):
+            with self.assertRaisesRegex(ValueError, "segment_id must be a non-empty string"):
+                build_evidence_segments([null_seg], [])
+        with self.subTest(scenario="missing"):
+            with self.assertRaisesRegex(ValueError, "segment_id must be a non-empty string"):
+                build_evidence_segments([missing_seg], [])
+
+    def test_speaker_null_vs_missing_same_error(self) -> None:
+        """Missing key and explicit None must both be rejected with the same message."""
+        null_seg = _low_segment()
+        null_seg["speaker"] = None
+        missing_seg = _low_segment()
+        del missing_seg["speaker"]
+
+        with self.subTest(scenario="null"):
+            with self.assertRaisesRegex(ValueError, "speaker must be a non-empty string"):
+                build_evidence_segments([null_seg], [])
+        with self.subTest(scenario="missing"):
+            with self.assertRaisesRegex(ValueError, "speaker must be a non-empty string"):
+                build_evidence_segments([missing_seg], [])
+
+    def test_build_from_processed_segment_direct_call_with_nulls(self) -> None:
+        """Directly calling the internal helper must also coerce None correctly."""
+        from src.evidence.builder import _build_from_processed_segment
+
+        segment = {
+            "meeting_id": "m1",
+            "segment_id": "s1",
+            "speaker": "MIXED",
+            "start_time": 0.0,
+            "end_time": 1.0,
+            "text": None,
+            "overlap_score": 0.8,
+            "asr_confidence": 0.5,
+            "speaker_confidence": 0.3,
+            "candidates": [
+                {"speaker": "SP", "text": "x", "confidence": 0.5},
+            ],
+            "uncertainty_note": "overlap",
+        }
+        result = _build_from_processed_segment(
+            segment,
+            expected_path="high_overlap_candidate",
+            meeting_id=None,
+            source_audio_path=None,
+            language=None,
+            overlap_threshold=0.4,
+        )
+        self.assertEqual(result["text"], "")
+        self.assertEqual(result["source_audio_path"], "")
+        self.assertEqual(result["language"], "und")
+        self.assertNotEqual(result["text"], "None")
+        self.assertNotEqual(result["source_audio_path"], "None")
+
+    def test_json_with_null_fields(self) -> None:
+        """JSON deserialisation may produce null values; they must not become 'None' strings."""
+        raw = json.dumps([{
+            "meeting_id": "m1",
+            "segment_id": "s1",
+            "speaker": "MIXED",
+            "start_time": 0.0,
+            "end_time": 1.0,
+            "text": None,
+            "processing_path": "high_overlap_candidate",
+            "overlap_score": 0.82,
+            "asr_confidence": 0.5,
+            "speaker_confidence": 0.3,
+            "candidates": [
+                {"speaker": "SP", "text": "x", "confidence": 0.5},
+            ],
+            "uncertainty_note": "overlap",
+            "audio_clip_path": None,
+            "source_audio_path": None,
+            "language": None,
+        }], ensure_ascii=False)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            low_path = root / "low.json"
+            high_path = root / "high.json"
+            low_path.write_text("[]", encoding="utf-8")
+            high_path.write_text(raw, encoding="utf-8")
+
+            result = build_evidence_file(low_path, high_path, root / "out.json")
+            self.assertEqual(len(result), 1)
+            self.assertEqual(result[0]["text"], "")
+            self.assertEqual(result[0]["audio_clip_path"], "")
+            self.assertEqual(result[0]["source_audio_path"], "")
+            self.assertEqual(result[0]["language"], "und")
+            self.assertNotEqual(result[0]["text"], "None")
+            self.assertNotEqual(result[0]["audio_clip_path"], "None")
+
 
 if __name__ == "__main__":
     unittest.main()

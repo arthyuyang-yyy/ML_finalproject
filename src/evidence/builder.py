@@ -18,6 +18,11 @@ def _coerce_str(value: Any, default: str = "") -> str:
 
     Assumes *value* is either None or a type whose ``str()`` produces a
     meaningful string representation (e.g. ``str``, ``int``).
+
+    Note: this helper is intended for *optional* string fields.  Required
+    fields such as ``segment_id`` or ``speaker`` should be validated
+    explicitly by the caller (e.g. with ``required_text()``) and should
+    not rely on this helper to convert ``None`` into an empty string.
     """
     return default if value is None else str(value)
 
@@ -132,6 +137,17 @@ def _build_from_processed_segment(
     language: str,
     overlap_threshold: float,
 ) -> dict[str, Any]:
+    """Build one metadata record from a processed low- or high-overlap segment.
+
+    ``text`` and ``uncertainty_note`` are coerced through ``_coerce_str``,
+    so ``None`` becomes ``""``.  Whether an empty string is accepted or
+    rejected depends on the ``processing_path`` and is enforced later by
+    ``validate_metadata_segment``:
+
+    - ``low_overlap_cluster`` requires non-empty ``text``.
+    - ``high_overlap_candidate`` requires empty ``text`` and non-empty
+      ``uncertainty_note`` (via ``candidates`` and the segment-level note).
+    """
     if not isinstance(segment, dict):
         raise ValueError(f"{expected_path} entries must be dictionaries")
 
@@ -148,9 +164,11 @@ def _build_from_processed_segment(
     route_reason = str(segment.get("route_reason") or generated_route_reason)
     return build_metadata_segment(
         meeting_id=str(segment_meeting_id),
-        segment_id=segment.get("segment_id"),
+        # Required fields: fall back to "" so ``required_text`` can give a
+        # single, clear error message for both missing keys and ``None``.
+        segment_id=segment.get("segment_id") or "",
         evidence_id=segment.get("evidence_id"),
-        speaker=_coerce_str(segment.get("speaker")),
+        speaker=_coerce_str(segment.get("speaker") or ""),
         start_time=float(segment.get("start_time", 0.0)),
         end_time=float(segment.get("end_time", 0.0)),
         text=_coerce_str(segment.get("text")),
@@ -162,6 +180,7 @@ def _build_from_processed_segment(
         candidates=list(segment.get("candidates", [])),
         uncertainty_note=_coerce_str(segment.get("uncertainty_note")),
         audio_clip_path=_coerce_str(segment.get("audio_clip_path")),
+        # Prefer segment-level value; fallback to the parameter default.
         source_audio_path=_coerce_str(segment.get("source_audio_path") or source_audio_path),
         language=_coerce_str(segment.get("language") or language),
         cluster_similarity_distribution=segment.get("cluster_similarity_distribution"),
@@ -169,7 +188,12 @@ def _build_from_processed_segment(
 
 
 def _normalize_distribution(distribution: dict[str, float] | None) -> dict[str, float]:
-    """Coerce a cluster-similarity distribution into a ``{label: value}`` map."""
+    """Coerce a cluster-similarity distribution into a ``{label: value}`` map.
+
+    Validates that every key is a string to catch upstream data-format
+    errors (e.g. ``None`` or numeric keys produced by buggy JSON
+    deserialization or manual dict construction).
+    """
     if not distribution:
         return {}
     if not isinstance(distribution, dict):
