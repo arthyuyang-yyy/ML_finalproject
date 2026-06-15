@@ -66,6 +66,26 @@ class CandidateGeneratorTests(unittest.TestCase):
         self.assertEqual(len(candidates), 1)
         self.assertEqual(model.transcribe.call_count, 1)
 
+    @patch.dict("sys.modules", {"faster_whisper": MagicMock()})
+    @patch("src.candidates.generator._load_faster_whisper_model")
+    def test_separated_candidates_honor_asr_config(self, mocked_load) -> None:
+        model = MagicMock()
+        model.transcribe.return_value = _decoded("hi")
+        mocked_load.return_value = model
+        src = np.ones(16000, dtype=np.float32) * 0.1
+
+        generate_separated_source_candidates(
+            {"segment_id": "m1_seg_009"},
+            [src],
+            sample_rate=16000,
+            separation_backend="nmf",
+            asr_config={"model": "large-v3", "device": "cuda", "compute_type": "float16"},
+        )
+
+        # The CLI/pipeline ASR config must reach the separated-source decoder
+        # instead of silently defaulting to small/cpu/int8.
+        mocked_load.assert_called_with("large-v3", "cuda", "float16")
+
 
 class HighOverlapPathTests(unittest.TestCase):
     def test_high_overlap_record_keeps_main_transcript_empty(self) -> None:
@@ -176,6 +196,40 @@ class HighOverlapPathTests(unittest.TestCase):
         self.assertIn("alpha", texts)
         self.assertTrue(any(c["speaker"] == "SEPARATED_SOURCE_01" for c in candidates))
         self.assertGreater(len(candidates), 1)
+
+    @patch.dict("sys.modules", {"faster_whisper": MagicMock()})
+    @patch("src.candidates.generator._load_faster_whisper_model")
+    def test_single_separated_source_still_keeps_multiple_candidates(self, mocked_load) -> None:
+        model = MagicMock()
+        # Separator recovers ONE source that transcribes successfully; without
+        # supplementing, the segment would collapse to a single candidate.
+        model.transcribe.side_effect = [
+            _decoded(" only one"),
+            _decoded(" alt one"),
+            _decoded(" alt two"),
+            _decoded(" alt three"),
+            _decoded(" alt four"),
+        ]
+        mocked_load.return_value = model
+        samples = np.ones(16000 * 2, dtype=np.float32) * 0.1
+        segments = [{
+            "meeting_id": "meeting_001",
+            "segment_id": "m1_seg_009",
+            "start_time": 0.0,
+            "end_time": 2.0,
+            "overlap_score": 0.78,
+            "processing_path": HIGH_OVERLAP_PATH,
+        }]
+
+        processed = process_high_overlap_segments(
+            samples,
+            segments,
+            separation_adapter=MockSpeechSeparationAdapter([samples * 0.5]),
+        )
+
+        candidates = processed[0]["candidates"]
+        self.assertGreaterEqual(len(candidates), 2)
+        self.assertTrue(any(c["speaker"] == "SEPARATED_SOURCE_01" for c in candidates))
 
     @patch(
         "src.high_overlap.generate_high_overlap_candidates",

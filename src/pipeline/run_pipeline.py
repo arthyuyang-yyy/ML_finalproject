@@ -91,6 +91,7 @@ def run_meeting_pipeline(
             cfg.speech_separation_backend,
             **_separation_adapter_kwargs(cfg),
         ),
+        asr_config=_high_overlap_asr_config(cfg),
     )
     evidence_segments = build_evidence_segments(
         low_overlap_processed,
@@ -163,6 +164,20 @@ def _adapter_kwargs(config: PipelineConfig) -> dict[str, Any]:
             "compute_type": config.faster_whisper_compute_type,
         })
     return kwargs
+
+
+def _high_overlap_asr_config(config: PipelineConfig) -> dict[str, str]:
+    """faster-whisper config for separated/multi-decode candidates.
+
+    The high-overlap path always decodes with faster-whisper, so it honours the
+    same ``--faster-whisper-model``/``--asr-device``/``--asr-compute-type`` as
+    the low-overlap baseline instead of silently using small/cpu/int8.
+    """
+    return {
+        "model": config.faster_whisper_model_size,
+        "device": config.faster_whisper_device,
+        "compute_type": config.faster_whisper_compute_type,
+    }
 
 
 def _separation_adapter_kwargs(config: PipelineConfig) -> dict[str, Any]:

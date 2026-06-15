@@ -27,6 +27,20 @@ DEFAULT_DECODE_CONFIGS: list[dict[str, Any]] = [
 SEPARATED_SOURCE_SILENCE_RMS = 1e-3
 
 
+def _resolve_whisper_runtime(asr_config: dict[str, str] | None) -> tuple[str, str, str]:
+    """Resolve faster-whisper (model, device, compute_type) for separated ASR.
+
+    Explicit pipeline/CLI config wins, then ``FASTER_WHISPER_*`` env overrides,
+    then the lightweight defaults — so the high-overlap path no longer silently
+    ignores ``--faster-whisper-model``/``--asr-device``/``--asr-compute-type``.
+    """
+    cfg = asr_config or {}
+    model_name = cfg.get("model") or os.environ.get("FASTER_WHISPER_MODEL", "small")
+    device = cfg.get("device") or os.environ.get("FASTER_WHISPER_DEVICE", "cpu")
+    compute_type = cfg.get("compute_type") or os.environ.get("FASTER_WHISPER_COMPUTE_TYPE", "int8")
+    return model_name, device, compute_type
+
+
 def generate_high_overlap_candidates(
     segment: dict,
     samples: np.ndarray | None = None,
@@ -35,6 +49,7 @@ def generate_high_overlap_candidates(
     decode_configs: list[dict[str, Any]] | None = None,
     max_candidates: int = 4,
     speaker_hypotheses: list[str] | None = None,
+    asr_config: dict[str, str] | None = None,
 ) -> list[dict]:
     """Generate transcript/speaker candidates for one high-overlap segment.
 
@@ -48,7 +63,7 @@ def generate_high_overlap_candidates(
         speaker_hypotheses = [str(segment["speaker"])]
     if samples is not None and samples.size:
         candidates = _generate_with_faster_whisper(
-            segment, samples, sample_rate, configs, max_candidates, speaker_hypotheses
+            segment, samples, sample_rate, configs, max_candidates, speaker_hypotheses, asr_config
         )
         if candidates:
             return candidates
@@ -62,6 +77,7 @@ def generate_separated_source_candidates(
     language: str | None = None,
     separation_backend: str = "unknown",
     max_candidates: int = 4,
+    asr_config: dict[str, str] | None = None,
 ) -> list[dict]:
     """Transcribe separated speaker sources into high-overlap candidates."""
     if not sources:
@@ -71,9 +87,7 @@ def generate_separated_source_candidates(
     except ImportError:
         return []
 
-    model_name = os.environ.get("FASTER_WHISPER_MODEL", "small")
-    device = os.environ.get("FASTER_WHISPER_DEVICE", "cpu")
-    compute_type = os.environ.get("FASTER_WHISPER_COMPUTE_TYPE", "int8")
+    model_name, device, compute_type = _resolve_whisper_runtime(asr_config)
     try:
         model = _load_faster_whisper_model(model_name, device, compute_type)
     except Exception:
@@ -131,6 +145,7 @@ def _generate_with_faster_whisper(
     decode_configs: list[dict[str, Any]],
     max_candidates: int,
     speaker_hypotheses: list[str] | None,
+    asr_config: dict[str, str] | None = None,
 ) -> list[dict]:
     """Run faster-whisper with multiple decode settings when available."""
     try:
@@ -138,9 +153,7 @@ def _generate_with_faster_whisper(
     except ImportError:
         return []
 
-    model_name = os.environ.get("FASTER_WHISPER_MODEL", "small")
-    device = os.environ.get("FASTER_WHISPER_DEVICE", "cpu")
-    compute_type = os.environ.get("FASTER_WHISPER_COMPUTE_TYPE", "int8")
+    model_name, device, compute_type = _resolve_whisper_runtime(asr_config)
 
     try:
         model = _load_faster_whisper_model(model_name, device, compute_type)

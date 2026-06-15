@@ -23,6 +23,7 @@ def process_high_overlap_segments(
     language: str | None = None,
     diarization_turns: list[dict[str, Any]] | None = None,
     separation_adapter: SpeechSeparationAdapter | None = None,
+    asr_config: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """Return high-overlap records with empty main text and candidate hypotheses."""
     processed: list[dict[str, Any]] = []
@@ -44,18 +45,21 @@ def process_high_overlap_segments(
             sample_rate=sample_rate,
             language=language,
             separation_backend=getattr(separation_adapter, "name", "none"),
+            asr_config=asr_config,
         )
-        # Supplement with multi-decode hypotheses when separation yielded no
-        # candidates at all, or fewer usable candidates than separated sources
-        # (a track was silent, duplicate, or failed ASR). Without this, partial
-        # separation success would silently drop a speaker's information.
-        if not candidates or len(candidates) < len(sources):
+        # Supplement with multi-decode hypotheses unless separation already gave
+        # at least two usable candidates AND one per separated source. A single
+        # separated source (e.g. a SepFormer run that recovers one stream) must
+        # still keep multiple candidates: a high-overlap segment that collapses
+        # to one candidate would violate the preserve-uncertainty requirement.
+        if len(candidates) < 2 or len(candidates) < len(sources):
             fallback = generate_high_overlap_candidates(
                 candidate_source,
                 samples=clip,
                 sample_rate=sample_rate,
                 language=language,
                 speaker_hypotheses=speaker_hypotheses,
+                asr_config=asr_config,
             )
             candidates = _merge_candidates(candidates, fallback)
         processed.append({
