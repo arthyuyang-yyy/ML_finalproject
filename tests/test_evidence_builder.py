@@ -141,6 +141,17 @@ class NoneCoercionTests(unittest.TestCase):
         self.assertEqual(evidence[0]["source_audio_path"], "")
         self.assertNotEqual(evidence[0]["source_audio_path"], "None")
 
+    def test_empty_source_audio_and_language_fallback_to_parameter(self) -> None:
+        """Empty string in segment dict means 'not provided' and falls back."""
+        segment = _low_segment()
+        segment["source_audio_path"] = ""
+        segment["language"] = ""
+        evidence = build_evidence_segments(
+            [segment], [], source_audio_path="data/m1.wav", language="zh"
+        )
+        self.assertEqual(evidence[0]["source_audio_path"], "data/m1.wav")
+        self.assertEqual(evidence[0]["language"], "zh")
+
     def test_distribution_label_none_raises(self) -> None:
         segment = _low_segment()
         segment["cluster_similarity_distribution"] = {None: 1.0}
