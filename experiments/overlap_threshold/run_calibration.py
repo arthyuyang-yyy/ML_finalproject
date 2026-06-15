@@ -180,30 +180,46 @@ def score_meeting_segments(
     audio_path: str | Path,
     detector: str,
     window_seconds: float = 2.0,
+    vad_method: str = "fixed",
+    fuse_diarization: bool = False,
 ) -> list[dict[str, Any]]:
     """Segment one meeting's audio and attach an ``overlap_score`` per segment.
 
-    Segmentation uses fixed ``window_seconds`` windows by default; pass
-    ``window_seconds <= 0`` to fall back to the project's energy VAD.
-    ``detector='pyannote'`` runs the real OSD model (needs ``HF_TOKEN`` +
-    ``pyannote.audio``); ``detector='energy'`` forces the energy fallback. The
-    diarization fusion is disabled here so the score is the detector's own signal.
+    ``vad_method`` selects the segmentation unit:
+
+    - ``"fixed"`` (default): tile into ``window_seconds`` windows — matches the
+      exploratory experiment and stays robust on long far-field recordings;
+    - ``"energy"``: the project's energy VAD;
+    - ``"silero"``: the faster-whisper silero VAD (production-aligned; requires
+      the ``segment_waveform(method="silero")`` backend from PR #52).
+
+    ``fuse_diarization`` mirrors the production pipeline: when set, pyannote
+    diarization turns are fed into the scorer so the result is the **fused**
+    overlap score (OSD + diarization overlap + speaker change), not the detector
+    signal alone. It needs ``pyannote.audio`` + ``HF_TOKEN``; without them the
+    diarization source returns nothing and the score degrades to OSD/energy only.
+
+    ``detector='pyannote'`` runs the real OSD model; ``detector='energy'`` forces
+    the energy fallback.
     """
     from src.audio.preprocess import load_audio, segment_waveform
     from src.overlap.detector import estimate_segment_overlap_scores
 
     samples, sample_rate = load_audio(str(audio_path))
     meeting_id = Path(audio_path).stem
-    if window_seconds > 0:
+    if vad_method == "silero":
+        segments = segment_waveform(samples, sample_rate, meeting_id=meeting_id, method="silero")
+    elif vad_method == "energy":
+        segments = segment_waveform(samples, sample_rate, meeting_id=meeting_id)
+    else:  # "fixed"
         duration = len(samples) / sample_rate if sample_rate else 0.0
         segments = window_segments(duration, window_seconds, meeting_id=meeting_id)
-    else:
-        segments = segment_waveform(samples, sample_rate, meeting_id=meeting_id)
     if not segments:
         return []
+    diarization_turns = _diarization_turns(audio_path) if fuse_diarization else None
     use_audio_path = str(audio_path) if detector == "pyannote" else None
     scored = estimate_segment_overlap_scores(
-        samples, segments, sample_rate, audio_path=use_audio_path, diarization_turns=None
+        samples, segments, sample_rate, audio_path=use_audio_path, diarization_turns=diarization_turns
     )
     if detector == "pyannote" and scored and scored[0].get("overlap_detector") != "pyannote":
         raise RuntimeError(
@@ -212,6 +228,17 @@ def score_meeting_segments(
             "(see the Enable pyannote steps in the README)."
         )
     return scored
+
+
+def _diarization_turns(audio_path: str | Path) -> list[dict[str, Any]] | None:
+    """Pyannote speaker turns for fusion, or ``None`` when unavailable.
+
+    Returns ``None`` (degrading the fused score to OSD/energy only) when
+    ``pyannote.audio`` or ``HF_TOKEN`` is missing, instead of raising.
+    """
+    from src.diarization.core import diarize_with_pyannote
+
+    return diarize_with_pyannote(str(audio_path)) or None
 
 
 def load_annotation_records(annotations_dir: str | Path) -> list[dict[str, Any]]:
@@ -263,6 +290,8 @@ def build_labeled_dataset(
     detector: str,
     gt_fraction: float,
     window_seconds: float = 2.0,
+    vad_method: str = "fixed",
+    fuse_diarization: bool = False,
 ) -> list[LabeledSegment]:
     """Score and ground-truth-label every segment across all meetings."""
     labeled: list[LabeledSegment] = []
@@ -276,7 +305,9 @@ def build_labeled_dataset(
             (float(region["start_time"]), float(region["end_time"]))
             for region in record.get("overlap_regions", [])
         ]
-        meeting_segments = score_meeting_segments(audio_path, detector, window_seconds)
+        meeting_segments = score_meeting_segments(
+            audio_path, detector, window_seconds, vad_method, fuse_diarization
+        )
         print(f"  {meeting_id}: {len(meeting_segments)} segments")
         for segment in meeting_segments:
             true_fraction = segment_overlap_fraction(segment, regions)
@@ -328,6 +359,8 @@ def run(
     window_seconds: float = 2.0,
     thresholds: list[float] | None = None,
     dump_dir: str | Path | None = None,
+    vad_method: str = "fixed",
+    fuse_diarization: bool = False,
 ) -> dict[str, Any]:
     """Run threshold calibration for each detector and return a combined report.
 
@@ -335,6 +368,10 @@ def run(
     (``meeting_id``/``overlap_score``/``gt_fraction``) is written there so the
     expensive detector pass can be reused for offline analysis (stratified split,
     finer sweeps, per-overlap-level buckets) without re-running the model.
+
+    ``vad_method`` and ``fuse_diarization`` align the run with the production
+    pipeline (silero VAD segments + fused overlap score) for a proper Step 7b
+    calibration, versus the default exploratory fixed-window / OSD-only setup.
     """
     records = load_annotation_records(annotations_dir)
     audio_lookup = make_audio_lookup(audio_dir)
@@ -348,6 +385,8 @@ def run(
             "seed": seed,
             "gt_fraction": gt_fraction,
             "window_seconds": window_seconds,
+            "vad_method": vad_method,
+            "fuse_diarization": fuse_diarization,
             "num_meetings": len(set(meeting_ids)),
         },
         "train_meetings": train_ids,
@@ -358,7 +397,9 @@ def run(
         Path(dump_dir).mkdir(parents=True, exist_ok=True)
     for detector in detectors:
         print(f"\n=== detector: {detector} ===")
-        labeled = build_labeled_dataset(records, audio_lookup, detector, gt_fraction, window_seconds)
+        labeled = build_labeled_dataset(
+            records, audio_lookup, detector, gt_fraction, window_seconds, vad_method, fuse_diarization
+        )
         if not labeled:
             print(f"  [warn] no labeled segments for detector '{detector}'")
             continue
@@ -385,7 +426,13 @@ def main() -> None:
     parser.add_argument("--gt-fraction", type=float, default=0.5,
                         help="ground-truth overlap coverage to label a segment high-overlap")
     parser.add_argument("--window-seconds", type=float, default=2.0,
-                        help="fixed window length for segmentation; <= 0 uses energy VAD")
+                        help="fixed window length when --vad-method=fixed")
+    parser.add_argument("--vad-method", default="fixed", choices=["fixed", "energy", "silero"],
+                        help="segmentation: fixed windows (default), energy VAD, or silero VAD "
+                             "(silero needs the segment_waveform method from PR #52)")
+    parser.add_argument("--fuse-diarization", action="store_true",
+                        help="feed pyannote diarization into the scorer for the production-aligned "
+                             "fused overlap score (needs pyannote.audio + HF_TOKEN)")
     parser.add_argument("--out-dir", default="outputs/overlap_threshold",
                         help="where to write results.json (git-ignored by default)")
     parser.add_argument("--dump-scored", action="store_true",
@@ -401,6 +448,8 @@ def main() -> None:
         gt_fraction=args.gt_fraction,
         window_seconds=args.window_seconds,
         dump_dir=args.out_dir if args.dump_scored else None,
+        vad_method=args.vad_method,
+        fuse_diarization=args.fuse_diarization,
     )
 
     out_dir = Path(args.out_dir)
