@@ -112,5 +112,40 @@ class EvidenceBuilderTests(unittest.TestCase):
             self.assertEqual(json.loads(output_path.read_text(encoding="utf-8")), result)
 
 
+class NoneCoercionTests(unittest.TestCase):
+    def test_text_none_coerces_to_empty_on_high_overlap(self) -> None:
+        segment = _high_segment()
+        segment["text"] = None
+        evidence = build_evidence_segments([], [segment])
+        self.assertEqual(evidence[0]["text"], "")
+        self.assertNotEqual(evidence[0]["text"], "None")
+
+    def test_segment_id_none_raises(self) -> None:
+        segment = _low_segment()
+        segment["segment_id"] = None
+        with self.assertRaisesRegex(ValueError, "segment_id must be a non-empty string"):
+            build_evidence_segments([segment], [])
+
+    def test_audio_clip_path_none_coerces_to_empty(self) -> None:
+        segment = _low_segment()
+        segment["audio_clip_path"] = None
+        evidence = build_evidence_segments([segment], [])
+        self.assertEqual(evidence[0]["audio_clip_path"], "")
+        self.assertNotEqual(evidence[0]["audio_clip_path"], "None")
+
+    def test_source_audio_path_none_coerces_to_empty(self) -> None:
+        segment = _low_segment()
+        segment["source_audio_path"] = None
+        evidence = build_evidence_segments([segment], [], source_audio_path=None)
+        self.assertEqual(evidence[0]["source_audio_path"], "")
+        self.assertNotEqual(evidence[0]["source_audio_path"], "None")
+
+    def test_distribution_label_none_raises(self) -> None:
+        segment = _low_segment()
+        segment["cluster_similarity_distribution"] = {None: 1.0}
+        with self.assertRaisesRegex(ValueError, "cluster_similarity_distribution keys must be strings"):
+            build_evidence_segments([segment], [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -55,8 +55,8 @@ def build_metadata_segment(
         "overlap_score": float(overlap_score),
         "asr_confidence": float(asr_confidence),
         "speaker_confidence": float(speaker_confidence),
-        "audio_clip_path": str(audio_clip_path),
-        "source_audio_path": str(source_audio_path),
+        "audio_clip_path": _coerce_str(audio_clip_path),
+        "source_audio_path": _coerce_str(source_audio_path),
         "language": str(language or "und"),
         "candidates": normalized_candidates,
         "uncertainty_note": _coerce_str(uncertainty_note),
@@ -146,7 +146,7 @@ def _build_from_processed_segment(
     route_reason = str(segment.get("route_reason") or generated_route_reason)
     return build_metadata_segment(
         meeting_id=str(segment_meeting_id),
-        segment_id=str(segment.get("segment_id", "")),
+        segment_id=segment.get("segment_id"),
         evidence_id=segment.get("evidence_id"),
         speaker=_coerce_str(segment.get("speaker")),
         start_time=float(segment.get("start_time", 0.0)),
@@ -160,7 +160,7 @@ def _build_from_processed_segment(
         candidates=list(segment.get("candidates", [])),
         uncertainty_note=_coerce_str(segment.get("uncertainty_note")),
         audio_clip_path=_coerce_str(segment.get("audio_clip_path")),
-        source_audio_path=str(segment.get("source_audio_path") or source_audio_path),
+        source_audio_path=_coerce_str(segment.get("source_audio_path") or source_audio_path),
         language=str(segment.get("language") or language),
         cluster_similarity_distribution=segment.get("cluster_similarity_distribution"),
     )
@@ -174,7 +174,15 @@ def _normalize_distribution(distribution: dict[str, float] | None) -> dict[str, 
         raise ValueError(
             "cluster_similarity_distribution must be a mapping of speaker label to value"
         )
-    return {str(label): float(value) for label, value in distribution.items()}
+    normalized: dict[str, float] = {}
+    for label, value in distribution.items():
+        if not isinstance(label, str):
+            raise ValueError(
+                "cluster_similarity_distribution keys must be strings, "
+                f"got {type(label).__name__}"
+            )
+        normalized[label] = float(value)
+    return normalized
 
 
 def _normalize_candidates(
