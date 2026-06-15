@@ -162,6 +162,16 @@ def _build_from_processed_segment(
     overlap_score = float(segment.get("overlap_score", 0.0))
     generated_route_reason = _route_reason(overlap_score, overlap_threshold, expected_path)
     route_reason = str(segment.get("route_reason") or generated_route_reason)
+
+    # Resolve segment-level overrides for optional fields.  We use an
+    # explicit ``is None`` check so that an empty string in the segment
+    # dict is preserved and does not accidentally fall back to the
+    # caller-supplied parameter via the ``or`` operator.
+    segment_source_audio = segment.get("source_audio_path")
+    resolved_source_audio = source_audio_path if segment_source_audio is None else segment_source_audio
+    segment_language = segment.get("language")
+    resolved_language = language if segment_language is None else segment_language
+
     return build_metadata_segment(
         meeting_id=str(segment_meeting_id),
         # Required fields: fall back to "" so ``required_text`` can give a
@@ -180,9 +190,8 @@ def _build_from_processed_segment(
         candidates=list(segment.get("candidates", [])),
         uncertainty_note=_coerce_str(segment.get("uncertainty_note")),
         audio_clip_path=_coerce_str(segment.get("audio_clip_path")),
-        # Prefer segment-level value; fallback to the parameter default.
-        source_audio_path=_coerce_str(segment.get("source_audio_path") or source_audio_path),
-        language=_coerce_str(segment.get("language") or language),
+        source_audio_path=_coerce_str(resolved_source_audio),
+        language=_coerce_str(resolved_language),
         cluster_similarity_distribution=segment.get("cluster_similarity_distribution"),
     )
 

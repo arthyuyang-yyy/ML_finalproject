@@ -132,6 +132,7 @@ class NoneCoercionTests(unittest.TestCase):
         evidence = build_evidence_segments([segment], [])
         self.assertEqual(evidence[0]["audio_clip_path"], "")
         self.assertNotEqual(evidence[0]["audio_clip_path"], "None")
+        self.assertFalse(evidence[0]["audio_clip_path"])
 
     def test_source_audio_path_none_coerces_to_empty(self) -> None:
         segment = _low_segment()
@@ -193,6 +194,31 @@ class NoneCoercionTests(unittest.TestCase):
         with self.subTest(path="high"):
             evidence = build_evidence_segments([], [high])
             self.assertEqual(evidence[0]["text"], "")
+        with self.subTest(path="direct_call"):
+            from src.evidence.builder import _build_from_processed_segment
+
+            segment = {
+                "meeting_id": "m1",
+                "segment_id": "s1",
+                "speaker": "MIXED",
+                "start_time": 0.0,
+                "end_time": 1.0,
+                "text": None,
+                "overlap_score": 0.8,
+                "asr_confidence": 0.5,
+                "speaker_confidence": 0.3,
+                "candidates": [{"speaker": "SP", "text": "x", "confidence": 0.5}],
+                "uncertainty_note": "overlap",
+            }
+            result = _build_from_processed_segment(
+                segment,
+                expected_path="high_overlap_candidate",
+                meeting_id=None,
+                source_audio_path=None,
+                language=None,
+                overlap_threshold=0.4,
+            )
+            self.assertEqual(result["text"], "")
 
     def test_segment_id_null_vs_missing_same_error(self) -> None:
         """Missing key and explicit None must both be rejected with the same message."""
@@ -221,6 +247,58 @@ class NoneCoercionTests(unittest.TestCase):
         with self.subTest(scenario="missing"):
             with self.assertRaisesRegex(ValueError, "speaker must be a non-empty string"):
                 build_evidence_segments([missing_seg], [])
+
+    def test_build_from_processed_segment_direct_call_missing_segment_id(self) -> None:
+        """Direct helper call must reject missing segment_id with a clear message."""
+        from src.evidence.builder import _build_from_processed_segment
+
+        segment = {
+            "meeting_id": "m1",
+            "speaker": "SP",
+            "start_time": 0.0,
+            "end_time": 1.0,
+            "text": "hello",
+            "overlap_score": 0.1,
+            "asr_confidence": 0.5,
+            "speaker_confidence": 0.3,
+            "candidates": [],
+            "uncertainty_note": "",
+        }
+        with self.assertRaisesRegex(ValueError, "segment_id must be a non-empty string"):
+            _build_from_processed_segment(
+                segment,
+                expected_path="low_overlap_cluster",
+                meeting_id=None,
+                source_audio_path=None,
+                language="und",
+                overlap_threshold=0.4,
+            )
+
+    def test_build_from_processed_segment_direct_call_missing_speaker(self) -> None:
+        """Direct helper call must reject missing speaker with a clear message."""
+        from src.evidence.builder import _build_from_processed_segment
+
+        segment = {
+            "meeting_id": "m1",
+            "segment_id": "s1",
+            "start_time": 0.0,
+            "end_time": 1.0,
+            "text": "hello",
+            "overlap_score": 0.1,
+            "asr_confidence": 0.5,
+            "speaker_confidence": 0.3,
+            "candidates": [],
+            "uncertainty_note": "",
+        }
+        with self.assertRaisesRegex(ValueError, "speaker must be a non-empty string"):
+            _build_from_processed_segment(
+                segment,
+                expected_path="low_overlap_cluster",
+                meeting_id=None,
+                source_audio_path=None,
+                language="und",
+                overlap_threshold=0.4,
+            )
 
     def test_build_from_processed_segment_direct_call_with_nulls(self) -> None:
         """Directly calling the internal helper must also coerce None correctly."""
