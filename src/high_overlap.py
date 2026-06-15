@@ -97,21 +97,32 @@ def _normalized_text(candidate: dict[str, Any]) -> str:
     return " ".join(str(candidate.get("text", "")).lower().split())
 
 
+def _candidate_key(candidate: dict[str, Any]) -> tuple[str, str]:
+    """Dedup key combining transcript and speaker hypothesis.
+
+    Same text under a *different* speaker is a distinct interpretation (e.g.
+    ``SEPARATED_SOURCE_01`` vs a diarization speaker) and must be preserved to
+    keep the speaker uncertainty that the high-overlap path exists to carry.
+    """
+    return (_normalized_text(candidate), str(candidate.get("speaker", "")).strip())
+
+
 def _merge_candidates(
     primary: list[dict[str, Any]],
     secondary: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Append secondary candidates, dropping those that duplicate a primary one.
 
-    Duplicates *within* secondary are kept: fallback/multi-decode hypotheses may
-    legitimately share a transcript while differing in decode settings, so only
-    transcripts already covered by a separated candidate are filtered out.
+    A duplicate means same transcript *and* same speaker; identical text under a
+    different speaker is kept. Duplicates *within* secondary are also kept:
+    fallback/multi-decode hypotheses may legitimately share a transcript while
+    differing in decode settings.
     """
-    seen = {text for text in (_normalized_text(c) for c in primary) if text}
+    seen = {key for key in (_candidate_key(c) for c in primary) if key[0]}
     merged = list(primary)
     for candidate in secondary:
-        normalized = _normalized_text(candidate)
-        if normalized and normalized in seen:
+        key = _candidate_key(candidate)
+        if key[0] and key in seen:
             continue
         merged.append(candidate)
     return merged

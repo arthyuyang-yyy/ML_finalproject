@@ -194,7 +194,7 @@ Pending before the project can claim full experimental completion:
 
 - manually annotated evaluation split;
 - overlap-threshold calibration and routing experiments against human labels;
-- real high-overlap processing and an optional speech-separation baseline;
+- real high-overlap processing and speech-separation quality evaluation with model comparison (NMF / SepFormer / direct multi-decode);
 - real heavy-model runs and accuracy comparisons for WhisperX, faster-whisper, Whisper, FunASR, pyannote, and Ollama Gemma;
 - formal validation of decision/action-item/deadline extraction;
 - an annotated set built from real pipeline outputs for content support, uncertainty preservation, and candidate usefulness;

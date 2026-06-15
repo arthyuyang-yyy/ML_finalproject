@@ -231,6 +231,37 @@ class HighOverlapPathTests(unittest.TestCase):
         self.assertGreaterEqual(len(candidates), 2)
         self.assertTrue(any(c["speaker"] == "SEPARATED_SOURCE_01" for c in candidates))
 
+    @patch.dict("sys.modules", {"faster_whisper": MagicMock()})
+    @patch("src.candidates.generator._load_faster_whisper_model")
+    def test_same_text_different_speaker_is_preserved(self, mocked_load) -> None:
+        model = MagicMock()
+        # Separated source and multi-decode fallback yield the SAME text, but the
+        # fallback carries a diarization speaker hypothesis. Both must survive.
+        model.transcribe.side_effect = [_decoded(" same text")] * 5
+        mocked_load.return_value = model
+        samples = np.ones(16000 * 2, dtype=np.float32) * 0.1
+        segments = [{
+            "meeting_id": "meeting_001",
+            "segment_id": "m1_seg_009",
+            "start_time": 0.0,
+            "end_time": 2.0,
+            "overlap_score": 0.78,
+            "processing_path": HIGH_OVERLAP_PATH,
+        }]
+
+        processed = process_high_overlap_segments(
+            samples,
+            segments,
+            diarization_turns=[{"speaker": "SPEAKER_00", "start_time": 0.0, "end_time": 2.0}],
+            separation_adapter=MockSpeechSeparationAdapter([samples * 0.5]),
+        )
+
+        candidates = processed[0]["candidates"]
+        speakers = {c["speaker"] for c in candidates}
+        self.assertIn("SEPARATED_SOURCE_01", speakers)
+        self.assertIn("SPEAKER_00", speakers)
+        self.assertGreaterEqual(len(candidates), 2)
+
     @patch(
         "src.high_overlap.generate_high_overlap_candidates",
         return_value=[{"candidate_id": "m1_seg_009_c1", "confidence": 0.5}],
