@@ -101,13 +101,25 @@ def split_meetings(
 
 
 def evaluate_at_threshold(labeled: list[LabeledSegment], threshold: float) -> dict[str, Any]:
-    """Route every segment at ``threshold`` and score against ground-truth labels."""
+    """Route every segment at ``threshold`` and score against ground-truth labels.
+
+    Also reports ``routing_cost``: the fraction of segments routed to the
+    expensive high-overlap (multi-candidate) path at this threshold. A lower
+    threshold catches more overlap (higher recall) but routes more segments to
+    the costly path — this is the cost side of the cost/quality trade-off.
+    """
     predictions = [
         HIGH_OVERLAP if float(item["overlap_score"]) >= threshold else LOW_OVERLAP
         for item in labeled
     ]
     references = [item["gt_label"] for item in labeled]
-    return evaluate_overlap_routing(predictions, references)
+    metrics = evaluate_overlap_routing(predictions, references)
+    routing_cost = (
+        sum(1 for prediction in predictions if prediction == HIGH_OVERLAP) / len(predictions)
+        if predictions
+        else 0.0
+    )
+    return {**metrics, "routing_cost": round(routing_cost, 4)}
 
 
 def default_thresholds(step: float = 0.05) -> list[float]:
