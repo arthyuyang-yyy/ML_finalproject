@@ -21,6 +21,11 @@ DEFAULT_DECODE_CONFIGS: list[dict[str, Any]] = [
     {"beam_size": 5, "temperature": 0.8, "language": "en"},
 ]
 
+# Below this RMS a separated track carries no usable speech; transcribing it
+# only invites ASR hallucinations and implies a speaker the separator never
+# actually recovered.
+SEPARATED_SOURCE_SILENCE_RMS = 1e-3
+
 
 def generate_high_overlap_candidates(
     segment: dict,
@@ -76,10 +81,11 @@ def generate_separated_source_candidates(
 
     segment_id = str(segment.get("segment_id") or segment.get("evidence_id") or "segment")
     config = _with_language_override([DEFAULT_DECODE_CONFIGS[0]], language)[0]
+    seen_text: set[str] = set()
     candidates: list[dict] = []
     for source_index, source in enumerate(sources[:max_candidates], start=1):
         waveform = np.asarray(source, dtype=np.float32).reshape(-1)
-        if waveform.size == 0:
+        if waveform.size == 0 or _is_silent(waveform):
             continue
         try:
             decoded_segments, _ = model.transcribe(
@@ -92,8 +98,12 @@ def generate_separated_source_candidates(
         except Exception:
             continue
         text = " ".join(str(item.text).strip() for item in decoded if str(item.text).strip()).strip()
-        if not text:
+        normalized = " ".join(text.lower().split())
+        # Drop empty transcripts and identical tracks: two duplicate sources
+        # must not masquerade as two independent SEPARATED_SOURCE speakers.
+        if not normalized or normalized in seen_text:
             continue
+        seen_text.add(normalized)
         candidates.append({
             "candidate_id": f"{segment_id}_sep{source_index}",
             "speaker": f"SEPARATED_SOURCE_{source_index:02d}",
@@ -175,6 +185,14 @@ def _generate_with_faster_whisper(
         if len(candidates) >= max_candidates:
             break
     return candidates
+
+
+def _is_silent(waveform: np.ndarray, threshold: float = SEPARATED_SOURCE_SILENCE_RMS) -> bool:
+    """True when a separated track has no usable energy (RMS below the floor)."""
+    if waveform.size == 0:
+        return True
+    rms = float(np.sqrt(np.mean(np.square(waveform.astype(np.float64)))))
+    return rms < threshold
 
 
 def _confidence_from_decoded_segments(decoded_segments: list[Any]) -> float:

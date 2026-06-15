@@ -45,14 +45,19 @@ def process_high_overlap_segments(
             language=language,
             separation_backend=getattr(separation_adapter, "name", "none"),
         )
-        if not candidates:
-            candidates = generate_high_overlap_candidates(
+        # Supplement with multi-decode hypotheses when separation yielded no
+        # candidates at all, or fewer usable candidates than separated sources
+        # (a track was silent, duplicate, or failed ASR). Without this, partial
+        # separation success would silently drop a speaker's information.
+        if not candidates or len(candidates) < len(sources):
+            fallback = generate_high_overlap_candidates(
                 candidate_source,
                 samples=clip,
                 sample_rate=sample_rate,
                 language=language,
                 speaker_hypotheses=speaker_hypotheses,
             )
+            candidates = _merge_candidates(candidates, fallback)
         processed.append({
             **segment,
             "speaker": HIGH_OVERLAP_SPEAKER,
@@ -81,6 +86,31 @@ def _speakers_for_segment(
         if speaker not in speakers:
             speakers.append(speaker)
     return speakers
+
+
+def _normalized_text(candidate: dict[str, Any]) -> str:
+    """Lowercased, whitespace-collapsed transcript for duplicate detection."""
+    return " ".join(str(candidate.get("text", "")).lower().split())
+
+
+def _merge_candidates(
+    primary: list[dict[str, Any]],
+    secondary: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Append secondary candidates, dropping those that duplicate a primary one.
+
+    Duplicates *within* secondary are kept: fallback/multi-decode hypotheses may
+    legitimately share a transcript while differing in decode settings, so only
+    transcripts already covered by a separated candidate are filtered out.
+    """
+    seen = {text for text in (_normalized_text(c) for c in primary) if text}
+    merged = list(primary)
+    for candidate in secondary:
+        normalized = _normalized_text(candidate)
+        if normalized and normalized in seen:
+            continue
+        merged.append(candidate)
+    return merged
 
 
 def _slice_segment(samples: np.ndarray, segment: dict[str, Any], sample_rate: int) -> np.ndarray:
