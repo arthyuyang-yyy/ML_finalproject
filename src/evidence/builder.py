@@ -14,10 +14,12 @@ VALID_PROCESSING_PATHS = {LOW_OVERLAP_PATH, HIGH_OVERLAP_PATH}
 
 
 def _coerce_str(value: Any, default: str = "") -> str:
-    """Return str(value) unless value is None, in which case return default."""
-    if value is None:
-        return default
-    return str(value)
+    """Return *default* when *value* is None, otherwise ``str(value)``.
+
+    Assumes *value* is either None or a type whose ``str()`` produces a
+    meaningful string representation (e.g. ``str``, ``int``).
+    """
+    return default if value is None else str(value)
 
 
 def build_metadata_segment(
@@ -161,7 +163,7 @@ def _build_from_processed_segment(
         uncertainty_note=_coerce_str(segment.get("uncertainty_note")),
         audio_clip_path=_coerce_str(segment.get("audio_clip_path")),
         source_audio_path=_coerce_str(segment.get("source_audio_path") or source_audio_path),
-        language=str(segment.get("language") or language),
+        language=_coerce_str(segment.get("language") or language),
         cluster_similarity_distribution=segment.get("cluster_similarity_distribution"),
     )
 

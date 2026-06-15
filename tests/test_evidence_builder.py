@@ -146,6 +146,54 @@ class NoneCoercionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "cluster_similarity_distribution keys must be strings"):
             build_evidence_segments([segment], [])
 
+    def test_distribution_numeric_key_raises(self) -> None:
+        segment = _low_segment()
+        segment["cluster_similarity_distribution"] = {123: 1.0}
+        with self.assertRaisesRegex(ValueError, "cluster_similarity_distribution keys must be strings"):
+            build_evidence_segments([segment], [])
+
+    def test_speaker_none_raises(self) -> None:
+        segment = _low_segment()
+        segment["speaker"] = None
+        with self.assertRaisesRegex(ValueError, "speaker must be a non-empty string"):
+            build_evidence_segments([segment], [])
+
+    def test_language_none_coerces_to_default(self) -> None:
+        segment = _low_segment()
+        evidence = build_evidence_segments([segment], [], language=None)
+        self.assertEqual(evidence[0]["language"], "und")
+        self.assertNotEqual(evidence[0]["language"], "None")
+
+    def test_text_none_raises_on_low_overlap(self) -> None:
+        segment = _low_segment()
+        segment["text"] = None
+        with self.assertRaisesRegex(ValueError, "must contain transcript text"):
+            build_evidence_segments([segment], [])
+
+    def test_missing_segment_id_raises(self) -> None:
+        segment = _low_segment()
+        del segment["segment_id"]
+        with self.assertRaisesRegex(ValueError, "segment_id must be a non-empty string"):
+            build_evidence_segments([segment], [])
+
+    def test_missing_speaker_raises(self) -> None:
+        segment = _low_segment()
+        del segment["speaker"]
+        with self.assertRaisesRegex(ValueError, "speaker must be a non-empty string"):
+            build_evidence_segments([segment], [])
+
+    def test_none_handling_consistent_across_overlap_paths(self) -> None:
+        low = _low_segment()
+        low["text"] = None
+        high = _high_segment()
+        high["text"] = None
+        with self.subTest(path="low"):
+            with self.assertRaises(ValueError):
+                build_evidence_segments([low], [])
+        with self.subTest(path="high"):
+            evidence = build_evidence_segments([], [high])
+            self.assertEqual(evidence[0]["text"], "")
+
 
 if __name__ == "__main__":
     unittest.main()
