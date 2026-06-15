@@ -45,6 +45,25 @@ class ProjectStructureTests(unittest.TestCase):
         self.assertEqual(payload["meeting_id"], "m1")
         self.assertEqual(payload["events"], [])
 
+    def test_json_repair_normalises_python_literals(self) -> None:
+        payload = parse_or_repair_json('{\n  "flag": True,\n  "ready": False,\n  "value": None\n}')
+        self.assertIs(payload["flag"], True)
+        self.assertIs(payload["ready"], False)
+        self.assertIsNone(payload["value"])
+
+    def test_json_repair_quotes_bare_object_keys(self) -> None:
+        payload = parse_or_repair_json('{meeting_id: "m1", events: [], count: 3}')
+        self.assertEqual(payload["meeting_id"], "m1")
+        self.assertEqual(payload["events"], [])
+        self.assertEqual(payload["count"], 3)
+
+    def test_json_repair_cascades_multiple_errors(self) -> None:
+        raw = '```json\n{meeting_id: "m1", events: [], count: None,}\n```'
+        payload = parse_or_repair_json(raw)
+        self.assertEqual(payload["meeting_id"], "m1")
+        self.assertEqual(payload["events"], [])
+        self.assertIsNone(payload["count"])
+
     def test_evidence_to_memory_to_qa_contract(self) -> None:
         evidence = _evidence()
         self.assertEqual(validate_evidence_segments([evidence]), [])
