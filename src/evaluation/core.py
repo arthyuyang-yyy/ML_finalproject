@@ -522,3 +522,69 @@ def _error_rate_result(counts: dict[str, int]) -> dict[str, Any]:
     ref_length = counts["reference_length"]
     rate = counts["distance"] / ref_length if ref_length else float(counts["distance"] > 0)
     return {**counts, "error_rate": rate}
+
+
+def evaluate_event_extraction(
+    predicted_events: list[dict[str, Any]],
+    gold_events: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Precision/recall/F1 for structured event extraction, overall and per type.
+
+    A predicted event matches a gold event when they share the same
+    ``event_type`` and cite at least one common ``evidence_id``. Matching is
+    greedy and one-to-one so duplicate predictions cannot be rewarded twice.
+    """
+    pred = [_event_signature(event) for event in predicted_events]
+    gold = [_event_signature(event) for event in gold_events]
+
+    matched_gold: set[int] = set()
+    matched_total = 0
+    matched_by_type: dict[str, int] = {}
+    for pred_type, pred_ids in pred:
+        for index, (gold_type, gold_ids) in enumerate(gold):
+            if index in matched_gold or pred_type != gold_type or not (pred_ids & gold_ids):
+                continue
+            matched_gold.add(index)
+            matched_total += 1
+            matched_by_type[pred_type] = matched_by_type.get(pred_type, 0) + 1
+            break
+
+    pred_counts = _count_types(pred)
+    gold_counts = _count_types(gold)
+    per_type = {
+        event_type: _precision_recall_f1(
+            matched_by_type.get(event_type, 0),
+            pred_counts.get(event_type, 0),
+            gold_counts.get(event_type, 0),
+        )
+        for event_type in sorted(set(pred_counts) | set(gold_counts))
+    }
+
+    return {
+        "support_predicted": len(pred),
+        "support_gold": len(gold),
+        "matched": matched_total,
+        **_precision_recall_f1(matched_total, len(pred), len(gold)),
+        "per_type": per_type,
+    }
+
+
+def _event_signature(event: dict[str, Any]) -> tuple[str, set[str]]:
+    return (
+        str(event.get("event_type", "")),
+        {str(value) for value in event.get("evidence_ids", [])},
+    )
+
+
+def _count_types(signatures: list[tuple[str, set[str]]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for event_type, _ in signatures:
+        counts[event_type] = counts.get(event_type, 0) + 1
+    return counts
+
+
+def _precision_recall_f1(matched: int, predicted: int, gold: int) -> dict[str, float]:
+    precision = matched / predicted if predicted else 0.0
+    recall = matched / gold if gold else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+    return {"precision": precision, "recall": recall, "f1": f1}
