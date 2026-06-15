@@ -13,6 +13,13 @@ HIGH_OVERLAP_PATH = "high_overlap_candidate"
 VALID_PROCESSING_PATHS = {LOW_OVERLAP_PATH, HIGH_OVERLAP_PATH}
 
 
+def _coerce_str(value: Any, default: str = "") -> str:
+    """Return str(value) unless value is None, in which case return default."""
+    if value is None:
+        return default
+    return str(value)
+
+
 def build_metadata_segment(
     meeting_id: str,
     segment_id: str,
@@ -42,7 +49,7 @@ def build_metadata_segment(
         "speaker": required_text(speaker, "speaker"),
         "start_time": float(start_time),
         "end_time": float(end_time),
-        "text": str(text),
+        "text": _coerce_str(text),
         "processing_path": str(processing_path),
         "route_reason": route_reason or f"overlap_score routed to {processing_path}",
         "overlap_score": float(overlap_score),
@@ -52,7 +59,7 @@ def build_metadata_segment(
         "source_audio_path": str(source_audio_path),
         "language": str(language or "und"),
         "candidates": normalized_candidates,
-        "uncertainty_note": str(uncertainty_note),
+        "uncertainty_note": _coerce_str(uncertainty_note),
         "cluster_similarity_distribution": _normalize_distribution(cluster_similarity_distribution),
     }
     return validate_metadata_segment(record)
@@ -141,18 +148,18 @@ def _build_from_processed_segment(
         meeting_id=str(segment_meeting_id),
         segment_id=str(segment.get("segment_id", "")),
         evidence_id=segment.get("evidence_id"),
-        speaker=str(segment.get("speaker", "")),
+        speaker=_coerce_str(segment.get("speaker")),
         start_time=float(segment.get("start_time", 0.0)),
         end_time=float(segment.get("end_time", 0.0)),
-        text=str(segment.get("text", "")),
+        text=_coerce_str(segment.get("text")),
         processing_path=expected_path,
         route_reason=route_reason,
         overlap_score=overlap_score,
         asr_confidence=float(segment.get("asr_confidence", 0.0)),
         speaker_confidence=float(segment.get("speaker_confidence", 0.0)),
         candidates=list(segment.get("candidates", [])),
-        uncertainty_note=str(segment.get("uncertainty_note", "")),
-        audio_clip_path=str(segment.get("audio_clip_path", "")),
+        uncertainty_note=_coerce_str(segment.get("uncertainty_note")),
+        audio_clip_path=_coerce_str(segment.get("audio_clip_path")),
         source_audio_path=str(segment.get("source_audio_path") or source_audio_path),
         language=str(segment.get("language") or language),
         cluster_similarity_distribution=segment.get("cluster_similarity_distribution"),
