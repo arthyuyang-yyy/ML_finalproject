@@ -1,5 +1,6 @@
 -r requirements-demo.txt
 -r requirements-asr.txt
+-r requirements-separation.txt
 
 # Choose and configure heavy backends based on the target machine/GPU.
 # openai-whisper>=20231117

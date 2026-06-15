@@ -17,6 +17,9 @@ def main() -> None:
     parser.add_argument("--asr-compute-type", default="int8", help="faster-whisper compute type, for example int8 or float16.")
     parser.add_argument("--denoise", action="store_true", help="Enable optional stationary-noise reduction before ASR.")
     parser.add_argument("--denoise-strength", type=float, default=0.5, help="Denoise strength in [0, 1].")
+    parser.add_argument("--speech-separation", default="none", choices=["none", "nmf", "sepformer"], help="Optional high-overlap speech-separation backend (nmf is dependency-free; sepformer needs SpeechBrain).")
+    parser.add_argument("--sepformer-model", default="speechbrain/sepformer-whamr16k", help="SpeechBrain SepFormer model source.")
+    parser.add_argument("--speech-separation-device", default="cpu", help="Device used by the speech-separation model.")
     parser.add_argument("--language", default="und")
     parser.add_argument("--gemma-backend", default="none", choices=["none", "ollama", "openai", "transformers"])
     parser.add_argument("--gemma-model", default="gemma3:4b")
@@ -29,6 +32,9 @@ def main() -> None:
         faster_whisper_compute_type=args.asr_compute_type,
         enable_denoise=args.denoise,
         denoise_strength=args.denoise_strength,
+        speech_separation_backend=args.speech_separation,
+        sepformer_model_source=args.sepformer_model,
+        speech_separation_device=args.speech_separation_device,
         language=args.language,
         gemma_backend=args.gemma_backend,
         gemma_model=args.gemma_model,

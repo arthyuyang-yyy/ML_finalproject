@@ -176,6 +176,7 @@ Implemented and runnable:
 - configurable ASR adapters (auto/WhisperX/faster-whisper/Whisper/FunASR/mock) with calibrated confidence;
 - overlap scoring that fuses pyannote OSD, diarization overlap, speaker changes, optional ASR instability, and a conservative energy fallback;
 - dual-path routing (threshold 0.4), low-overlap ASR + speaker-attribution path, and high-overlap candidate generation without forcing one transcript;
+- optional high-overlap speech separation via replaceable adapters — a dependency-free from-scratch NMF baseline and an optional SpeechBrain SepFormer baseline — with per-source ASR candidates and the existing multi-decode fallback;
 - metadata construction, schema validation, evidence-only JSON prompts, LLM output repair/validation, and deterministic evidence-linked event fallback;
 - event-grouped episodic memory creation, atomic JSON persistence, semantic/lexical retrieval, relevance gating, and meeting/speaker/time filters;
 - baseline evidence-backed QA with evidence IDs, timestamps, confidence, uncertainty, and retrieval metadata;
@@ -193,7 +194,7 @@ Pending before the project can claim full experimental completion:
 
 - manually annotated evaluation split;
 - overlap-threshold calibration and routing experiments against human labels;
-- real high-overlap processing and an optional speech-separation baseline;
+- real high-overlap processing and speech-separation quality evaluation with model comparison (NMF / SepFormer / direct multi-decode);
 - real heavy-model runs and accuracy comparisons for WhisperX, faster-whisper, Whisper, FunASR, pyannote, and Ollama Gemma;
 - formal validation of decision/action-item/deadline extraction;
 - an annotated set built from real pipeline outputs for content support, uncertainty preservation, and candidate usefulness;

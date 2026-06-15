@@ -1,0 +1,4 @@
+-r requirements-asr.txt
+
+# Optional Phase 2 Step 11 baseline. The model is downloaded lazily on first use.
+speechbrain>=1.0,<2

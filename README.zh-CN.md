@@ -135,6 +135,7 @@ LLM 接入本身不是创新点。项目会把它作为可选实验变量，比�
 - 可插拔 ASR 适配器（Mock/WhisperX/faster-whisper/Whisper/FunASR）与置信度校准；
 - 重叠检测：pyannote OSD 适配器（有 HF token 时）+ 保守能量 fallback（上限 0.39，不会误触发高重叠路由）；
 - 双路径路由（阈值 0.4）、低重叠 ASR + 说话人归属路径、高重叠候选生成（不强行确定单一转写）；
+- 可选高重叠语音分离（可替换适配器）：零依赖自写 NMF 基线 + 可选 SpeechBrain SepFormer；分离出的声源分别执行 ASR，未启用或失败时保留原有多参数候选回退；
 - 元数据构建、schema 验证、evidence-only JSON Prompt、LLM 输出修复与校验，以及确定性事件提取 fallback；
 - 事件级情景记忆创建、按会议原子更新的 JSON 持久化与 BM25 + embedding 混合检索；
 - 模板 QA 和可选 Gemma QA 均只基于 top-k Episode，并校验证据 ID、时间戳、说话人和不确定性；
@@ -152,7 +153,7 @@ LLM 接入本身不是创新点。项目会把它作为可选实验变量，比�
 
 - 人工标注评估集构建；
 - 重叠阈值校准和 pyannote 正式实验；
-- 真实高重叠语音处理与可选语音分离模块；
+- 真实高重叠语音分离质量评估与模型对比；
 - faster-whisper/WhisperX/Whisper/FunASR、pyannote 与 Ollama Gemma 的真实运行和精度对比；
 - decision、action item、deadline 等真实会议事件抽取验证；
 - 使用真实 Pipeline 输出构建内容支持、不确定性保留和候选有效性标注集；
@@ -180,11 +181,32 @@ python -m unittest discover -s tests -v
 python -m pip install -r requirements-asr.txt
 ```
 
+Phase 2 Step 11 的零依赖 NMF 语音分离基线无需额外安装。可选的重模型 SepFormer baseline 需要：
+
+```bash
+python -m pip install -r requirements-separation.txt
+```
+
 运行端到端 pipeline。CLI 默认使用 `faster-whisper small`，首次运行会下载模型：
 
 ```bash
 python main.py data/raw_audio/meeting_001.wav --meeting-id meeting_001
 ```
+
+启用高重叠语音分离（`nmf` 零依赖，`sepformer` 需重依赖）：
+
+```bash
+# 零依赖 NMF 基线
+python main.py data/raw_audio/meeting_001.wav --meeting-id meeting_001 \
+  --speech-separation nmf
+
+# 可选重模型 SepFormer
+python main.py data/raw_audio/meeting_001.wav --meeting-id meeting_001 \
+  --speech-separation sepformer
+```
+
+两者默认关闭。SepFormer 首次启用时会下载 `speechbrain/sepformer-whamr16k`。分离模型不可用、
+加载失败或未生成有效分轨候选时，Pipeline 会自动回到原有 faster-whisper 多参数候选路径。
 
 输入可以是 WAV、FLAC、OGG、MP3、M4A、AAC、MP4 或 WMA。所有格式都会先统一为
 16 kHz 单声道 float32 WAV，因此 Step 4 的 ASR 后端不需要针对每种文件格式分别适配。

@@ -15,6 +15,7 @@ from src.memory.episodic_store import build_episodes, upsert_episodes
 from src.overlap.detector import estimate_segment_overlap_scores
 from src.audio.preprocess import preprocess_audio, segment_waveform
 from src.evidence import validate_metadata_segment
+from src.speech_separation import get_separation_adapter
 
 from .config import PipelineConfig
 from .io import ensure_meeting_dirs, write_json
@@ -86,6 +87,11 @@ def run_meeting_pipeline(
         sample_rate=sample_rate,
         language=cfg.language,
         diarization_turns=diarization_turns,
+        separation_adapter=get_separation_adapter(
+            cfg.speech_separation_backend,
+            **_separation_adapter_kwargs(cfg),
+        ),
+        asr_config=_high_overlap_asr_config(cfg),
     )
     evidence_segments = build_evidence_segments(
         low_overlap_processed,
@@ -158,3 +164,26 @@ def _adapter_kwargs(config: PipelineConfig) -> dict[str, Any]:
             "compute_type": config.faster_whisper_compute_type,
         })
     return kwargs
+
+
+def _high_overlap_asr_config(config: PipelineConfig) -> dict[str, str]:
+    """faster-whisper config for separated/multi-decode candidates.
+
+    The high-overlap path always decodes with faster-whisper, so it honours the
+    same ``--faster-whisper-model``/``--asr-device``/``--asr-compute-type`` as
+    the low-overlap baseline instead of silently using small/cpu/int8.
+    """
+    return {
+        "model": config.faster_whisper_model_size,
+        "device": config.faster_whisper_device,
+        "compute_type": config.faster_whisper_compute_type,
+    }
+
+
+def _separation_adapter_kwargs(config: PipelineConfig) -> dict[str, Any]:
+    if config.speech_separation_backend.lower() not in {"sepformer", "speechbrain-sepformer"}:
+        return {}
+    return {
+        "model_source": config.sepformer_model_source,
+        "device": config.speech_separation_device,
+    }
