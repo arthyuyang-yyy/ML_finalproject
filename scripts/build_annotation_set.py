@@ -27,6 +27,8 @@ import argparse
 import csv
 import io
 import json
+import logging
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -36,6 +38,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.llm.event_validator import validate_meeting_events_document  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 LOW_OVERLAP = "low_overlap_cluster"
 HIGH_OVERLAP = "high_overlap_candidate"
@@ -144,7 +148,17 @@ def _build_gold_event(segment_id: str, group: list[dict[str, str]], high: bool) 
     head = group[0]
     event_type = head.get("event_type", "").strip()
     if high:
-        # Hard rule: high-overlap evidence is always an uncertainty event.
+        # HARD RULE (issue #58, the project's core methodological constraint):
+        # a high-overlap segment has no reliable single transcription, so it can
+        # never become a confident decision/action_item. We deliberately OVERRIDE
+        # whatever the annotator wrote and force `uncertainty` here. This is not a
+        # bug: a `decision` label on an overlap segment is downgraded on purpose.
+        if event_type and event_type != UNCERTAINTY:
+            logger.info(
+                "segment %s: high-overlap, forcing event_type '%s' -> 'uncertainty' (issue #58)",
+                segment_id,
+                event_type,
+            )
         event_type = UNCERTAINTY
     if not event_type:
         return None
@@ -197,6 +211,28 @@ def _gold_to_validatable(meeting_id: str, gold_events: list[dict[str, Any]],
     return events
 
 
+_EVENT_INDEX_RE = re.compile(r"events\[(\d+)\]")
+
+_VALIDATION_HINT = (
+    "请检查该段的标注：owner 必须是所引用证据段中出现过的说话人ID或填 'uncertain'；"
+    "event_type 必须是允许值；content 不能为空；引用的 segment_id 必须存在。"
+)
+
+
+def _friendly_validation_error(meeting_id: str, exc: ValueError, gold_events: list[dict[str, Any]]) -> str:
+    """Turn a validator ValueError into a message that points annotators at the row."""
+    message = str(exc)
+    match = _EVENT_INDEX_RE.search(message)
+    location = ""
+    if match:
+        index = int(match.group(1))
+        if 0 <= index < len(gold_events):
+            evidence_ids = gold_events[index].get("evidence_ids", [])
+            if evidence_ids:
+                location = f"，段 {evidence_ids[0]}"
+    return f"会议 '{meeting_id}'{location} 标注校验失败: {message}\n{_VALIDATION_HINT}"
+
+
 def build_meeting(meeting_id: str, rows: list[dict[str, str]]) -> dict[str, Any]:
     """Build and validate one meeting's annotation document.
 
@@ -222,7 +258,7 @@ def build_meeting(meeting_id: str, rows: list[dict[str, str]]) -> dict[str, Any]
     try:
         validate_meeting_events_document(document, evidence_segments)
     except ValueError as exc:
-        raise ValueError(f"meeting '{meeting_id}': {exc}") from exc
+        raise ValueError(_friendly_validation_error(meeting_id, exc, gold_events)) from exc
 
     return {
         "description": (

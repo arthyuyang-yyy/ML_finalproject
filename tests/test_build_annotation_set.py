@@ -1,13 +1,17 @@
 """Tests for the annotation-set builder (CSV -> validated annotations.json)."""
 
+import json
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+sys.path.insert(0, str(REPO_ROOT / "experiments" / "event_extraction"))
 
 import build_annotation_set as bas  # noqa: E402
+import run_experiment  # noqa: E402
 
 HEADER = (
     "meeting_id,segment_id,start_time,end_time,speaker,text,is_overlap,"
@@ -91,8 +95,24 @@ class BuildAnnotationSetTests(unittest.TestCase):
                 "m1,m1_s1,0,4,SPEAKER_00,安排任务,False,none,,,,action_item,做点事,SPEAKER_99,,",
             ]
         )
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ValueError) as ctx:
             bas.build_meeting("m1", bas.read_rows(_write(csv_text)))
+        # The error must point annotators at the offending segment and how to fix it.
+        message = str(ctx.exception)
+        self.assertIn("m1_s1", message)
+        self.assertIn("uncertain", message)
+
+    def test_built_json_runs_in_step16b_experiment(self):
+        # End-to-end happy path: CSV -> annotations.json -> run_experiment.py metrics.
+        documents = bas.build_all(bas.read_rows(_write(GOOD_CSV)))
+        out = Path(tempfile.mkdtemp()) / "m1.json"
+        out.write_text(json.dumps(documents["m1"], ensure_ascii=False), encoding="utf-8")
+
+        result = run_experiment.run(out)
+        metrics = result["metrics"]
+        self.assertEqual(metrics["support_gold"], 3)
+        self.assertIn("per_type", metrics)
+        self.assertIn("uncertainty", metrics["per_type"])
 
     def test_build_all_separates_meetings(self):
         csv_text = "\n".join(

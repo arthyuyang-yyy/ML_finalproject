@@ -4,6 +4,7 @@ meeting_id,segment_id,start_time,end_time,speaker,text,is_overlap,overlap_type,t
 # content: 该事件的简短中文摘要 (事件标注时必填)。owner/deadline: 仅 action_item 需要; owner 是说话人ID或 uncertain; deadline 可留空。
 # 硬规则: 高重叠段 (is_overlap=True) 的 event_type 一律填 uncertainty; 多个候选说话人就用相同 segment_id 多写几行, 转换脚本会合并成一段的多个候选。
 # 旧列 topic/decision/action_item 为自由文本备注, build_annotation_set.py 不读取; 事件标注请填后面的 event_type 等列。
+# 迁移: 若此前已用旧格式(只填了 decision/action_item)标注过, 需手工把这些备注改填到 event_type/content/owner/deadline 列, 脚本只认新列。
 # Example data rows below (remove these comment lines before use):
 # demo-001,demo-001-0001,0.0,4.0,SPEAKER_00,经过讨论我们决定采用方案A,False,none,方案,,,decision,采用方案A,,,
 # demo-001,demo-001-0002,4.0,9.0,SPEAKER_01,李明负责在明天之前完成接口测试,False,none,任务,,,action_item,李明完成接口测试,SPEAKER_01,明天,
