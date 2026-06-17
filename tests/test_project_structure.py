@@ -64,6 +64,44 @@ class ProjectStructureTests(unittest.TestCase):
         self.assertEqual(payload["events"], [])
         self.assertIsNone(payload["count"])
 
+    def test_json_repair_does_not_corrupt_strings_with_literals(self) -> None:
+        payload = parse_or_repair_json(
+            '{"msg": "None available", "flag": "True story", "ready": "False alarm"}'
+        )
+        self.assertEqual(payload["msg"], "None available")
+        self.assertEqual(payload["flag"], "True story")
+        self.assertEqual(payload["ready"], "False alarm")
+
+    def test_json_repair_does_not_corrupt_strings_with_colon_patterns(self) -> None:
+        payload = parse_or_repair_json(
+            '{"desc": "key: value pair", "nested": "b: c", "obj": "{opt1: a, opt2: b}"}'
+        )
+        self.assertEqual(payload["desc"], "key: value pair")
+        self.assertEqual(payload["nested"], "b: c")
+        self.assertEqual(payload["obj"], "{opt1: a, opt2: b}")
+
+    def test_json_repair_handles_nested_structures(self) -> None:
+        raw = '{results: [{key: True}, {key: False, items: [{a: None}, {b: 1}]}]}'
+        payload = parse_or_repair_json(raw)
+        self.assertEqual(payload["results"][0]["key"], True)
+        self.assertEqual(payload["results"][1]["key"], False)
+        self.assertIsNone(payload["results"][1]["items"][0]["a"])
+        self.assertEqual(payload["results"][1]["items"][1]["b"], 1)
+
+    def test_json_repair_distinguishes_string_values_from_literals(self) -> None:
+        raw = '{key1: "True", key2: true, key3: "None", key4: null}'
+        payload = parse_or_repair_json(raw)
+        self.assertEqual(payload["key1"], "True")
+        self.assertIs(payload["key2"], True)
+        self.assertEqual(payload["key3"], "None")
+        self.assertIsNone(payload["key4"])
+
+    def test_json_repair_preserves_escaped_quotes(self) -> None:
+        raw = r'{"msg": "He said \"True\" and \"None\"", "val": True}'
+        payload = parse_or_repair_json(raw)
+        self.assertEqual(payload["msg"], 'He said "True" and "None"')
+        self.assertIs(payload["val"], True)
+
     def test_evidence_to_memory_to_qa_contract(self) -> None:
         evidence = _evidence()
         self.assertEqual(validate_evidence_segments([evidence]), [])

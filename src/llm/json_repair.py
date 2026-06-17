@@ -2,7 +2,52 @@
 
 import json
 import re
+from collections.abc import Callable
 from typing import Any
+
+
+# -- string-boundary helpers -------------------------------------------------
+
+def _string_ranges(text: str) -> list[tuple[int, int]]:
+    """Return (start, end) spans of double-quoted JSON string regions."""
+    ranges: list[tuple[int, int]] = []
+    i = 0
+    while i < len(text):
+        if text[i] == '"':
+            start = i
+            i += 1
+            while i < len(text):
+                if text[i] == '\\':
+                    i += 2
+                elif text[i] == '"':
+                    i += 1
+                    break
+                else:
+                    i += 1
+            ranges.append((start, i))
+        else:
+            i += 1
+    return ranges
+
+
+def _replace_outside_strings(
+    text: str, pattern: re.Pattern[str], repl: str | Callable[[re.Match[str]], str],
+) -> str:
+    """Apply *pattern* replacements only where they do not fall inside a quoted string."""
+    ranges = _string_ranges(text)
+    result: list[str] = []
+    last_end = 0
+    for match in pattern.finditer(text):
+        if any(start <= match.start() < end for start, end in ranges):
+            continue
+        result.append(text[last_end:match.start()])
+        if callable(repl):
+            result.append(repl(match))
+        else:
+            result.append(match.expand(repl))
+        last_end = match.end()
+    result.append(text[last_end:])
+    return ''.join(result)
 
 
 # -- repair helpers ----------------------------------------------------------
@@ -28,18 +73,26 @@ def _extract_json_block(text: str) -> str:
     return cleaned
 
 
+_TRAILING_COMMA_RE = re.compile(r",\s*([}\]])")
+
+
 def _repair_trailing_commas(text: str) -> str:
     """Remove trailing commas before ``}`` or ``]``."""
-    return re.sub(r",\s*([}\]])", r"\1", text)
+    return _replace_outside_strings(text, _TRAILING_COMMA_RE, r"\1")
+
+
+_PYTHON_LITERAL_RE = re.compile(r"\b(True|False|None)\b")
+_LITERAL_MAP = {"True": "true", "False": "false", "None": "null"}
 
 
 def _repair_python_literals(text: str) -> str:
     """Replace Python capitalised literals with JSON lowercase ones."""
-    # Use word boundaries to avoid changing substrings inside strings.
-    text = re.sub(r"\bTrue\b", "true", text)
-    text = re.sub(r"\bFalse\b", "false", text)
-    text = re.sub(r"\bNone\b", "null", text)
-    return text
+    return _replace_outside_strings(
+        text, _PYTHON_LITERAL_RE, lambda m: _LITERAL_MAP[m.group(1)],
+    )
+
+
+_UNQUOTED_KEY_RE = re.compile(r'(?<=[{,])\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:')
 
 
 def _repair_unquoted_keys(text: str) -> str:
@@ -50,7 +103,7 @@ def _repair_unquoted_keys(text: str) -> str:
     not fix every possible unquoted-key syntax, but it handles the common
     LLM output ``{key: value}`` pattern without touching quoted strings.
     """
-    return re.sub(r'(?<=[{,])\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:', r'"\1":', text)
+    return _replace_outside_strings(text, _UNQUOTED_KEY_RE, r'"\1":')
 
 
 def _ensure_dict(payload: Any) -> dict[str, Any]:
