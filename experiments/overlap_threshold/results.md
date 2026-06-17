@@ -4,14 +4,15 @@ First end-to-end run on real data. **Preliminary**: 8 meetings, 2 in the test
 split, so absolute numbers are noisy. Raw audio/annotations are not committed
 (see `../../data/README.md`); only metrics are recorded here.
 
-> **Scope — this is an exploratory, fixed-window, OSD-only experiment.** It uses
-> fixed 2 s windows and the pyannote OSD score with diarization fusion **disabled**.
-> The real Pipeline (`run_meeting_pipeline`) routes **VAD segments** using the
-> **fused** overlap score, so segment length and score composition differ and the
-> same threshold value does not carry over. Treat the calibrated value as an
-> exploratory finding — **not** as a finished Step 7b, and **not** as a drop-in
-> replacement of the default `0.4`. A proper routing-threshold calibration must
-> rerun on the same VAD segments and fused scores the Pipeline actually uses.
+> **Two phases.** **Phase 1** (below: *Setup* → *Follow-up*) is the *exploratory*
+> run — fixed 2 s windows, pyannote OSD score, diarization fusion **disabled**. It
+> does **not** match the real Pipeline, so its threshold does not carry over and was
+> never a finished Step 7b. **Phase 2** ([jump](#phase-2--production-aligned-step-7b))
+> is the *production-aligned* run that closes Step 7b: it uses the **silero VAD
+> segments** and the **fused** overlap score (OSD + diarization overlap + speaker
+> change) that `run_meeting_pipeline` actually routes on. Read Phase 2 for the
+> recommended threshold and the production-readiness verdict; Phase 1 is kept for
+> history and for the pyannote-vs-energy comparison.
 
 ## Setup
 
@@ -96,8 +97,79 @@ unfavourable, but a clean conclusion needs more meetings and a pre-registered sp
 Scores are dumped once (`run_calibration.py --dump-scored`) and reused by
 `analyze_scores.py`, so split/sweep/bucket changes need no pyannote re-run.
 
+## Phase 2 — production-aligned Step 7b
+
+This is the run that actually closes Step 7b: it calibrates the routing threshold on
+the **same inputs the Pipeline uses** — **silero VAD segments** scored with the
+**fused** overlap signal (pyannote OSD + diarization overlap + speaker-change), i.e.
+`run_calibration.py --vad-method silero --fuse-diarization --detectors pyannote`.
+Unlike Phase 1, `--fuse-diarization` now **fails loud** if the diarization backend is
+missing or its gated-model terms are unaccepted, so a degraded "OSD-only" score can
+never masquerade as a fused one.
+
+### Setup
+
+- **Dataset:** AliMeeting Eval, far-field mix, 8 meetings (same as Phase 1).
+- **Segmentation:** silero VAD (production-aligned), **2172 segments** total.
+- **Score:** fused overlap score (OSD + diarization overlap + speaker change).
+- **Label / split:** `gt_fraction = 0.5`; split by meeting, `test_ratio = 0.3`, `seed = 0`.
+- Scores dumped to `pyannote_scored.json` and reused by `analyze_scores.py` (no re-run).
+
+### Results (held-out test)
+
+Two evaluations of the *same* dumped scores — the seed-0 random split and the
+overlap-stratified split — bracket the threshold and the achievable F1:
+
+| Split | Calibrated threshold | test F1 | test P / R | F1 @default (0.4) |
+| --- | --- | --- | --- | --- |
+| random (by meeting, seed 0) | **0.25** | 0.433 | 0.500 / 0.382 | 0.103 |
+| stratified (by overlap level) | **0.22** | **0.779** | 0.661 / 0.950 | — |
+
+At the default **0.4** the detector is near-useless: recall **0.055** (misses ~95% of
+overlap), routing only 0.4% of segments to the expensive path. Lowering to **~0.22–0.25**
+lifts test F1 **4–7×** (0.10 → 0.43–0.78) for a routing cost of ~6% of segments.
+
+### Detection rate by true overlap level (stratified test, threshold 0.22)
+
+| True overlap level | flagged-high (pyannote, fused) |
+| --- | --- |
+| heavy (≥50%) | **0.950** |
+| moderate (30–50%) | 0.643 |
+| light (10–30%) | 0.157 |
+| trace (0–10%) | 0.000 |
+| **none (0%) → false alarm** | **0.000** |
+
+This is the decisive view: detection rises monotonically with severity, catches **95%
+of genuinely heavy overlap**, and **false-alarms at 0.0%** on clean windows — the exact
+shape a cost/quality router wants. (The energy fallback, by contrast, stays degenerate:
+it flags ~everything, so it cannot be used as the routing signal.)
+
+### Step 7b verdict — production readiness
+
+**Conditionally ready.** The *approach* is production-deployable; the *exact* threshold
+is a calibrated recommendation, not a hard-validated constant.
+
+- ✅ **Detector & signal:** pyannote fused overlap is a genuine, well-behaved detector
+  (monotonic severity response, ~0% false alarm). The energy fallback is degenerate and
+  must **not** be the router. Use pyannote fused.
+- ✅ **Threshold direction:** the default `0.4` is clearly wrong (recall ~5%). Adopting
+  **≈0.25** as the new production default is well-justified and strictly better across
+  both splits; 0.22–0.25 is the defensible band.
+- ⚠️ **Statistical confidence:** only **8 meetings / 2 in test**, and test F1 swings
+  0.43↔0.78 by split — so treat the number as a **v1 default to ship with monitoring**,
+  not a final constant. Validate on more meetings (AISHELL-4 Test / more AliMeeting)
+  before freezing it.
+- ⚠️ **Recall headroom:** even at the calibrated threshold ~5% of heavy overlap and most
+  light overlap are missed; acceptable for a cost-gated router, revisit if downstream
+  needs higher overlap recall.
+
+**Recommendation:** ship `route_threshold ≈ 0.25` (replacing `0.4`) with pyannote fused
+scoring as the Step 7b production default, flagged as a calibrated v1 pending wider
+validation.
+
 ## Next steps
 
+- Validate the ≈0.25 threshold on more meetings before freezing it as a constant.
 - Smaller windows / alternative score aggregation to lift recall on heavy overlap.
 - Sensitivity analysis over `gt_fraction` and `window_seconds`.
 - More test meetings (use AISHELL-4 Test or more of AliMeeting) for stable numbers.
@@ -115,8 +187,14 @@ torch==2.2.2  torchaudio==2.2.2  torchvision==0.17.2
 pytorch-lightning==2.1.4  torchmetrics==1.2.1
 huggingface_hub==0.23.4
 speechbrain==0.5.16
+transformers==4.41.2   # pin: 5.x requires torch>=2.4 and silently disables PyTorch on this stack
 numpy<2            # 1.26.4
 ```
+
+> ⚠️ Pin `transformers` too. If it floats to 5.x it logs `Disabling PyTorch
+> because PyTorch >= 2.4 is required but found 2.2.2` and turns off the torch
+> backend. `4.41.2` is the floor that still satisfies `sentence-transformers`
+> (used by retrieval) while keeping torch 2.2.x.
 
 Plus an `HF_TOKEN` with the `pyannote/overlapped-speech-detection` and
 `pyannote/segmentation` model terms accepted. OSD inference over the 8 far-field

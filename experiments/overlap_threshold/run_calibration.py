@@ -243,14 +243,34 @@ def score_meeting_segments(
 
 
 def _diarization_turns(audio_path: str | Path) -> list[dict[str, Any]] | None:
-    """Pyannote speaker turns for fusion, or ``None`` when unavailable.
+    """Pyannote speaker turns for fusion, or ``None`` when diarization is off.
 
-    Returns ``None`` (degrading the fused score to OSD/energy only) when
-    ``pyannote.audio`` or ``HF_TOKEN`` is missing, instead of raising.
+    Returns ``None`` only when diarization is genuinely disabled (no
+    ``HF_TOKEN``) — the fused score then degrades to OSD/energy only. But when
+    ``--fuse-diarization`` was explicitly requested and the backend is *present
+    yet failing* (missing ``pyannote.audio``, or gated model terms not accepted),
+    silently degrading would emit misleading "fake fusion" numbers. We instead
+    fail loud with an actionable message so the calibration is not trusted by
+    mistake.
     """
     from src.diarization.core import diarize_with_pyannote
+    from src.errors import BackendExecutionError, BackendUnavailableError
 
-    return diarize_with_pyannote(str(audio_path)) or None
+    try:
+        return diarize_with_pyannote(str(audio_path)) or None
+    except BackendUnavailableError as exc:
+        raise RuntimeError(
+            "--fuse-diarization needs pyannote.audio, which is not installed. "
+            "Install it (see the README) or drop --fuse-diarization to calibrate on the OSD-only score."
+        ) from exc
+    except BackendExecutionError as exc:
+        raise RuntimeError(
+            "--fuse-diarization could not load/run the pyannote diarization model. "
+            "The usual cause is unaccepted gated-model terms: log in to Hugging Face with the account "
+            "that owns your HF_TOKEN and accept the conditions at "
+            "https://hf.co/pyannote/speaker-diarization-3.1 and https://hf.co/pyannote/segmentation-3.0 . "
+            "Then re-run in a fresh shell. Drop --fuse-diarization to calibrate on the OSD-only score instead."
+        ) from exc
 
 
 def load_annotation_records(annotations_dir: str | Path) -> list[dict[str, Any]]:

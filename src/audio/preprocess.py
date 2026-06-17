@@ -251,15 +251,69 @@ def energy_vad(
     return _split_long_regions(regions, max_segment_s, target_segment_s)
 
 
+def silero_vad(
+    samples: np.ndarray,
+    sample_rate: int = TARGET_SAMPLE_RATE,
+    threshold: float = 0.5,
+    min_silence_ms: int = 500,
+    speech_pad_ms: int = 200,
+    max_segment_s: float = 15.0,
+) -> list[tuple[float, float]]:
+    """Detect speech regions with the silero VAD bundled in ``faster-whisper``.
+
+    Unlike :func:`energy_vad`, the speech/non-speech decision comes from a learned
+    model rather than a fraction of the clip's peak energy, so a single loud
+    transient (a door slam or mic bump in a far-field meeting) no longer inflates
+    the threshold and starves the detector. The silero model operates at 16 kHz,
+    which matches the pipeline's target sample rate.
+
+    Requires ``faster-whisper`` (a heavy backend); callers that must stay
+    dependency-free should use :func:`energy_vad`.
+    """
+    try:
+        from faster_whisper.vad import VadOptions, get_speech_timestamps
+    except ImportError as exc:  # pragma: no cover - only without the heavy backend
+        raise ImportError(
+            "silero VAD needs faster-whisper; install it or use method='energy'."
+        ) from exc
+
+    mono = to_mono(samples).astype(np.float32)
+    if mono.size == 0:
+        return []
+    options = VadOptions(
+        threshold=threshold,
+        min_silence_duration_ms=min_silence_ms,
+        speech_pad_ms=speech_pad_ms,
+        max_speech_duration_s=max_segment_s,
+    )
+    timestamps = get_speech_timestamps(mono, options)
+    return [
+        (round(ts["start"] / sample_rate, 3), round(ts["end"] / sample_rate, 3))
+        for ts in timestamps
+    ]
+
+
 def segment_waveform(
     samples: np.ndarray,
     sample_rate: int = TARGET_SAMPLE_RATE,
     meeting_id: str = "meeting",
     segment_id_prefix: str | None = None,
+    method: str = "energy",
     **vad_kwargs: Any,
 ) -> list[dict[str, Any]]:
-    """Run VAD and return lightweight, timestamped speech segments."""
-    regions = energy_vad(samples, sample_rate, **vad_kwargs)
+    """Run VAD and return lightweight, timestamped speech segments.
+
+    ``method="energy"`` (default) uses the dependency-free energy VAD;
+    ``method="silero"`` uses the faster-whisper silero VAD, which is far more
+    robust on far-field meetings whose loud transients break the energy
+    threshold (see :func:`silero_vad`).
+    """
+    if method == "silero":
+        regions = silero_vad(samples, sample_rate, **vad_kwargs)
+    elif method == "energy":
+        regions = energy_vad(samples, sample_rate, **vad_kwargs)
+    else:
+        raise ValueError(f"unknown VAD method '{method}'; choose 'energy' or 'silero'")
     prefix = segment_id_prefix or f"{meeting_id}_seg"
     return [
         {
