@@ -471,6 +471,10 @@ def main() -> None:
                         help="also dump per-window scores to out-dir for offline analysis")
     args = parser.parse_args()
 
+    if args.vad_method != "fixed" and args.window_seconds != parser.get_default("window_seconds"):
+        print(f"[warn] --window-seconds={args.window_seconds} is ignored when "
+              f"--vad-method={args.vad_method}; it only applies to --vad-method=fixed.")
+
     results = run(
         annotations_dir=args.annotations,
         audio_dir=args.audio_dir,
