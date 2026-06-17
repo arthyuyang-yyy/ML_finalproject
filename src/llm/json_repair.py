@@ -17,9 +17,13 @@ def _string_ranges(text: str) -> list[tuple[int, int]]:
             start = i
             i += 1
             while i < len(text):
-                if text[i] == '\\':
-                    # Bounds-guard: a trailing backslash should not overshoot.
-                    i = min(i + 2, len(text))
+                if text[i] == '\\' and i + 1 < len(text):
+                    next_ch = text[i + 1]
+                    if next_ch == 'u':
+                        # Unicode escape \uXXXX is 6 chars total.
+                        i = min(i + 6, len(text))
+                    else:
+                        i = min(i + 2, len(text))
                 elif text[i] == '"':
                     i += 1
                     break
@@ -66,15 +70,39 @@ def _extract_json_block(text: str) -> str:
         cleaned = re.sub(r"\s*```$", "", cleaned)
         cleaned = cleaned.strip()
 
-    start = cleaned.find("{")
-    bracket_start = cleaned.find("[")
-    if start < 0 or (0 <= bracket_start < start):
-        start = bracket_start
-    end = cleaned.rfind("}")
-    bracket_end = cleaned.rfind("]")
-    if end < start or bracket_end > end:
-        end = bracket_end
-    if start >= 0 and end > start:
+    ranges = _string_ranges(cleaned)
+
+    # Find the first { or [ that sits outside a quoted string.
+    start = -1
+    for i, ch in enumerate(cleaned):
+        if ch in "{[" and not any(s <= i < e for s, e in ranges):
+            start = i
+            break
+
+    if start < 0:
+        return cleaned
+
+    # Walk forward to find the matching closing brace/bracket,
+    # skipping anything inside quoted strings.
+    opener = cleaned[start]
+    closer = "}" if opener == "{" else "]"
+    depth = 0
+    end = -1
+    i = start
+    while i < len(cleaned):
+        if any(s <= i < e for s, e in ranges):
+            i += 1
+            continue
+        if cleaned[i] == opener:
+            depth += 1
+        elif cleaned[i] == closer:
+            depth -= 1
+            if depth == 0:
+                end = i
+                break
+        i += 1
+
+    if end >= start:
         cleaned = cleaned[start : end + 1]
     return cleaned
 

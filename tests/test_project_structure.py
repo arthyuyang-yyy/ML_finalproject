@@ -130,6 +130,31 @@ class ProjectStructureTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "LLM output is not valid JSON"):
             parse_or_repair_json('{invalid')
 
+    def test_json_repair_preserves_unicode_escapes(self) -> None:
+        raw = r'{"emoji": "❤", "flag": True}'
+        payload = parse_or_repair_json(raw)
+        self.assertEqual(payload["emoji"], "❤")
+        self.assertIs(payload["flag"], True)
+
+    def test_json_repair_extracts_first_block_from_multiple(self) -> None:
+        raw = 'result: {a: 1} notes: {b: 2}'
+        payload = parse_or_repair_json(raw)
+        self.assertEqual(payload["a"], 1)
+
+    def test_json_repair_handles_braces_inside_string_values(self) -> None:
+        raw = '{"url": "https://example.com/{id}", "template": "{name: val}", "ok": True}'
+        payload = parse_or_repair_json(raw)
+        self.assertEqual(payload["url"], "https://example.com/{id}")
+        self.assertEqual(payload["template"], "{name: val}")
+        self.assertIs(payload["ok"], True)
+
+    def test_json_repair_handles_various_whitespace(self) -> None:
+        raw = '{\n\tkey1: True,\n  key2: False,\n\t\tkey3: None\n}'
+        payload = parse_or_repair_json(raw)
+        self.assertIs(payload["key1"], True)
+        self.assertIs(payload["key2"], False)
+        self.assertIsNone(payload["key3"])
+
     def test_evidence_to_memory_to_qa_contract(self) -> None:
         evidence = _evidence()
         self.assertEqual(validate_evidence_segments([evidence]), [])
