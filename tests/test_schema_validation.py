@@ -153,22 +153,27 @@ class SegmentValidationTests(unittest.TestCase):
 
     def test_resolved_high_overlap_allows_speaker_and_text(self) -> None:
         record = _valid_low_overlap()
+        candidates = [{
+            "candidate_id": "c1",
+            "speaker": "SPEAKER_00",
+            "text": "alternate",
+            "confidence": 0.5,
+            "uncertainty_note": "overlap",
+        }]
         record.update({
             "processing_path": "high_overlap_candidate",
             "speaker": "SPEAKER_00",
             "text": "resolved transcript",
-            "candidates": [{
-                "candidate_id": "c1",
-                "speaker": "SPEAKER_00",
-                "text": "alternate",
-                "confidence": 0.5,
-                "uncertainty_note": "overlap",
-            }],
+            "candidates": candidates,
             "uncertainty_note": "overlap",
             "source": "llm_resolved",
             "decision_reason": "Candidate 1 is most consistent.",
         })
-        self.assertEqual(validate_metadata_segment(record), record)
+        validated = validate_metadata_segment(record)
+        self.assertEqual(validated, record)
+        self.assertEqual(validated["source"], "llm_resolved")
+        self.assertEqual(validated["decision_reason"], "Candidate 1 is most consistent.")
+        self.assertEqual(validated["candidates"], candidates)
 
     def test_meeting_rejects_duplicate_evidence_ids(self) -> None:
         first = _valid_low_overlap()

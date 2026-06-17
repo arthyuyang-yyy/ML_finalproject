@@ -52,6 +52,11 @@ input audio
 ├── README.md
 ├── Project_task.md
 ├── TODO.md
+├── docs/
+│   ├── asr_baseline.zh-CN.md
+│   ├── future_work_guide.zh-CN.md
+│   ├── speech_separation.zh-CN.md
+│   └── system_architecture.md
 ├── data/
 │   ├── raw_audio/
 │   ├── processed_audio/
@@ -80,7 +85,7 @@ input audio
 └── tests/
 ```
 
-`docs/` 目录和多个 requirements 文件已移除。项目说明统一维护在 `README.md`、`Project_task.md` 和 `TODO.md`。
+多个 requirements 文件已合并为 `requirements.txt`。项目主说明统一维护在 `README.md`、`Project_task.md` 和 `TODO.md`；`docs/` 只保留精简参考说明和可选后端/future work 记录。
 
 ## 4. 关键实现约定
 
@@ -109,6 +114,7 @@ src/audio/clipper.py
 ```text
 src/diarization/
 src/overlap/
+src/speech_separation.py
 ```
 
 约定：
@@ -120,7 +126,7 @@ else:
     processing_path = "high_overlap_candidate"
 ```
 
-pyannote 可用时优先使用 pyannote；不可用时保留轻量 fallback，保证测试和演示流程不会因为重模型缺失而崩溃。
+pyannote 可用时优先使用 pyannote；不可用时保留轻量 fallback，保证测试和演示流程不会因为重模型缺失而崩溃。Speech separation 当前是高重叠路径的可选增强，默认 `none`，需要时可启用 `mock`、`nmf` 或 `sepformer` adapter 来补充 separated-source candidates。
 
 ### 4.3 低重叠路径
 
@@ -158,7 +164,9 @@ src/llm/resolver.py
 2. `resolve_high_overlap_segments` 负责从候选中解析最终文本。
 3. 有 Gemma/Ollama client 时，resolver 调用 LLM。
 4. 没有 LLM 时，resolver 选择最高置信候选作为 `fallback_resolved`。
-5. 最终高重叠 evidence 必须继续保留候选列表和不确定性说明。
+5. LLM 输出无效或置信度越界时，resolver 回退到最高置信候选。
+6. 无候选时，resolver 标记为 `unresolved`，不伪造文本。
+7. 最终高重叠 evidence 必须继续保留候选列表和不确定性说明。
 
 高重叠 evidence 可包含：
 
@@ -238,6 +246,8 @@ memory/episodic_memory.json
 
 该 embedding 是当前项目保留的轻量特色能力，不依赖外部 embedding 模型。
 
+检索当前刻意保持为 MVP 版本：不使用 transformer embedding，不加入 recency decay、importance prior 或复杂 reranker。这样可以保证结果稳定、依赖轻、测试可重复；代价是排序不会捕捉深层语义相似度、会议时序偏好或事件重要性偏好。后续只有在有标注评估集后再扩展这些信号。
+
 ### 4.7 QA
 
 文件：
@@ -304,7 +314,7 @@ python app.py
 当前已通过：
 
 ```text
-259 passed
+488 passed, 6 skipped, 2 warnings, 7 subtests passed
 ruff: All checks passed
 ```
 
@@ -316,11 +326,11 @@ ruff: All checks passed
 2. 建立小规模人工标注集。
 3. 验证 pyannote、faster-whisper、WhisperX 在真实音频上的效果。
 4. 评估高重叠 resolver 是否优于直接选择单一 ASR 输出。
-5. 保持 README、Project_task、TODO 与代码同步。
+5. 保持 README、Project_task、TODO 和精简 docs 与代码同步。
 
 暂不优先做：
 
-- 新增大量文档；
+- 新增大量重复文档；
 - 新增复杂配置系统；
 - 新增未使用的插件式抽象；
 - 在没有评估数据前继续扩展复杂指标。

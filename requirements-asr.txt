@@ -1,5 +1,0 @@
--r requirements.txt
-
-# Primary Step 4 real-ASR baseline. Other adapters remain optional so they can
-# be installed later for comparison experiments.
-faster-whisper>=1.1,<2

@@ -207,7 +207,7 @@ class FasterWhisperAdapter(ASRAdapter):
         except ImportError as exc:
             raise BackendUnavailableError(
                 "faster-whisper ASR is selected but unavailable; "
-                "install it with `pip install -r requirements-asr.txt`"
+                "install it with `pip install -r requirements.txt`"
             ) from exc
         except Exception as exc:
             raise BackendUnavailableError(

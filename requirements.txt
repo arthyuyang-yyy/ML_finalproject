@@ -20,3 +20,4 @@ faster-whisper>=1.0
 whisperx>=3.1
 pyannote.audio>=3.1
 funasr>=1.0
+speechbrain>=1.0,<2

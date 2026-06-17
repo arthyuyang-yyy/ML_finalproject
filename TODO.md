@@ -1,6 +1,6 @@
 # TODO
 
-本文件只跟踪当前工程状态和下一步任务。完整项目说明见 `README.md` 和 `Project_task.md`。
+本文件只跟踪当前工程状态和下一步任务。完整项目说明见 `README.md`、`Project_task.md` 和 `docs/system_architecture.md`。
 
 ## 已完成
 
@@ -13,6 +13,7 @@
 - [x] overlap score 估计与路由
 - [x] 低重叠 ASR + speaker attribution
 - [x] 高重叠候选生成
+- [x] Speech separation adapter 保留为可选候选增强，默认关闭
 - [x] 高重叠 resolver：LLM 可用时用 LLM，无 LLM 时 fallback 到最高置信候选
 - [x] Evidence segment schema、builder、validator
 - [x] Meeting event extraction 和 fallback
@@ -26,7 +27,7 @@
 
 ```text
 python3 -m pytest -q
-259 passed
+488 passed, 6 skipped, 2 warnings, 7 subtests passed
 
 python3 -m ruff check src tests main.py app.py
 All checks passed
@@ -49,7 +50,7 @@ All checks passed
 
 ## 暂不优先
 
-- [ ] Speech separation 正式接入。
+- [ ] 基于真实音频评估 speech separation 可选后端的收益。
 - [ ] 大规模数据集实验。
 - [ ] 复杂 evaluation 指标体系。
 - [ ] 新增更多文档文件。

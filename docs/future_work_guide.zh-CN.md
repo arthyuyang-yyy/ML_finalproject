@@ -277,7 +277,7 @@ Pipeline 当前仍使用通用 fallback，因此实验时应明确区分“规�
 
 ### 应该怎么做
 
-1. 安装 `requirements-demo.txt` 和演示需要的可选依赖。
+1. 安装 `requirements.txt` 和演示需要的可选依赖。
 2. 使用一段固定演示音频完整运行 Pipeline。
 3. 手动检查五个区域：
    - 上传和运行；

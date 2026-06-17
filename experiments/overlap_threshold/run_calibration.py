@@ -229,7 +229,7 @@ def score_meeting_segments(
         except ImportError as exc:
             raise RuntimeError(
                 "--vad-method silero needs faster-whisper, which is not installed. "
-                "Install it (pip install -r requirements-asr.txt) or use --vad-method energy/fixed."
+                "Install it (pip install -r requirements.txt) or use --vad-method energy/fixed."
             ) from exc
     elif vad_method == "energy":
         segments = segment_waveform(samples, sample_rate, meeting_id=meeting_id)

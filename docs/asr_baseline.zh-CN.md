@@ -19,7 +19,7 @@
 ## 安装
 
 ```bash
-python -m pip install -r requirements-asr.txt
+python -m pip install -r requirements.txt
 ```
 
 模型权重会在第一次真实运行时下载。模型权重不提交到 Git。

@@ -3,7 +3,7 @@
 import unittest
 from unittest.mock import patch
 
-try:  # gradio is an optional demo dependency (requirements-demo.txt), not needed for unit tests
+try:  # gradio is an optional demo dependency, not needed for unit tests
     import gradio  # noqa: F401
 
     _HAS_GRADIO = True

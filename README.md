@@ -50,6 +50,8 @@ input audio
 ├── main.py                        # CLI pipeline entry point
 ├── requirements.txt               # Unified dependency file
 ├── README.md
+├── Project_task.md                 # Current task scope and acceptance notes
+├── TODO.md                         # Current follow-up tracker
 ├── data/
 │   ├── raw_audio/                 # Raw meeting audio, ignored except placeholders
 │   ├── processed_audio/           # Processed audio, ignored except placeholders
@@ -58,6 +60,7 @@ input audio
 │   └── manifests/                 # Dataset manifests, if used
 ├── memory/
 │   └── episodic_memory.json       # Long-term memory store
+├── docs/                          # Compact reference notes for optional areas
 ├── outputs/                       # Generated pipeline artifacts
 ├── scripts/                       # Optional dataset/benchmark helpers
 ├── src/
@@ -118,6 +121,7 @@ else:
 高重叠片段进入 `src/high_overlap.py` 和 `src/candidates/generator.py`：
 
 - 生成多个候选转写；
+- 可选调用 speech separation adapter 生成 separated-source 候选；
 - 保留候选 speaker、文本、置信度和 decode 配置；
 - 不直接丢弃不确定性。
 
@@ -132,6 +136,8 @@ else:
   - `source`
   - `decision_reason`
   - `uncertainty_note`
+
+Speech separation 当前是可选增强，不是默认主路径。`src/speech_separation.py` 保留 `none`、`mock`、`nmf` 和 `sepformer` adapter；pipeline 默认 `speech_separation_backend="none"`，需要时才为高重叠片段补充 separated-source candidates。resolver 不替代 speech separation，而是在候选生成之后负责最终选择或合并。
 
 ### Evidence
 
@@ -184,6 +190,12 @@ src/fallbacks/embeddings.py
 
 这是当前项目保留的轻量特色能力，不依赖 `sentence-transformers`。
 
+当前检索是 MVP 权衡：优先保证 deterministic、低依赖和可测试，不引入 transformer embedding、recency decay、importance prior 或跨会议个性化排序。QA 返回的 evidence IDs、timestamps 和 uncertainty 信息用于降低误答风险；后续如果有人工评估集，再重新加入更复杂的排序信号。
+
+## Architecture Notes
+
+精简架构说明见 `docs/system_architecture.md`。该文档只保留当前主流程、关键契约和可选后端边界，避免恢复过多历史文档。
+
 ### QA
 
 `src/qa/answerer.py` 只基于检索到的 episodes 回答问题，并返回 evidence IDs、timestamps、speakers 和 uncertainty 信息。
@@ -230,7 +242,7 @@ python -m ruff check src tests main.py app.py
 当前验证状态：
 
 ```text
-259 passed
+488 passed, 6 skipped, 2 warnings, 7 subtests passed
 ruff: All checks passed
 ```
 
