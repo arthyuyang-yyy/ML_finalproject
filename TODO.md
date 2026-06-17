@@ -64,7 +64,10 @@ LLM 是结构化事件抽取和答案组织的可选实验组件。RAG 检索、
   confidence values. / 完成低重叠稳定转写路径。
 - [x] Step 10 - High-overlap path preserving multiple candidates and
   uncertainty instead of forcing one transcript. / 完成高重叠多候选路径。
-- [ ] Step 11 - Optional speech separation baseline for high-overlap segments. / 实现可选语音分离。
+- [x] Step 11 - Optional speech separation for high-overlap segments via
+  replaceable adapters: a dependency-free from-scratch NMF baseline and an
+  optional SpeechBrain SepFormer baseline, both with multi-decode fallback.
+  / 完成可选高重叠语音分离：零依赖自写 NMF 基线 + 可选 SepFormer，可替换接口与多候选回退。
 - [x] Step 12 - Evidence-segment schema builder and validator. / 完成统一 Evidence Schema 构建与校验。
 - [x] Validate that every emitted `audio_clip_path` exists on disk. / 在校验器中检查每个音频路径真实存在。
 
@@ -76,8 +79,10 @@ LLM 是结构化事件抽取和答案组织的可选实验组件。RAG 检索、
   owner uncertainty, small-talk exclusion, and high-overlap confidence rules. / 完成证据约束 Prompt 和不确定性规则。
 - [x] Step 15 - Add LLM JSON parse, repair, regeneration, and evidence-ID
   validation. / 完成 LLM JSON 修复、重试和证据 ID 校验。
-- [ ] Step 16a - Define and evaluate a deterministic/rule-based structured-event
+- [x] Step 16a - Define and evaluate a deterministic/rule-based structured-event
   baseline for decisions, action items, deadlines, open questions, and uncertainty.
+  / 完成规则式结构化事件抽取基线(src/events/rule_extractor.py)与 per-type 评估
+  (evaluate_event_extraction),含 experiments/event_extraction 种子标注与结果。
   / 定义并评估规则式结构化事件抽取基线。
 - [ ] Step 16b - Compare rule extraction, plain LLM extraction, and full-Evidence
   constrained LLM extraction on the same annotated meetings.

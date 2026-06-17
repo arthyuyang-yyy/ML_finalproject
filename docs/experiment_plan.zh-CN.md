@@ -36,11 +36,15 @@
 - 说话人假设覆盖率：至少一位候选命中正确说话人的片段比例
 - 候选有效性：人工评定有用信息是否能在模糊重叠区域中保留
 
-**候选生成基线**（实现于 `src/high_overlap.py` 与 `src/candidates/generator.py`）：高重叠主记录保持 mixed/空转写，候选由 faster-whisper 多参数解码生成（beam size、temperature、language）。如未安装 faster-whisper，则输出显式 fallback 候选以保留同一套不确定性 schema。
+**候选生成基线**（实现于 `src/high_overlap.py`、`src/speech_separation.py`、
+`src/nmf_separation.py` 与 `src/candidates/generator.py`）：高重叠主记录保持
+mixed/空转写。可选语音分离（零依赖 NMF 或重模型 SepFormer）会先输出多条声源并分别
+执行 ASR；未启用、模型失败或分轨没有产生有效候选时，使用 faster-whisper 多参数解码。
+未安装 faster-whisper 时输出显式 fallback 候选，以保留同一套不确定性 schema。
 
 **状态：** 候选接口已实现。oracle WER、top-1 WER、WER 降幅和说话人假设覆盖率已实现于
 `evaluate_candidate_usefulness()`，并由 `experiments/evidence_eval/` 实际跑通；人工有用性评定和
-真实模型数字仍需人工标注。
+真实模型数字，以及 NMF、SepFormer 与直接多参数解码三路的质量对比，仍需人工标注。
 
 ## 实验 3：元信息感知 LLM 后处理
 
@@ -100,11 +104,12 @@
   （调用时**必须**传入完整的 `source_evidence_ids` 全集；否则默认退化为金标并集，
   会把"真实存在但非金标"的引用误判为幻觉，并与无支持声明率混淆）
 - 置信度校准：置信度与正确性之间的期望校准误差（ECE）
+- 内容级精确率/召回率/F1、命中率与无支持率：判断声明*文本*是否被证据*文本*语义支持，
+  使用无依赖的 `HashingEmbeddingBackend`（通过 `evidence_text_map` 参数启用）
 
-**状态：** 基于 evidence ID 的指标、不确定性保留、候选有效性均已实现并有单元测试，且可通过
-`experiments/evidence_eval/run_experiment.py` 端到端跑出结果表。仍待完成：基于内容的支持判定
-（判断声明*文本*是否真被证据内容支持，而不仅检查引用的 ID），以及真实评估语料——目前内置标注
-是手工编写的种子集，并非人工标注的 pipeline 输出。
+**状态：** 基于 evidence ID 的指标、不确定性保留、候选有效性以及基于内容的支持判定均已实现
+并有单元测试，且可通过 `experiments/evidence_eval/run_experiment.py` 端到端跑出结果表。
+仍待完成：真实评估语料——目前内置标注是手工编写的种子集，并非人工标注的 pipeline 输出。
 
 ## 评估函数参考
 

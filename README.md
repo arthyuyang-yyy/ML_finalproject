@@ -82,6 +82,8 @@ LLM integration is not itself an innovation. It is an optional experimental vari
 7. Retrieve episodes with BM25 + embeddings, then answer with templates or an optional LLM. Every supported answer must cite real evidence IDs and timestamps.
 
 See [docs/system_architecture.md](docs/system_architecture.md) for the module-level design.
+See [docs/future_work_guide.zh-CN.md](docs/future_work_guide.zh-CN.md) for the
+plain-language execution guide for the remaining work and formal experiments.
 
 ## Repository Structure
 
@@ -154,8 +156,8 @@ Episodes support:
 | Experiment | Goal | Status |
 | --- | --- | --- |
 | 1. Overlap routing | Compare predicted overlap routes with manual labels | Infrastructure ready; pyannote adapter and energy fallback implemented; annotation set pending |
-| 2. High-overlap candidates | Compare candidate generation with forced single-output transcription | Candidate interface and metrics implemented; real high-overlap runs and separation pending |
-| 3. Structured event extraction | Compare rules, plain LLMs, and Evidence-constrained LLMs | Rule fallback, LLM interface, and validation implemented; real-model ablation pending |
+| 2. High-overlap candidates | Compare candidate generation with forced single-output transcription | NMF and optional SepFormer separation paths, candidate interface, and metrics implemented; formal real-audio comparison pending |
+| 3. Structured event extraction | Compare rules, plain LLMs, and Evidence-constrained LLMs | Step 16a standalone rule baseline and seed per-type evaluation complete; same-set LLM ablation pending |
 | 4. Episodic Memory QA | Compare summary QA, transcript RAG, and speaker-aware memory QA | Event-grouped storage, hybrid retrieval, filters, and baseline evidence-backed QA implemented; formal experiment pending |
 | 5. Evidence and uncertainty | Measure evidence hits, content support, unsupported claims, and uncertainty preservation | Core metrics and a seed experiment exist; annotated real pipeline outputs are pending |
 
@@ -163,7 +165,7 @@ Full details are in [docs/experiment_plan.md](docs/experiment_plan.md).
 
 ## Current Status
 
-The project is currently in the **runnable infrastructure, pending real high-overlap processing and formal experiments** stage. The lightweight pipeline validates software integration, but its Mock ASR and deterministic fallbacks do not demonstrate real meeting quality.
+The project has reached **Phase 3 baseline implementation through Step 19 and is entering Phase 4 formal evaluation**. Phase 1 is complete; Phase 2 implementation is complete through Step 12 except Step 7b calibration; and Phase 3 has working event, memory, retrieval, and QA baselines, with Step 16b and Step 20 comparisons still pending. The lightweight pipeline validates software integration, but Mock ASR and deterministic fallbacks do not demonstrate real meeting quality.
 
 Implemented and runnable:
 
@@ -176,7 +178,9 @@ Implemented and runnable:
 - configurable ASR adapters (auto/WhisperX/faster-whisper/Whisper/FunASR/mock) with calibrated confidence;
 - overlap scoring that fuses pyannote OSD, diarization overlap, speaker changes, optional ASR instability, and a conservative energy fallback;
 - dual-path routing (threshold 0.4), low-overlap ASR + speaker-attribution path, and high-overlap candidate generation without forcing one transcript;
+- optional high-overlap speech separation via replaceable adapters — a dependency-free from-scratch NMF baseline and an optional SpeechBrain SepFormer baseline — with per-source ASR candidates and the existing multi-decode fallback;
 - metadata construction, schema validation, evidence-only JSON prompts, LLM output repair/validation, and deterministic evidence-linked event fallback;
+- Step 16a standalone deterministic rule-based event extraction for decisions, action items, deadlines, open questions, and uncertainty, with per-type metrics and a reproducible seed experiment; the default no-LLM Pipeline still uses the generic evidence-linked fallback;
 - event-grouped episodic memory creation, atomic JSON persistence, semantic/lexical retrieval, relevance gating, and meeting/speaker/time filters;
 - baseline evidence-backed QA with evidence IDs, timestamps, confidence, uncertainty, and retrieval metadata;
 - a five-area Gradio workflow with selectable ASR/Gemma backends, timeline, candidates, long-term memory, and QA;
@@ -192,14 +196,14 @@ Current run capability:
 Pending before the project can claim full experimental completion:
 
 - manually annotated evaluation split;
-- overlap-threshold calibration and routing experiments against human labels;
-- real high-overlap processing and an optional speech-separation baseline;
+- Step 7b overlap-threshold calibration on the same VAD segments and fused scores used by the production pipeline;
+- formal real-audio high-overlap and speech-separation quality comparison (NMF / SepFormer / direct multi-decode);
 - real heavy-model runs and accuracy comparisons for WhisperX, faster-whisper, Whisper, FunASR, pyannote, and Ollama Gemma;
-- formal validation of decision/action-item/deadline extraction;
+- Step 16b comparison of rule, plain-LLM, and full-Evidence constrained event extraction on the same annotated meetings;
+- Step 20 comparison of template QA, transcript RAG, and Episodic Memory RAG;
 - an annotated set built from real pipeline outputs for content support, uncertainty preservation, and candidate usefulness;
-- rules/plain-LLM/Evidence-constrained-LLM ablations and Summary QA/Transcript RAG/Episodic Memory QA comparisons.
 
-Verified on June 13, 2026 with the lightweight virtual environment: `280` unit/integration tests passed and `1` optional Gradio component test was skipped because Gradio was not installed. The seed evidence-evaluation experiment and a lightweight end-to-end smoke run completed successfully. Heavy models remain optional and are loaded lazily.
+Verified on June 15, 2026 with the lightweight virtual environment: all `424` unit/integration tests passed and `1` optional Gradio component test was skipped because Gradio was not installed; syntax compilation passed; and the Step 16a rule-event seed experiment reproduced overall precision/recall/F1 of `0.833 / 0.833 / 0.833`. Heavy-model quality claims and formal Phase 4 experiments remain pending.
 
 ## How to Run
 
@@ -224,6 +228,20 @@ Launch the Gradio interactive demo:
 ```bash
 python app.py
 ```
+
+### Enable pyannote (optional, 3 steps)
+
+Without this the pipeline still runs, but diarization and overlap detection use the lightweight fallbacks. To turn on the real pyannote models:
+
+1. **Install:** `pip install pyannote.audio`
+2. **Accept the terms** (one-time, per Hugging Face account) for [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1) and [pyannote/overlapped-speech-detection](https://huggingface.co/pyannote/overlapped-speech-detection).
+3. **Set your token** as an environment variable (never commit it):
+
+   ```bash
+   export HF_TOKEN=hf_xxx          # Windows PowerShell: $env:HF_TOKEN="hf_xxx"
+   ```
+
+The code reads `HF_TOKEN` (or `HUGGINGFACE_TOKEN`) at runtime; no token is stored in the repo.
 
 Keep large audio files, model weights, and generated outputs outside Git.
 
@@ -277,11 +295,12 @@ Keep large audio files, model weights, and generated outputs outside Git.
 
 ## 当前进度
 
-项目处于**可运行基线与正式实验准备阶段**。轻量依赖环境已经能够从 WAV 输入完整运行到证据片段、会议事件、Episodic Memory 和证据问答，但尚未产生真实重模型与人工标注数据上的正式实验结果。
+项目已达到**阶段三基线实现至 Step 19，并进入阶段四正式评估**。阶段一已完成；阶段二的实现已到 Step 12，仅 Step 7b 正式阈值校准未完成；阶段三的事件、记忆、检索和问答基线已实现，仍需完成 Step 16b 与 Step 20 对比实验。轻量依赖环境可以完整验证软件流程，但尚未产生真实重模型与人工标注数据上的最终实验结论。
 
 已完成：
 - pipeline 编排、音频预处理、VAD、音频切片、重叠检测（pyannote OSD + 能量 fallback）、双路径路由、ASR 适配器、高重叠候选生成、元数据构建与 schema 验证；
-- evidence-only JSON Prompt、LLM 输出修复与校验、确定性事件提取 fallback；
+- NMF 与可选 SepFormer 高重叠语音分离、分轨 ASR 候选与多参数解码回退；
+- evidence-only JSON Prompt、LLM 输出修复与校验、确定性事件提取 fallback，以及独立的 Step 16a 规则事件基线与种子 per-type 评估；默认无 LLM Pipeline 当前仍使用通用证据关联 fallback；
 - 按事件分组的 Episodic Memory、原子 JSON 持久化、混合检索与会议/说话人/时间过滤；
 - 引用 evidence ID 与时间戳、保留不确定性并拒绝无证据回答的 QA；
 - 五区 Gradio 工作流和端到端 CLI Pipeline；
@@ -291,9 +310,9 @@ Keep large audio files, model weights, and generated outputs outside Git.
 - 仅安装轻量依赖时可以完整运行 Pipeline，但会使用 Mock ASR 与确定性 fallback，适合验证系统流程，不代表真实识别效果；
 - 配置可选依赖、模型、Hugging Face token 和 Ollama 服务后，可切换真实 ASR、pyannote、Gemma 与 Gradio。
 
-正式实验前仍需：人工标注评估集、重叠阈值校准、真实高重叠处理与语音分离、真实重模型对比、正式事件抽取验证，以及计划中的消融和对比实验。
+下一阶段应优先构建人工标注评估集，并完成 Step 7b（按正式 Pipeline 的 VAD 片段与融合分数校准阈值）；随后完成真实高重叠/语音分离质量对比、Step 16b 事件抽取消融、Step 20 QA 对比和其余 Phase 4 实验。
 
-2026 年 6 月 13 日验证：轻量环境下 `280` 个测试通过，`1` 个可选 Gradio 组件测试因未安装 Gradio 跳过；证据评估种子实验和轻量端到端 smoke run 成功。
+2026 年 6 月 15 日验证：轻量环境下全部 `424` 个测试通过，`1` 个可选 Gradio 组件测试因未安装 Gradio 跳过；语法编译通过；Step 16a 规则事件种子实验复现总体 precision/recall/F1 `0.833 / 0.833 / 0.833`。
 
 ## 运行方式
 
@@ -303,5 +322,19 @@ python -m unittest discover -s tests -v
 python main.py data/raw_audio/meeting_001.wav --meeting-id meeting_001
 python app.py
 ```
+
+### 启用 pyannote（可选，三步）
+
+不做这三步也能运行，但 diarization 和重叠检测会走轻量 fallback。启用真实 pyannote 模型：
+
+1. **安装：** `pip install pyannote.audio`
+2. **接受模型条款**（每个 Hugging Face 账号一次）：[pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1) 与 [pyannote/overlapped-speech-detection](https://huggingface.co/pyannote/overlapped-speech-detection)。
+3. **设置 token** 为环境变量（切勿提交到 Git）：
+
+   ```bash
+   export HF_TOKEN=hf_xxx          # Windows PowerShell：$env:HF_TOKEN="hf_xxx"
+   ```
+
+代码运行时从 `HF_TOKEN`（或 `HUGGINGFACE_TOKEN`）读取；仓库内不保存任何 token。
 
 独立中文版详见 [README.zh-CN.md](README.zh-CN.md)。大型音频文件、模型权重和生成结果不应提交到 Git。

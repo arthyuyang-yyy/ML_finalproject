@@ -2,16 +2,20 @@
 
 This module implements word/character error rate, overlap-routing classification
 metrics, best-mapping speaker-attribution accuracy, evidence-support metrics
-(precision/recall/F1, hit rate, unsupported-claim and hallucination rate, and
-confidence calibration), uncertainty-preservation quality, and candidate
-usefulness, following ``docs/experiment_plan.md`` (Experiments 2 and 5).
+(precision/recall/F1, hit rate, unsupported-claim and hallucination rate,
+confidence calibration, and optional text-similarity proxy),
+uncertainty-preservation quality, and candidate usefulness, following
+``docs/experiment_plan.md`` (Experiments 2 and 5).
 
-These metrics score evidence IDs, uncertainty signals, and candidate text; they
-do not yet judge whether a claim's wording is entailed by the evidence content.
+The optional text-similarity check (enabled via ``evidence_text_map``) measures
+surface textual similarity, not semantic entailment. True content-level support
+(NLI) is future work.
 """
 
 from itertools import permutations
 from typing import Any
+
+from src.fallbacks.embeddings import HashingEmbeddingBackend
 
 HIGH_OVERLAP = "high_overlap_candidate"
 LOW_OVERLAP = "low_overlap_cluster"
@@ -148,6 +152,42 @@ def speaker_attribution_accuracy(reference: list[str], hypothesis: list[str]) ->
 _CONFIDENCE_VALUES = {"high": 0.9, "medium": 0.6, "low": 0.3}
 
 
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    """Cosine similarity between two equal-length unit vectors."""
+    return sum(x * y for x, y in zip(a, b))
+
+
+def _text_similarity(
+    claim_text: str,
+    evidence_text: str,
+    threshold: float = 0.45,
+    backend: HashingEmbeddingBackend | None = None,
+) -> tuple[bool, float]:
+    """Return the text-similarity score between *claim_text* and *evidence_text*.
+
+    Uses the dependency-free :class:`HashingEmbeddingBackend` (character n-gram
+    + CJK token hashing) so this check works without torch, transformers, or
+    sentence-transformers.  Both texts are normalised and encoded; if either is
+    empty the score is ``0.0``.
+
+    .. note::
+       This measures *surface textual similarity*, not semantic entailment or
+       factual correctness.  Opposite statements can obtain high similarity
+       scores (e.g. "the budget was approved" vs "the budget was not approved").
+       Callers should treat the result as a loose filter, not a guarantee of
+       semantic support.
+    """
+    claim_text = claim_text.strip()
+    evidence_text = evidence_text.strip()
+    if not claim_text or not evidence_text:
+        return False, 0.0
+    if backend is None:
+        backend = HashingEmbeddingBackend()
+    claim_vec, ev_vec = backend.encode([claim_text, evidence_text])
+    score = _cosine_similarity(claim_vec, ev_vec)
+    return score >= threshold, score
+
+
 def _confidence_value(confidence: Any) -> float | None:
     """Map a confidence label or numeric score to a probability in [0, 1]."""
     if isinstance(confidence, bool):
@@ -161,6 +201,8 @@ def evaluate_evidence_support(
     predictions: list[dict],
     references: list[dict],
     source_evidence_ids: Any = None,
+    evidence_text_map: dict[str, str] | None = None,
+    text_similarity_threshold: float = 0.45,
 ) -> dict[str, Any]:
     """Evaluate evidence traceability for a set of aligned claim/reference pairs.
 
@@ -173,25 +215,35 @@ def evaluate_evidence_support(
       abstention rather than an asserted claim;
     - prediction ``confidence`` (optional): ``"high"``/``"medium"``/``"low"`` or
       a numeric score in [0, 1], used for calibration;
+    - prediction ``text`` (optional): the claim wording, used for content-level
+      support checking when ``evidence_text_map`` is provided.  If missing,
+      content-level similarity is scored as ``0.0``;
     - reference ``evidence_ids``: the gold supporting evidence (empty means the
-      claim is not supportable and a faithful system should abstain).
+      claim is not supportable and a faithful system should abstain);
 
     ``source_evidence_ids`` is the universe of evidence IDs that actually exist
     in the source segments; a cited ID outside it counts as a hallucination.
+
+    ``evidence_text_map`` maps evidence IDs to their source text. When provided,
+    an additional *text-similarity* check is performed: a citation counts as
+    text-similarity-supported only when its ID is correct **and** its text has high
+    surface textual similarity to the claim text (cosine similarity of
+    :class:`HashingEmbeddingBackend` vectors >= ``text_similarity_threshold``).
+    This is a lightweight proxy, **not** semantic entailment; opposite claims can
+    obtain high similarity scores.  Callers requiring true NLI should replace
+    this heuristic with a dedicated entailment model.
 
     Caveat: for a meaningful ``hallucination_rate`` callers MUST pass the full
     set of real source evidence IDs. When it is omitted it defaults to the union
     of all gold evidence IDs, which makes any real-but-non-gold citation look
     hallucinated and conflates hallucination with ``unsupported_claim_rate``.
 
-    Scope: these metrics check whether the *cited evidence IDs* are correct; they
-    do not yet verify that the claim *text* is entailed by the evidence content.
-    Uncertainty-preservation and candidate-usefulness metrics are not covered
-    here (see ``docs/experiment_plan.md`` Experiment 5 follow-ups).
-
     Returns evidence precision/recall/F1, evidence hit rate, unsupported-claim
-    rate, hallucination rate, and confidence-calibration error (ECE), following
-    the metric definitions in ``docs/experiment_plan.md`` (Experiment 5).
+    rate, hallucination rate, and confidence-calibration error (ECE).  When
+    ``evidence_text_map`` is provided, additional ``text_similarity_*`` metrics are
+    included (text-similarity precision/recall/F1, text-similarity hit rate, and
+    text-similarity unsupported rate).  These metrics measure surface textual
+    similarity, not semantic entailment.
     """
     if len(predictions) != len(references):
         raise ValueError("predictions and references must have the same length")
@@ -228,7 +280,7 @@ def evaluate_evidence_support(
 
     calibration = _confidence_calibration(predictions, cited_sets, gold_sets)
 
-    return {
+    result = {
         "support": len(predictions),
         "answerable": len(answerable),
         "claims": len(claims),
@@ -240,6 +292,75 @@ def evaluate_evidence_support(
         "hallucination_rate": hallucination_rate,
         **calibration,
     }
+
+    # Text-similarity check (optional): compare claim text with cited evidence
+    # text using surface similarity, not just whether the IDs match.
+    if evidence_text_map is not None:
+        text_similarity_cited = 0
+        text_similarity_gold = 0
+        text_similarity_correct = 0
+        text_similarity_hits = 0
+        text_similarity_unsupported = 0
+        backend = HashingEmbeddingBackend()
+
+        for i, (pred, ref) in enumerate(zip(predictions, references)):
+            claim_text = str(pred.get("text") or "").strip()
+            cited = cited_sets[i]
+            gold = gold_sets[i]
+
+            cited_with_text = {eid for eid in cited if eid in evidence_text_map}
+            gold_with_text = {eid for eid in gold if eid in evidence_text_map}
+
+            text_similarity_cited += len(cited_with_text)
+            text_similarity_gold += len(gold_with_text)
+
+            has_text_similarity = False
+            if claim_text and cited_with_text:
+                claim_vec = backend.encode([claim_text])[0]
+                for eid in cited_with_text & gold_with_text:
+                    ev_vec = backend.encode([evidence_text_map[eid]])[0]
+                    score = _cosine_similarity(claim_vec, ev_vec)
+                    if score >= text_similarity_threshold:
+                        text_similarity_correct += 1
+                        has_text_similarity = True
+
+            if gold_with_text and has_text_similarity:
+                text_similarity_hits += 1
+            if not pred.get("insufficient_evidence") and not has_text_similarity:
+                text_similarity_unsupported += 1
+
+        text_similarity_precision = text_similarity_correct / text_similarity_cited if text_similarity_cited else 0.0
+        text_similarity_recall = text_similarity_correct / text_similarity_gold if text_similarity_gold else 0.0
+        text_similarity_f1 = (
+            2 * text_similarity_precision * text_similarity_recall / (text_similarity_precision + text_similarity_recall)
+            if (text_similarity_precision + text_similarity_recall)
+            else 0.0
+        )
+
+        answerable_text = [
+            i for i, gold in enumerate(gold_sets)
+            if any(eid in evidence_text_map for eid in gold)
+        ]
+        claims_text = [
+            i for i in claims
+            if any(eid in evidence_text_map for eid in gold_sets[i]) or not gold_sets[i]
+        ]
+
+        result.update({
+            "text_similarity_precision": text_similarity_precision,
+            "text_similarity_recall": text_similarity_recall,
+            "text_similarity_f1": text_similarity_f1,
+            "text_similarity_hit_rate": text_similarity_hits / len(answerable_text) if answerable_text else 0.0,
+            "text_similarity_unsupported_rate": text_similarity_unsupported / len(claims_text) if claims_text else 0.0,
+            "text_similarity_support": len(predictions),
+            "text_similarity_answerable": len(answerable_text),
+            "text_similarity_claims": len(claims_text),
+            "text_similarity_cited": text_similarity_cited,
+            "text_similarity_gold": text_similarity_gold,
+            "text_similarity_correct": text_similarity_correct,
+        })
+
+    return result
 
 
 def _confidence_calibration(
@@ -401,3 +522,69 @@ def _error_rate_result(counts: dict[str, int]) -> dict[str, Any]:
     ref_length = counts["reference_length"]
     rate = counts["distance"] / ref_length if ref_length else float(counts["distance"] > 0)
     return {**counts, "error_rate": rate}
+
+
+def evaluate_event_extraction(
+    predicted_events: list[dict[str, Any]],
+    gold_events: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Precision/recall/F1 for structured event extraction, overall and per type.
+
+    A predicted event matches a gold event when they share the same
+    ``event_type`` and cite at least one common ``evidence_id``. Matching is
+    greedy and one-to-one so duplicate predictions cannot be rewarded twice.
+    """
+    pred = [_event_signature(event) for event in predicted_events]
+    gold = [_event_signature(event) for event in gold_events]
+
+    matched_gold: set[int] = set()
+    matched_total = 0
+    matched_by_type: dict[str, int] = {}
+    for pred_type, pred_ids in pred:
+        for index, (gold_type, gold_ids) in enumerate(gold):
+            if index in matched_gold or pred_type != gold_type or not (pred_ids & gold_ids):
+                continue
+            matched_gold.add(index)
+            matched_total += 1
+            matched_by_type[pred_type] = matched_by_type.get(pred_type, 0) + 1
+            break
+
+    pred_counts = _count_types(pred)
+    gold_counts = _count_types(gold)
+    per_type = {
+        event_type: _precision_recall_f1(
+            matched_by_type.get(event_type, 0),
+            pred_counts.get(event_type, 0),
+            gold_counts.get(event_type, 0),
+        )
+        for event_type in sorted(set(pred_counts) | set(gold_counts))
+    }
+
+    return {
+        "support_predicted": len(pred),
+        "support_gold": len(gold),
+        "matched": matched_total,
+        **_precision_recall_f1(matched_total, len(pred), len(gold)),
+        "per_type": per_type,
+    }
+
+
+def _event_signature(event: dict[str, Any]) -> tuple[str, set[str]]:
+    return (
+        str(event.get("event_type", "")),
+        {str(value) for value in event.get("evidence_ids", [])},
+    )
+
+
+def _count_types(signatures: list[tuple[str, set[str]]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for event_type, _ in signatures:
+        counts[event_type] = counts.get(event_type, 0) + 1
+    return counts
+
+
+def _precision_recall_f1(matched: int, predicted: int, gold: int) -> dict[str, float]:
+    precision = matched / predicted if predicted else 0.0
+    recall = matched / gold if gold else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+    return {"precision": precision, "recall": recall, "f1": f1}

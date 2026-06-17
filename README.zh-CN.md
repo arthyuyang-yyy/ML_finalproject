@@ -36,13 +36,14 @@ LLM 接入本身不是创新点。项目会把它作为可选实验变量，比�
 
 1. **预处理：**统一采样率和声道，使用 VAD 生成带时间戳的语音片段。
 2. **重叠检测与分流：**估计 `overlap_score`，将片段路由到低重叠或高重叠路径。
-3. **双路径处理：**低重叠片段执行 ASR 和说话人归属；高重叠片段生成多个带置信度的候选，真实语音分离仍是待完成任务。
+3. **双路径处理：**低重叠片段执行 ASR 和说话人归属；高重叠片段生成多个带置信度的候选，并可选使用 NMF 或 SepFormer 语音分离。
 4. **Evidence 证据层：**将文本、候选、说话人、时间戳、置信度、路由原因和原始音频路径统一为 17 字段记录（外加 1 个可选的聚类相似度分布字段）并校验。
 5. **结构化事件：**从 Evidence 中提取 decision、action item、open question 和 uncertainty。可以使用规则，也可以使用受证据约束的 LLM。
 6. **Episodic Memory：**将事件转换为可持久化、可检索、可回溯原始证据的 Episode。
 7. **检索与问答：**先通过 BM25 + embedding 检索 Episode，再使用模板或可选 LLM 组织回答；回答必须引用真实 Evidence ID 和时间戳。
 
 模块设计见 [docs/system_architecture.zh-CN.md](docs/system_architecture.zh-CN.md)，目录职责与扩展约定见 [docs/project_structure.zh-CN.md](docs/project_structure.zh-CN.md)，完整 pipeline 调用链见 [docs/pipeline_walkthrough.md](docs/pipeline_walkthrough.md)。
+后续任务的执行顺序、具体做法和完成标准见 [docs/future_work_guide.zh-CN.md](docs/future_work_guide.zh-CN.md)。
 
 ## 仓库结构
 
@@ -113,8 +114,8 @@ LLM 接入本身不是创新点。项目会把它作为可选实验变量，比�
 | 实验 | 目标 | 当前状态 |
 | --- | --- | --- |
 | 1. 重叠路由 | 将预测的重叠路由与人工标注比较 | 基础设施就绪；pyannote 适配器和能量 fallback 已实现；标注集待构建 |
-| 2. 高重叠候选 | 比较候选生成与强制单一转写 | 候选接口和指标已实现；真实高重叠音频实验与语音分离待完成 |
-| 3. 结构化事件抽取 | 比较规则、普通 LLM 和完整 Evidence 元信息约束 LLM | 规则 fallback、LLM 接口和校验已实现；真实模型消融待进行 |
+| 2. 高重叠候选 | 比较候选生成与强制单一转写 | NMF 与可选 SepFormer 分离路径、候选接口和指标已实现；正式真实音频对比待完成 |
+| 3. 结构化事件抽取 | 比较规则、普通 LLM 和完整 Evidence 元信息约束 LLM | Step 16a 独立规则基线与种子 per-type 评估已完成；同一标注集上的 LLM 消融待完成 |
 | 4. Episodic Memory 问答 | 比较摘要问答、纯转写 RAG 和说话人感知记忆问答 | 存储、检索和基线 QA 已实现；正式实验待进行 |
 | 5. 证据与不确定性 | 测量证据命中、内容支持、无支持声明和不确定性保留 | 基础指标与种子实验已实现；真实 Pipeline 输出标注集待构建 |
 
@@ -122,7 +123,7 @@ LLM 接入本身不是创新点。项目会把它作为可选实验变量，比�
 
 ## 当前进度
 
-项目目前处于**主线基础设施可运行、真实高重叠处理与正式实验待完成**阶段。轻量环境可以完整验证软件流程，但当前输出大量依赖 Mock ASR 和确定性 fallback，不能代表真实会议处理效果。
+项目已达到**阶段三基线实现至 Step 19，并进入阶段四正式评估**。阶段一已完成；阶段二的实现已到 Step 12，仅 Step 7b 正式阈值校准未完成；阶段三的事件、记忆、检索和问答基线已实现，仍需完成 Step 16b 与 Step 20 对比实验。轻量环境可以完整验证软件流程，但当前输出大量依赖 Mock ASR 和确定性 fallback，不能代表真实会议处理效果。
 
 已完成：
 
@@ -135,7 +136,9 @@ LLM 接入本身不是创新点。项目会把它作为可选实验变量，比�
 - 可插拔 ASR 适配器（Mock/WhisperX/faster-whisper/Whisper/FunASR）与置信度校准；
 - 重叠检测：pyannote OSD 适配器（有 HF token 时）+ 保守能量 fallback（上限 0.39，不会误触发高重叠路由）；
 - 双路径路由（阈值 0.4）、低重叠 ASR + 说话人归属路径、高重叠候选生成（不强行确定单一转写）；
+- 可选高重叠语音分离（可替换适配器）：零依赖自写 NMF 基线 + 可选 SpeechBrain SepFormer；分离出的声源分别执行 ASR，未启用或失败时保留原有多参数候选回退；
 - 元数据构建、schema 验证、evidence-only JSON Prompt、LLM 输出修复与校验，以及确定性事件提取 fallback；
+- Step 16a 独立规则式事件抽取基线：覆盖 decision、action item、deadline、open question 和 uncertainty，并提供 per-type 指标与可复现种子实验；默认无 LLM Pipeline 当前仍使用通用证据关联 fallback；
 - 事件级情景记忆创建、按会议原子更新的 JSON 持久化与 BM25 + embedding 混合检索；
 - 模板 QA 和可选 Gemma QA 均只基于 top-k Episode，并校验证据 ID、时间戳、说话人和不确定性；
 - 基于 Gradio 的交互式 UI 演示；
@@ -151,19 +154,21 @@ LLM 接入本身不是创新点。项目会把它作为可选实验变量，比�
 正式实验前仍需完成：
 
 - 人工标注评估集构建；
-- 重叠阈值校准和 pyannote 正式实验；
-- 真实高重叠语音处理与可选语音分离模块；
+- Step 7b：使用正式 Pipeline 的 VAD 片段和融合分数完成重叠阈值校准；
+- 真实高重叠语音与语音分离质量正式对比（NMF / SepFormer / direct multi-decode）；
 - faster-whisper/WhisperX/Whisper/FunASR、pyannote 与 Ollama Gemma 的真实运行和精度对比；
-- decision、action item、deadline 等真实会议事件抽取验证；
+- Step 16b：在同一标注会议上比较规则、普通 LLM 和完整 Evidence 约束 LLM；
+- Step 20：比较模板 QA、Transcript RAG 和 Episodic Memory RAG；
 - 使用真实 Pipeline 输出构建内容支持、不确定性保留和候选有效性标注集；
-- 规则/普通 LLM/Evidence 约束 LLM、Summary QA/Transcript RAG/Episodic Memory QA 等消融与对比实验。
 
-2026 年 6 月 13 日验证结果：
+下一阶段应优先构建人工标注评估集并完成 Step 7b，然后执行 Step 16b、Step 20 和其余 Phase 4 正式实验。
 
-- `280` 个单元与集成测试通过；
+2026 年 6 月 15 日验证结果：
+
+- 全部 `424` 个单元与集成测试通过；
 - `1` 个可选 Gradio 组件测试因未安装 Gradio 跳过；
-- 证据评估种子实验可运行并生成结果表；
-- 使用轻量依赖和 Mock ASR 的端到端 smoke run 成功。
+- 语法编译通过；
+- Step 16a 规则事件种子实验复现总体 precision/recall/F1 `0.833 / 0.833 / 0.833`。
 
 ## 运行方式
 
@@ -180,11 +185,32 @@ python -m unittest discover -s tests -v
 python -m pip install -r requirements-asr.txt
 ```
 
+Phase 2 Step 11 的零依赖 NMF 语音分离基线无需额外安装。可选的重模型 SepFormer baseline 需要：
+
+```bash
+python -m pip install -r requirements-separation.txt
+```
+
 运行端到端 pipeline。CLI 默认使用 `faster-whisper small`，首次运行会下载模型：
 
 ```bash
 python main.py data/raw_audio/meeting_001.wav --meeting-id meeting_001
 ```
+
+启用高重叠语音分离（`nmf` 零依赖，`sepformer` 需重依赖）：
+
+```bash
+# 零依赖 NMF 基线
+python main.py data/raw_audio/meeting_001.wav --meeting-id meeting_001 \
+  --speech-separation nmf
+
+# 可选重模型 SepFormer
+python main.py data/raw_audio/meeting_001.wav --meeting-id meeting_001 \
+  --speech-separation sepformer
+```
+
+两者默认关闭。SepFormer 首次启用时会下载 `speechbrain/sepformer-whamr16k`。分离模型不可用、
+加载失败或未生成有效分轨候选时，Pipeline 会自动回到原有 faster-whisper 多参数候选路径。
 
 输入可以是 WAV、FLAC、OGG、MP3、M4A、AAC、MP4 或 WMA。所有格式都会先统一为
 16 kHz 单声道 float32 WAV，因此 Step 4 的 ASR 后端不需要针对每种文件格式分别适配。

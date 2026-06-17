@@ -15,6 +15,17 @@
 | hallucination_rate | 0.1667 |
 | calibration_error | 0.4857 |
 | calibration_samples | 7 |
+| text_similarity_precision | 0.6667 |
+| text_similarity_recall | 0.8000 |
+| text_similarity_f1 | 0.7273 |
+| text_similarity_hit_rate | 0.8000 |
+| text_similarity_unsupported_rate | 0.2000 |
+| text_similarity_support | 7 |
+| text_similarity_answerable | 5 |
+| text_similarity_claims | 5 |
+| text_similarity_cited | 6 |
+| text_similarity_gold | 5 |
+| text_similarity_correct | 4 |
 
 ## Uncertainty preservation
 

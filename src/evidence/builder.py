@@ -13,6 +13,20 @@ HIGH_OVERLAP_PATH = "high_overlap_candidate"
 VALID_PROCESSING_PATHS = {LOW_OVERLAP_PATH, HIGH_OVERLAP_PATH}
 
 
+def _coerce_str(value: Any, default: str = "") -> str:
+    """Return *default* when *value* is None, otherwise ``str(value)``.
+
+    Assumes *value* is either None or a type whose ``str()`` produces a
+    meaningful string representation (e.g. ``str``, ``int``).
+
+    Note: this helper is intended for *optional* string fields.  Required
+    fields such as ``segment_id`` or ``speaker`` should be validated
+    explicitly by the caller (e.g. with ``required_text()``) and should
+    not rely on this helper to convert ``None`` into an empty string.
+    """
+    return default if value is None else str(value)
+
+
 def build_metadata_segment(
     meeting_id: str,
     segment_id: str,
@@ -42,17 +56,17 @@ def build_metadata_segment(
         "speaker": required_text(speaker, "speaker"),
         "start_time": float(start_time),
         "end_time": float(end_time),
-        "text": str(text),
+        "text": _coerce_str(text),
         "processing_path": str(processing_path),
         "route_reason": route_reason or f"overlap_score routed to {processing_path}",
         "overlap_score": float(overlap_score),
         "asr_confidence": float(asr_confidence),
         "speaker_confidence": float(speaker_confidence),
-        "audio_clip_path": str(audio_clip_path),
-        "source_audio_path": str(source_audio_path),
+        "audio_clip_path": _coerce_str(audio_clip_path),
+        "source_audio_path": _coerce_str(source_audio_path),
         "language": str(language or "und"),
         "candidates": normalized_candidates,
-        "uncertainty_note": str(uncertainty_note),
+        "uncertainty_note": _coerce_str(uncertainty_note),
         "cluster_similarity_distribution": _normalize_distribution(cluster_similarity_distribution),
     }
     return validate_metadata_segment(record)
@@ -123,6 +137,17 @@ def _build_from_processed_segment(
     language: str,
     overlap_threshold: float,
 ) -> dict[str, Any]:
+    """Build one metadata record from a processed low- or high-overlap segment.
+
+    ``text`` and ``uncertainty_note`` are coerced through ``_coerce_str``,
+    so ``None`` becomes ``""``.  Whether an empty string is accepted or
+    rejected depends on the ``processing_path`` and is enforced later by
+    ``validate_metadata_segment``:
+
+    - ``low_overlap_cluster`` requires non-empty ``text``.
+    - ``high_overlap_candidate`` requires empty ``text`` and non-empty
+      ``uncertainty_note`` (via ``candidates`` and the segment-level note).
+    """
     if not isinstance(segment, dict):
         raise ValueError(f"{expected_path} entries must be dictionaries")
 
@@ -137,37 +162,64 @@ def _build_from_processed_segment(
     overlap_score = float(segment.get("overlap_score", 0.0))
     generated_route_reason = _route_reason(overlap_score, overlap_threshold, expected_path)
     route_reason = str(segment.get("route_reason") or generated_route_reason)
+
+    # Resolve segment-level overrides for optional fields.  Both ``None``
+    # and the empty string are treated as "not provided" so that upstream
+    # segments which use ``""`` to mean "missing" still fall back to the
+    # caller-supplied parameter rather than silently discarding it.
+    segment_source_audio = segment.get("source_audio_path")
+    resolved_source_audio = (
+        source_audio_path if segment_source_audio in (None, "") else segment_source_audio
+    )
+    segment_language = segment.get("language")
+    resolved_language = language if segment_language in (None, "") else segment_language
+
     return build_metadata_segment(
         meeting_id=str(segment_meeting_id),
-        segment_id=str(segment.get("segment_id", "")),
+        # Required fields: fall back to "" so ``required_text`` can give a
+        # single, clear error message for both missing keys and ``None``.
+        segment_id=segment.get("segment_id") or "",
         evidence_id=segment.get("evidence_id"),
-        speaker=str(segment.get("speaker", "")),
+        speaker=_coerce_str(segment.get("speaker") or ""),
         start_time=float(segment.get("start_time", 0.0)),
         end_time=float(segment.get("end_time", 0.0)),
-        text=str(segment.get("text", "")),
+        text=_coerce_str(segment.get("text")),
         processing_path=expected_path,
         route_reason=route_reason,
         overlap_score=overlap_score,
         asr_confidence=float(segment.get("asr_confidence", 0.0)),
         speaker_confidence=float(segment.get("speaker_confidence", 0.0)),
         candidates=list(segment.get("candidates", [])),
-        uncertainty_note=str(segment.get("uncertainty_note", "")),
-        audio_clip_path=str(segment.get("audio_clip_path", "")),
-        source_audio_path=str(segment.get("source_audio_path") or source_audio_path),
-        language=str(segment.get("language") or language),
+        uncertainty_note=_coerce_str(segment.get("uncertainty_note")),
+        audio_clip_path=_coerce_str(segment.get("audio_clip_path")),
+        source_audio_path=_coerce_str(resolved_source_audio),
+        language=_coerce_str(resolved_language),
         cluster_similarity_distribution=segment.get("cluster_similarity_distribution"),
     )
 
 
 def _normalize_distribution(distribution: dict[str, float] | None) -> dict[str, float]:
-    """Coerce a cluster-similarity distribution into a ``{label: value}`` map."""
+    """Coerce a cluster-similarity distribution into a ``{label: value}`` map.
+
+    Validates that every key is a string to catch upstream data-format
+    errors (e.g. ``None`` or numeric keys produced by buggy JSON
+    deserialization or manual dict construction).
+    """
     if not distribution:
         return {}
     if not isinstance(distribution, dict):
         raise ValueError(
             "cluster_similarity_distribution must be a mapping of speaker label to value"
         )
-    return {str(label): float(value) for label, value in distribution.items()}
+    normalized: dict[str, float] = {}
+    for label, value in distribution.items():
+        if not isinstance(label, str):
+            raise ValueError(
+                "cluster_similarity_distribution keys must be strings, "
+                f"got {type(label).__name__}"
+            )
+        normalized[label] = float(value)
+    return normalized
 
 
 def _normalize_candidates(

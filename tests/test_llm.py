@@ -269,9 +269,10 @@ class EventValidationTests(unittest.TestCase):
 
 
 class GemmaClientTests(unittest.TestCase):
-    def test_generate_json_raises_without_generator(self) -> None:
-        with self.assertRaisesRegex(ValueError, "no generator"):
-            GemmaClient().generate_json("test prompt")
+    def test_generate_json_returns_fallback_without_generator(self) -> None:
+        result = GemmaClient().generate_json("test prompt")
+        self.assertIsInstance(result, dict)
+        self.assertIn("fallback", str(result.get("uncertainty_note", "")).lower())
 
     def test_configured_generator_is_used(self) -> None:
         client = GemmaClient(generator=lambda prompt: {"prompt": prompt})
@@ -283,6 +284,21 @@ class GemmaClientTests(unittest.TestCase):
 
     def test_run_gemma_falls_back_when_backend_fails(self) -> None:
         self.assertEqual(run_gemma("hello", client=FailingClient()), "{}")
+
+    def test_run_gemma_without_client_uses_env(self) -> None:
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {"GEMMA_BACKEND": "none"}, clear=False):
+            self.assertEqual(run_gemma("hello"), "{}")
+
+    def test_run_gemma_env_invalid_raises(self) -> None:
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {"GEMMA_BACKEND": "invalid"}, clear=False):
+            with self.assertRaises(ValueError):
+                run_gemma("hello")
 
 
 class PromptTests(unittest.TestCase):

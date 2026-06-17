@@ -21,6 +21,25 @@ DEFAULT_DECODE_CONFIGS: list[dict[str, Any]] = [
     {"beam_size": 5, "temperature": 0.8, "language": "en"},
 ]
 
+# Below this RMS a separated track carries no usable speech; transcribing it
+# only invites ASR hallucinations and implies a speaker the separator never
+# actually recovered.
+SEPARATED_SOURCE_SILENCE_RMS = 1e-3
+
+
+def _resolve_whisper_runtime(asr_config: dict[str, str] | None) -> tuple[str, str, str]:
+    """Resolve faster-whisper (model, device, compute_type) for separated ASR.
+
+    Explicit pipeline/CLI config wins, then ``FASTER_WHISPER_*`` env overrides,
+    then the lightweight defaults — so the high-overlap path no longer silently
+    ignores ``--faster-whisper-model``/``--asr-device``/``--asr-compute-type``.
+    """
+    cfg = asr_config or {}
+    model_name = cfg.get("model") or os.environ.get("FASTER_WHISPER_MODEL", "small")
+    device = cfg.get("device") or os.environ.get("FASTER_WHISPER_DEVICE", "cpu")
+    compute_type = cfg.get("compute_type") or os.environ.get("FASTER_WHISPER_COMPUTE_TYPE", "int8")
+    return model_name, device, compute_type
+
 
 def generate_high_overlap_candidates(
     segment: dict,
@@ -30,6 +49,7 @@ def generate_high_overlap_candidates(
     decode_configs: list[dict[str, Any]] | None = None,
     max_candidates: int = 4,
     speaker_hypotheses: list[str] | None = None,
+    asr_config: dict[str, str] | None = None,
 ) -> list[dict]:
     """Generate transcript/speaker candidates for one high-overlap segment.
 
@@ -43,11 +63,79 @@ def generate_high_overlap_candidates(
         speaker_hypotheses = [str(segment["speaker"])]
     if samples is not None and samples.size:
         candidates = _generate_with_faster_whisper(
-            segment, samples, sample_rate, configs, max_candidates, speaker_hypotheses
+            segment, samples, sample_rate, configs, max_candidates, speaker_hypotheses, asr_config
         )
         if candidates:
             return candidates
     return fallback_candidates(segment, configs[:2], speaker_hypotheses)
+
+
+def generate_separated_source_candidates(
+    segment: dict,
+    sources: list[np.ndarray],
+    sample_rate: int = TARGET_SAMPLE_RATE,
+    language: str | None = None,
+    separation_backend: str = "unknown",
+    max_candidates: int = 4,
+    asr_config: dict[str, str] | None = None,
+) -> list[dict]:
+    """Transcribe separated speaker sources into high-overlap candidates."""
+    if not sources:
+        return []
+    try:
+        import faster_whisper  # noqa: F401 - availability check
+    except ImportError:
+        return []
+
+    model_name, device, compute_type = _resolve_whisper_runtime(asr_config)
+    try:
+        model = _load_faster_whisper_model(model_name, device, compute_type)
+    except Exception:
+        return []
+
+    segment_id = str(segment.get("segment_id") or segment.get("evidence_id") or "segment")
+    config = _with_language_override([DEFAULT_DECODE_CONFIGS[0]], language)[0]
+    seen_text: set[str] = set()
+    candidates: list[dict] = []
+    for source_index, source in enumerate(sources[:max_candidates], start=1):
+        waveform = np.asarray(source, dtype=np.float32).reshape(-1)
+        if waveform.size == 0 or _is_silent(waveform):
+            continue
+        try:
+            decoded_segments, _ = model.transcribe(
+                waveform,
+                beam_size=int(config["beam_size"]),
+                temperature=float(config["temperature"]),
+                language=config.get("language"),
+            )
+            decoded = list(decoded_segments)
+        except Exception:
+            continue
+        text = " ".join(str(item.text).strip() for item in decoded if str(item.text).strip()).strip()
+        normalized = " ".join(text.lower().split())
+        # Drop empty transcripts and identical tracks: two duplicate sources
+        # must not masquerade as two independent SEPARATED_SOURCE speakers.
+        if not normalized or normalized in seen_text:
+            continue
+        seen_text.add(normalized)
+        candidates.append({
+            "candidate_id": f"{segment_id}_sep{source_index}",
+            "speaker": f"SEPARATED_SOURCE_{source_index:02d}",
+            "text": text,
+            "confidence": _confidence_from_decoded_segments(decoded),
+            "uncertainty_note": (
+                f"High-overlap segment separated by {separation_backend} before ASR; "
+                "source-to-speaker assignment remains uncertain."
+            ),
+            "decode_config": {
+                "backend": separation_backend,
+                "source_index": source_index,
+                "beam_size": int(config["beam_size"]),
+                "temperature": float(config["temperature"]),
+                "language": config.get("language") or "auto",
+            },
+        })
+    return candidates
 
 
 def _generate_with_faster_whisper(
@@ -57,6 +145,7 @@ def _generate_with_faster_whisper(
     decode_configs: list[dict[str, Any]],
     max_candidates: int,
     speaker_hypotheses: list[str] | None,
+    asr_config: dict[str, str] | None = None,
 ) -> list[dict]:
     """Run faster-whisper with multiple decode settings when available."""
     try:
@@ -64,9 +153,7 @@ def _generate_with_faster_whisper(
     except ImportError:
         return []
 
-    model_name = os.environ.get("FASTER_WHISPER_MODEL", "small")
-    device = os.environ.get("FASTER_WHISPER_DEVICE", "cpu")
-    compute_type = os.environ.get("FASTER_WHISPER_COMPUTE_TYPE", "int8")
+    model_name, device, compute_type = _resolve_whisper_runtime(asr_config)
 
     try:
         model = _load_faster_whisper_model(model_name, device, compute_type)
@@ -111,6 +198,14 @@ def _generate_with_faster_whisper(
         if len(candidates) >= max_candidates:
             break
     return candidates
+
+
+def _is_silent(waveform: np.ndarray, threshold: float = SEPARATED_SOURCE_SILENCE_RMS) -> bool:
+    """True when a separated track has no usable energy (RMS below the floor)."""
+    if waveform.size == 0:
+        return True
+    rms = float(np.sqrt(np.mean(np.square(waveform.astype(np.float64)))))
+    return rms < threshold
 
 
 def _confidence_from_decoded_segments(decoded_segments: list[Any]) -> float:
