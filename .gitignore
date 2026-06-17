@@ -23,6 +23,11 @@ data/processed_audio/*
 data/alimeeting/
 outputs/*
 
+# Generated/filled annotation sheets carry corpus transcripts -> never commit them
+# (the blank data/annotations/annotation_template.csv stays tracked).
+data/annotations/prefilled/
+data/annotations/built/
+
 # Audio and model files
 *.wav
 *.mp3
