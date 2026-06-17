@@ -220,7 +220,13 @@ def score_meeting_segments(
     samples, sample_rate = load_audio(str(audio_path))
     meeting_id = Path(audio_path).stem
     if vad_method == "silero":
-        segments = segment_waveform(samples, sample_rate, meeting_id=meeting_id, method="silero")
+        try:
+            segments = segment_waveform(samples, sample_rate, meeting_id=meeting_id, method="silero")
+        except ImportError as exc:
+            raise RuntimeError(
+                "--vad-method silero needs faster-whisper, which is not installed. "
+                "Install it (pip install -r requirements-asr.txt) or use --vad-method energy/fixed."
+            ) from exc
     elif vad_method == "energy":
         segments = segment_waveform(samples, sample_rate, meeting_id=meeting_id)
     else:  # "fixed"

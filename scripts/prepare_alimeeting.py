@@ -158,10 +158,40 @@ def _meeting_id_from_path(path: Path) -> str:
     return path.stem
 
 
+def validate_record(record: dict[str, Any]) -> None:
+    """Fail fast on a structurally broken annotation record.
+
+    A malformed TextGrid (empty tiers, zero/negative-duration turns, overlap that
+    exceeds the total speech time) would otherwise produce ground-truth labels that
+    silently corrupt the calibration. Catch the clear breakages here so garbage
+    never reaches ``build_labeled_dataset``.
+    """
+    meeting_id = record["meeting_id"]
+    turns = record["turns"]
+    if not turns:
+        raise ValueError(f"{meeting_id}: no speaker turns parsed (empty/malformed TextGrid)")
+    if record["num_speakers"] < 1:
+        raise ValueError(f"{meeting_id}: num_speakers={record['num_speakers']} (< 1)")
+    for turn in turns:
+        if float(turn["end_time"]) <= float(turn["start_time"]):
+            raise ValueError(
+                f"{meeting_id}: non-positive turn duration "
+                f"[{turn['start_time']}, {turn['end_time']}] for speaker {turn.get('speaker')}"
+            )
+    total_speech = sum(float(t["end_time"]) - float(t["start_time"]) for t in turns)
+    if record["overlap_seconds"] < 0 or record["overlap_seconds"] > total_speech + 1e-6:
+        raise ValueError(
+            f"{meeting_id}: overlap_seconds={record['overlap_seconds']} is outside "
+            f"[0, total_speech={round(total_speech, 3)}]"
+        )
+
+
 def prepare_root(root: Path, out_dir: Path) -> list[Path]:
     """Convert every ``*.TextGrid`` under ``root`` and write one JSON per meeting."""
     out_dir.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
+    total_turns = 0
+    total_overlap = 0.0
     textgrids = sorted(root.rglob("*.TextGrid"))
     if not textgrids:
         raise FileNotFoundError(f"no .TextGrid files found under {root}")
@@ -176,12 +206,17 @@ def prepare_root(root: Path, out_dir: Path) -> list[Path]:
             )
         seen[meeting_id] = textgrid
         record = convert_meeting(textgrid.read_text(encoding="utf-8"), meeting_id)
+        validate_record(record)
         out_path = out_dir / f"{meeting_id}.json"
         out_path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
         written.append(out_path)
         print(f"{meeting_id}: {len(record['turns'])} turns, "
               f"{len(record['overlap_regions'])} overlap regions, "
               f"{record['overlap_seconds']}s overlap -> {out_path}")
+        total_turns += len(record["turns"])
+        total_overlap += record["overlap_seconds"]
+    print(f"\nsummary: {len(written)} meetings, {total_turns} turns, "
+          f"{round(total_overlap, 1)}s total overlap")
     return written
 
 

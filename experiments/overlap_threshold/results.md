@@ -8,11 +8,14 @@ split, so absolute numbers are noisy. Raw audio/annotations are not committed
 > run — fixed 2 s windows, pyannote OSD score, diarization fusion **disabled**. It
 > does **not** match the real Pipeline, so its threshold does not carry over and was
 > never a finished Step 7b. **Phase 2** ([jump](#phase-2--production-aligned-step-7b))
-> is the *production-aligned* run that closes Step 7b: it uses the **silero VAD
-> segments** and the **fused** overlap score (OSD + diarization overlap + speaker
-> change) that `run_meeting_pipeline` actually routes on. Read Phase 2 for the
-> recommended threshold and the production-readiness verdict; Phase 1 is kept for
-> history and for the pyannote-vs-energy comparison.
+> is the *production-aligned* run that closes Step 7b: it scores with the **fused**
+> overlap score (OSD + diarization overlap + speaker change) that
+> `run_meeting_pipeline` actually routes on. One deliberate difference remains: it
+> segments with **silero VAD**, whereas the Pipeline today defaults to **energy VAD**
+> (`run_pipeline.py` calls `segment_waveform(...)` without `method=`) — see the
+> verdict's VAD caveat. Read Phase 2 for the recommended threshold and the
+> production-readiness verdict; Phase 1 is kept for history and the pyannote-vs-energy
+> comparison.
 
 ## Setup
 
@@ -100,17 +103,27 @@ Scores are dumped once (`run_calibration.py --dump-scored`) and reused by
 ## Phase 2 — production-aligned Step 7b
 
 This is the run that actually closes Step 7b: it calibrates the routing threshold on
-the **same inputs the Pipeline uses** — **silero VAD segments** scored with the
-**fused** overlap signal (pyannote OSD + diarization overlap + speaker-change), i.e.
+the **fused** overlap signal (pyannote OSD + diarization overlap + speaker-change) the
+Pipeline routes on, i.e.
 `run_calibration.py --vad-method silero --fuse-diarization --detectors pyannote`.
 Unlike Phase 1, `--fuse-diarization` now **fails loud** if the diarization backend is
 missing or its gated-model terms are unaccepted, so a degraded "OSD-only" score can
 never masquerade as a fused one.
 
+> **VAD caveat — not yet fully aligned.** The fused *score* matches production, but the
+> *segmentation* does not: this run uses **silero VAD**, while `run_meeting_pipeline`
+> currently defaults to **energy VAD**. Silero was chosen here because it is far more
+> robust on far-field meetings (energy VAD's peak-relative threshold is starved by loud
+> transients). Because the threshold is calibrated on silero segments, transferring it
+> to the energy-segmented Pipeline carries a VAD-distribution gap. Close it by either
+> switching the Pipeline to silero VAD **or** re-calibrating on energy segments before
+> freezing the constant (see Next steps).
+
 ### Setup
 
 - **Dataset:** AliMeeting Eval, far-field mix, 8 meetings (same as Phase 1).
-- **Segmentation:** silero VAD (production-aligned), **2172 segments** total.
+- **Segmentation:** silero VAD, **2172 segments** total (Pipeline currently uses energy
+  VAD — see the VAD caveat above).
 - **Score:** fused overlap score (OSD + diarization overlap + speaker change).
 - **Label / split:** `gt_fraction = 0.5`; split by meeting, `test_ratio = 0.3`, `seed = 0`.
 - Scores dumped to `pyannote_scored.json` and reused by `analyze_scores.py` (no re-run).
@@ -162,13 +175,18 @@ is a calibrated recommendation, not a hard-validated constant.
 - ⚠️ **Recall headroom:** even at the calibrated threshold ~5% of heavy overlap and most
   light overlap are missed; acceptable for a cost-gated router, revisit if downstream
   needs higher overlap recall.
+- ⚠️ **VAD not aligned:** calibrated on silero segments, but the Pipeline routes energy
+  segments today. Switch the Pipeline to silero VAD or re-calibrate on energy segments
+  before treating `0.25` as the frozen production constant.
 
 **Recommendation:** ship `route_threshold ≈ 0.25` (replacing `0.4`) with pyannote fused
 scoring as the Step 7b production default, flagged as a calibrated v1 pending wider
-validation.
+validation **and** VAD alignment with the Pipeline.
 
 ## Next steps
 
+- Align VAD: switch `run_meeting_pipeline` to silero VAD, or re-calibrate on energy
+  segments, so the threshold is standardized on the segmentation production actually uses.
 - Validate the ≈0.25 threshold on more meetings before freezing it as a constant.
 - Smaller windows / alternative score aggregation to lift recall on heavy overlap.
 - Sensitivity analysis over `gt_fraction` and `window_seconds`.
