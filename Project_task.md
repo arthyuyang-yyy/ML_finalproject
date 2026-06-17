@@ -148,6 +148,8 @@ src/asr/
 - `candidates: []`
 - `uncertainty_note: ""`
 
+低重叠路径也显式输出 `candidates: []`，而不是省略字段。这样 validator、event extractor、memory builder 和 QA 层可以用同一个 evidence shape 处理低/高重叠片段，不需要先判断字段是否存在。
+
 ### 4.4 高重叠路径
 
 文件：
@@ -314,7 +316,7 @@ python app.py
 当前已通过：
 
 ```text
-488 passed, 6 skipped, 2 warnings, 7 subtests passed
+490 passed, 6 skipped, 2 warnings, 7 subtests passed
 ruff: All checks passed
 ```
 

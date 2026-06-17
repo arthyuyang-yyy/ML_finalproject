@@ -2,7 +2,9 @@
 
 This document is the compact architecture reference for the current MVP. The
 main project contract lives in `README.md` and `Project_task.md`; this file only
-records the stable module boundaries and tradeoffs.
+records the stable module boundaries and tradeoffs. Older API references and
+historical proposals were removed because they no longer matched the runnable
+pipeline.
 
 ## Pipeline
 
@@ -70,3 +72,8 @@ matching, recency weighting, or event-importance priors.
 Large models are loaded only when selected at runtime. Tests and demos can run
 with mock/fallback adapters. Model weights, raw audio, generated outputs, and
 local environment files should remain outside git.
+
+To add a backend, implement the existing adapter interface for that area
+(`ASRAdapter`, diarization adapter, speech-separation adapter, or `LLMBackend`),
+keep imports lazy, and add focused tests that can run without downloading model
+weights.

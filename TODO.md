@@ -27,7 +27,7 @@
 
 ```text
 python3 -m pytest -q
-488 passed, 6 skipped, 2 warnings, 7 subtests passed
+490 passed, 6 skipped, 2 warnings, 7 subtests passed
 
 python3 -m ruff check src tests main.py app.py
 All checks passed
@@ -46,6 +46,7 @@ All checks passed
 - [ ] 校准默认 overlap threshold `0.4`。
 - [ ] 补一份小型演示数据的运行结果截图或输出样例。
 - [ ] 明确哪些 optional heavy backend 是最终展示必须安装的。
+- [ ] 有人工评估集后，重新评估是否恢复 recency、importance、overlap penalty 等检索排序信号。
 - [ ] 清理或归档暂时不用的数据集脚本，如果最终展示不需要它们。
 
 ## 暂不优先

@@ -132,6 +132,31 @@ class HighOverlapPathTests(unittest.TestCase):
         self.assertEqual(resolved["text"], "The speaker is unclear.")
         self.assertEqual(resolved["source"], "fallback_resolved")
 
+    def test_resolver_tie_breaks_equal_confidence_by_candidate_order(self) -> None:
+        segment = self._high_overlap_segment()
+        segment["candidates"] = [
+            {
+                "candidate_id": "m1_seg_009_c1",
+                "speaker": "SPEAKER_01",
+                "text": "First equal-confidence candidate.",
+                "confidence": 0.7,
+                "uncertainty_note": "High-overlap segment.",
+            },
+            {
+                "candidate_id": "m1_seg_009_c2",
+                "speaker": "SPEAKER_02",
+                "text": "Second equal-confidence candidate.",
+                "confidence": 0.7,
+                "uncertainty_note": "High-overlap segment.",
+            },
+        ]
+
+        resolved = resolve_high_overlap_segment(segment)
+
+        self.assertEqual(resolved["speaker"], "SPEAKER_01")
+        self.assertEqual(resolved["text"], "First equal-confidence candidate.")
+        self.assertEqual(resolved["source"], "fallback_resolved")
+
     def test_resolver_marks_segment_unresolved_without_candidates(self) -> None:
         segment = self._high_overlap_segment()
         segment["candidates"] = []

@@ -60,7 +60,7 @@ input audio
 │   └── manifests/                 # Dataset manifests, if used
 ├── memory/
 │   └── episodic_memory.json       # Long-term memory store
-├── docs/                          # Compact reference notes for optional areas
+├── docs/                          # 精简参考说明；已删除过时 API 文档和历史提案
 ├── outputs/                       # Generated pipeline artifacts
 ├── scripts/                       # Optional dataset/benchmark helpers
 ├── src/
@@ -242,7 +242,7 @@ python -m ruff check src tests main.py app.py
 当前验证状态：
 
 ```text
-488 passed, 6 skipped, 2 warnings, 7 subtests passed
+490 passed, 6 skipped, 2 warnings, 7 subtests passed
 ruff: All checks passed
 ```
 

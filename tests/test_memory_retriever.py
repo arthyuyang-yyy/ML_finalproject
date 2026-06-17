@@ -46,6 +46,11 @@ class FixedEmbeddingBackend:
         return [[1.0, 0.0], [0.8, 0.6], [0.0, 1.0]]
 
 
+class OrthogonalEmbeddingBackend:
+    def encode(self, texts: list[str]) -> list[list[float]]:
+        return [[1.0, 0.0], *([[0.0, 1.0]] * (len(texts) - 1))]
+
+
 class MemoryRetrieverTests(unittest.TestCase):
     def setUp(self) -> None:
         self.episodes = [
@@ -132,6 +137,36 @@ class MemoryRetrieverTests(unittest.TestCase):
     def test_default_backend_is_custom_hash_embedding(self) -> None:
         results = retrieve_episodes("WhisperX", episodes=self.episodes)
         self.assertEqual(results[0]["retrieval"]["embedding_backend"], "HashingEmbeddingBackend")
+
+    def test_keyword_match_survives_low_embedding_similarity(self) -> None:
+        episodes = [
+            _episode(
+                "ep_keyword",
+                event_type="decision",
+                content="alpha owner",
+                topic="assignment",
+                speakers=["S1"],
+                evidence_text="alpha owner",
+            ),
+            _episode(
+                "ep_noise",
+                event_type="decision",
+                content="beta",
+                topic="other",
+                speakers=["S2"],
+                evidence_text="beta",
+            ),
+        ]
+
+        results = retrieve_episodes(
+            "alpha",
+            episodes=episodes,
+            embedding_backend=OrthogonalEmbeddingBackend(),
+        )
+
+        self.assertEqual([item["episode_id"] for item in results], ["ep_keyword"])
+        self.assertEqual(results[0]["retrieval"]["embedding_similarity"], 0.0)
+        self.assertGreater(results[0]["retrieval"]["keyword_score"], 0.0)
 
     def test_retrieval_does_not_mutate_memory(self) -> None:
         original = deepcopy(self.episodes)
