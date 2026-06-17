@@ -1,4 +1,4 @@
-"""Tests for BM25 and embedding hybrid episodic-memory retrieval."""
+"""Tests for hash-embedding episodic-memory retrieval."""
 
 import json
 import tempfile
@@ -89,12 +89,11 @@ class MemoryRetrieverTests(unittest.TestCase):
         results = retrieve_episodes("有哪些不确定的重叠片段？", episodes=self.episodes)
         self.assertEqual(results[0]["episode_id"], "ep_uncertain")
 
-    def test_recent_decision_query_uses_event_type_and_recency(self) -> None:
-        results = retrieve_episodes("上次决定了什么？", episodes=self.episodes)
+    def test_decision_query_uses_event_type_text(self) -> None:
+        results = retrieve_episodes("decision baseline", episodes=self.episodes)
         self.assertEqual(results[0]["episode_id"], "ep_decision")
-        self.assertEqual(results[0]["retrieval"]["recency"], 1.0)
 
-    def test_score_uses_documented_weights(self) -> None:
+    def test_score_uses_documented_hash_and_keyword_weights(self) -> None:
         episodes = [
             _episode(
                 "ep_match",
@@ -124,38 +123,15 @@ class MemoryRetrieverTests(unittest.TestCase):
         )[0]
         components = result["retrieval"]
         expected = (
-            0.45 * components["embedding_similarity"]
-            + 0.25 * components["keyword_score"]
-            + 0.15 * components["importance"]
-            + 0.10 * components["recency"]
-            - 0.20 * components["overlap_penalty"]
+            0.70 * components["embedding_similarity"]
+            + 0.30 * components["keyword_score"]
         )
         self.assertAlmostEqual(components["final_score"], expected, places=6)
         self.assertEqual(components["embedding_backend"], "FixedEmbeddingBackend")
 
-    def test_high_overlap_penalty_skips_uncertainty_events(self) -> None:
-        certain = _episode(
-            "ep_certain",
-            event_type="decision",
-            content="Gemma post-processing",
-            topic="Gemma",
-            speakers=["S1"],
-            evidence_text="Gemma",
-            overlap_score=0.9,
-        )
-        uncertain = _episode(
-            "ep_uncertain",
-            event_type="uncertainty",
-            content="Gemma post-processing",
-            topic="Gemma",
-            speakers=["MIXED"],
-            evidence_text="Gemma",
-            overlap_score=0.9,
-        )
-        results = retrieve_episodes("Gemma", episodes=[certain, uncertain])
-        by_id = {item["episode_id"]: item for item in results}
-        self.assertEqual(by_id["ep_uncertain"]["retrieval"]["overlap_penalty"], 0.0)
-        self.assertGreater(by_id["ep_certain"]["retrieval"]["overlap_penalty"], 0.0)
+    def test_default_backend_is_custom_hash_embedding(self) -> None:
+        results = retrieve_episodes("WhisperX", episodes=self.episodes)
+        self.assertEqual(results[0]["retrieval"]["embedding_backend"], "HashingEmbeddingBackend")
 
     def test_retrieval_does_not_mutate_memory(self) -> None:
         original = deepcopy(self.episodes)

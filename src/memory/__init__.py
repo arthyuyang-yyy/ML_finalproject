@@ -9,19 +9,13 @@ from .episodic_store import (
     write_episodes,
 )
 from .memory_schema import Episode, validate_episode, validate_episode_collection
-from .retriever import (
-    EmbeddingBackend,
-    HashingEmbeddingBackend,
-    SentenceTransformerEmbeddingBackend,
-    retrieve_episodes,
-)
+from .retriever import retrieve_episodes
+from src.fallbacks.embeddings import HashingEmbeddingBackend
 
 __all__ = [
     "DEFAULT_MEMORY_PATH",
     "Episode",
-    "EmbeddingBackend",
     "HashingEmbeddingBackend",
-    "SentenceTransformerEmbeddingBackend",
     "build_episodes",
     "build_episodes_file",
     "read_episodes",

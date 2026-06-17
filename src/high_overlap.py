@@ -1,4 +1,4 @@
-"""High-overlap path: preserve multiple candidates instead of one transcript."""
+"""High-overlap path: generate candidates before resolver finalization."""
 
 from typing import Any
 
@@ -19,7 +19,7 @@ def process_high_overlap_segments(
     language: str | None = None,
     diarization_turns: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return high-overlap records with empty main text and candidate hypotheses."""
+    """Return high-overlap candidate records before LLM/fallback resolution."""
     processed: list[dict[str, Any]] = []
     for segment in segments:
         clip = _slice_segment(samples, segment, sample_rate)

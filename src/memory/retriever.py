@@ -1,68 +1,34 @@
-"""BM25 and embedding hybrid retrieval over episodic memory."""
+"""Lightweight retrieval over episodic memory using hash embeddings."""
 
-import json
-import logging
 import math
 import re
 from collections import Counter
 from collections.abc import Sequence
-from datetime import datetime, timezone
-from functools import lru_cache
 from pathlib import Path
 from typing import Any, Protocol
 
 from .episodic_store import DEFAULT_MEMORY_PATH, read_episodes
 from src.fallbacks.embeddings import HashingEmbeddingBackend
 
-logger = logging.getLogger(__name__)
-
-EMBEDDING_WEIGHT = 0.45
-KEYWORD_WEIGHT = 0.25
-IMPORTANCE_WEIGHT = 0.15
-RECENCY_WEIGHT = 0.10
-OVERLAP_PENALTY_WEIGHT = 0.20
-DEFAULT_MIN_RELEVANCE_SCORE = 0.10
-
+EMBEDDING_WEIGHT = 0.70
+KEYWORD_WEIGHT = 0.30
+DEFAULT_MIN_RELEVANCE_SCORE = 0.15
 INDEX_FIELDS = ("content", "topic", "event_type", "speakers", "evidence_text")
-
-QUERY_EXPANSIONS = {
-    "谁负责": ["action_item", "action item", "owner", "负责", "任务"],
-    "负责": ["action_item", "action item", "owner", "任务"],
-    "行动项": ["action_item", "action item", "task", "owner"],
-    "不确定": ["uncertainty", "overlap", "uncertain", "重叠"],
-    "重叠": ["uncertainty", "overlap", "不确定"],
-    "决定": ["decision", "decided"],
-    "决策": ["decision", "decided"],
-    "上次": ["decision", "recent", "latest"],
-    "question": ["open_question", "open question"],
-    "uncertain": ["uncertainty", "overlap"],
-    "decision": ["decision", "decided"],
-    "responsible": ["action_item", "owner", "task"],
+QUERY_ALIASES = {
+    "不确定": ("uncertainty", "overlap", "重叠"),
+    "重叠": ("uncertainty", "overlap", "不确定"),
+    "决定": ("decision",),
+    "决策": ("decision",),
+    "负责": ("action_item", "task", "owner"),
+    "谁负责": ("action_item", "task", "owner"),
 }
 
 
 class EmbeddingBackend(Protocol):
-    """Minimal embedding interface accepted by the hybrid retriever."""
+    """Minimal embedding interface used by the retriever."""
 
     def encode(self, texts: Sequence[str]) -> list[list[float]]:
         """Encode texts into equal-length vectors."""
-
-
-class SentenceTransformerEmbeddingBackend:
-    """Optional semantic embedding backend loaded only when requested."""
-
-    def __init__(self, model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2") -> None:
-        try:
-            import sentence_transformers  # noqa: F401 - availability check
-        except ImportError as exc:
-            raise ImportError(
-                "Install sentence-transformers to use the semantic embedding backend."
-            ) from exc
-        self.model = _load_sentence_transformer(model_name)
-
-    def encode(self, texts: Sequence[str]) -> list[list[float]]:
-        vectors = self.model.encode(list(texts), normalize_embeddings=True)
-        return [vector.tolist() for vector in vectors]
 
 
 def retrieve_episodes(
@@ -78,12 +44,7 @@ def retrieve_episodes(
     start_time: float | None = None,
     end_time: float | None = None,
 ) -> list[dict[str, Any]]:
-    """Retrieve episodes with BM25 + embedding hybrid scoring.
-
-    Each result includes a ``retrieval`` object containing the final score and
-    all score components for evaluation and debugging. The persisted memory is
-    never mutated.
-    """
+    """Return top-k episodes using custom BLAKE2 character n-gram embeddings."""
     if not isinstance(question, str) or not question.strip():
         raise ValueError("question must be a non-empty string")
     if top_k <= 0:
@@ -93,76 +54,36 @@ def retrieve_episodes(
     if min_relevance_score < 0.0:
         raise ValueError("min_relevance_score must be non-negative")
 
-    records = list(episodes if episodes is not None else _read_episodes(path))
+    records = list(episodes if episodes is not None else read_episodes(path))
     records = _filter_episodes(records, meeting_id, speaker, start_time, end_time)
     if not records:
         return []
 
     query_text = _expand_query(question)
     documents = [_index_text(episode) for episode in records]
-    keyword_scores = _normalized_bm25_scores(query_text, documents)
-
+    keyword_scores = _normalized_keyword_scores(query_text, documents)
     backend = embedding_backend or _default_embedding_backend()
     vectors = backend.encode([query_text, *documents])
     if len(vectors) != len(documents) + 1:
         raise ValueError("embedding backend returned an unexpected number of vectors")
-    query_vector = vectors[0]
-    embedding_scores = [max(0.0, _cosine_similarity(query_vector, vector)) for vector in vectors[1:]]
-    recency_scores = _recency_scores(records)
+    embedding_scores = [max(0.0, _cosine_similarity(vectors[0], vector)) for vector in vectors[1:]]
 
     ranked: list[tuple[float, dict[str, Any]]] = []
     for index, episode in enumerate(records):
-        importance = _unit_score(episode.get("importance", 0.5), "importance")
-        overlap_penalty = _overlap_penalty(episode)
-        relevance_score = (
-            EMBEDDING_WEIGHT * embedding_scores[index]
-            + KEYWORD_WEIGHT * keyword_scores[index]
-        )
-        final_score = (
-            relevance_score
-            + IMPORTANCE_WEIGHT * importance
-            + RECENCY_WEIGHT * recency_scores[index]
-            - OVERLAP_PENALTY_WEIGHT * overlap_penalty
-        )
+        final_score = EMBEDDING_WEIGHT * embedding_scores[index] + KEYWORD_WEIGHT * keyword_scores[index]
         result = dict(episode)
         result["retrieval"] = {
             "final_score": round(final_score, 6),
-            "relevance_score": round(relevance_score, 6),
+            "relevance_score": round(final_score, 6),
             "embedding_similarity": round(embedding_scores[index], 6),
             "keyword_score": round(keyword_scores[index], 6),
-            "importance": round(importance, 6),
-            "recency": round(recency_scores[index], 6),
-            "overlap_penalty": round(overlap_penalty, 6),
             "embedding_backend": type(backend).__name__,
         }
-        if relevance_score >= min_relevance_score and final_score >= min_score:
+        if final_score >= min_score and final_score >= min_relevance_score:
             ranked.append((final_score, result))
 
-    ranked.sort(
-        key=lambda item: (
-            item[0],
-            item[1]["retrieval"]["keyword_score"],
-            item[1].get("importance", 0.0),
-            item[1].get("memory_timestamp", ""),
-        ),
-        reverse=True,
-    )
+    ranked.sort(key=lambda item: (item[0], item[1]["retrieval"]["keyword_score"]), reverse=True)
     return [episode for _, episode in ranked[:top_k]]
-
-
-@lru_cache(maxsize=2)
-def _load_sentence_transformer(model_name: str) -> Any:
-    from sentence_transformers import SentenceTransformer
-
-    return SentenceTransformer(model_name)
-
-
-def _default_embedding_backend() -> EmbeddingBackend:
-    try:
-        return SentenceTransformerEmbeddingBackend()
-    except (ImportError, OSError) as exc:
-        logger.info("sentence-transformers unavailable; using hashing embeddings: %s", exc)
-        return HashingEmbeddingBackend()
 
 
 def _filter_episodes(
@@ -190,6 +111,11 @@ def _filter_episodes(
     return filtered
 
 
+def _default_embedding_backend() -> HashingEmbeddingBackend:
+    """Return the project's dependency-free BLAKE2 hash embedding backend."""
+    return HashingEmbeddingBackend()
+
+
 def _index_text(episode: dict[str, Any]) -> str:
     values: list[str] = []
     for field in INDEX_FIELDS:
@@ -201,35 +127,25 @@ def _index_text(episode: dict[str, Any]) -> str:
     return " ".join(values)
 
 
-def _normalized_bm25_scores(query: str, documents: list[str]) -> list[float]:
-    tokenized_documents = [_tokenize(document) for document in documents]
+def _normalized_keyword_scores(query: str, documents: list[str]) -> list[float]:
     query_tokens = _tokenize(query)
-    if not query_tokens or not tokenized_documents:
+    if not query_tokens:
         return [0.0] * len(documents)
-
-    document_frequency: Counter[str] = Counter()
-    for tokens in tokenized_documents:
-        document_frequency.update(set(tokens))
-    average_length = sum(len(tokens) for tokens in tokenized_documents) / len(tokenized_documents)
-    k1 = 1.5
-    b = 0.75
     scores: list[float] = []
-    for tokens in tokenized_documents:
-        frequencies = Counter(tokens)
-        score = 0.0
-        for term in query_tokens:
-            frequency = frequencies.get(term, 0)
-            if frequency == 0:
-                continue
-            df = document_frequency[term]
-            inverse_document_frequency = math.log(1.0 + (len(documents) - df + 0.5) / (df + 0.5))
-            denominator = frequency + k1 * (
-                1.0 - b + b * len(tokens) / max(average_length, 1.0)
-            )
-            score += inverse_document_frequency * frequency * (k1 + 1.0) / denominator
-        scores.append(score)
+    for document in documents:
+        counts = Counter(_tokenize(document))
+        scores.append(sum(counts[token] for token in query_tokens))
     maximum = max(scores, default=0.0)
-    return [score / maximum if maximum > 0.0 else 0.0 for score in scores]
+    return [score / maximum if maximum else 0.0 for score in scores]
+
+
+def _expand_query(question: str) -> str:
+    terms = [question]
+    lowered = question.lower()
+    for trigger, aliases in QUERY_ALIASES.items():
+        if trigger in lowered:
+            terms.extend(aliases)
+    return " ".join(terms)
 
 
 def _tokenize(text: str) -> list[str]:
@@ -243,82 +159,15 @@ def _tokenize(text: str) -> list[str]:
     return latin_tokens + cjk_tokens
 
 
-def _expand_query(question: str) -> str:
-    expanded = [question]
-    lowered = question.lower()
-    for trigger, terms in QUERY_EXPANSIONS.items():
-        if trigger in lowered:
-            expanded.extend(terms)
-    return " ".join(expanded)
-
-
-def _recency_scores(episodes: list[dict[str, Any]]) -> list[float]:
-    timestamps = [_parse_timestamp(episode.get("memory_timestamp")) for episode in episodes]
-    valid = [value for value in timestamps if value is not None]
-    if len(valid) >= 2:
-        oldest = min(valid)
-        newest = max(valid)
-        span = max((newest - oldest).total_seconds(), 1.0)
-        return [
-            (value - oldest).total_seconds() / span if value is not None else 0.0
-            for value in timestamps
-        ]
-    if len(episodes) == 1:
-        return [1.0]
-    denominator = max(len(episodes) - 1, 1)
-    return [index / denominator for index in range(len(episodes))]
-
-
-def _overlap_penalty(episode: dict[str, Any]) -> float:
-    overlap_score = _unit_score(episode.get("overlap_score", 0.0), "overlap_score")
-    if overlap_score <= 0.6 or episode.get("event_type") == "uncertainty":
-        return 0.0
-    return min(1.0, (overlap_score - 0.6) / 0.4)
-
-
-def _parse_timestamp(value: Any) -> datetime | None:
-    if not isinstance(value, str) or not value.strip():
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
-
-
-def _cosine_similarity(left: Sequence[float], right: Sequence[float]) -> float:
+def _cosine_similarity(left: list[float], right: list[float]) -> float:
     if len(left) != len(right):
-        raise ValueError("embedding vectors must have the same dimensions")
+        raise ValueError("embedding vectors must have the same length")
+    dot = sum(a * b for a, b in zip(left, right))
     left_norm = math.sqrt(sum(value * value for value in left))
     right_norm = math.sqrt(sum(value * value for value in right))
-    if left_norm == 0.0 or right_norm == 0.0:
+    if not left_norm or not right_norm:
         return 0.0
-    return sum(a * b for a, b in zip(left, right)) / (left_norm * right_norm)
+    return dot / (left_norm * right_norm)
 
 
-def _unit_score(value: Any, name: str) -> float:
-    score = float(value)
-    if not 0.0 <= score <= 1.0:
-        raise ValueError(f"episode.{name} must be between 0.0 and 1.0")
-    return score
-
-
-def _read_episodes(path: str | Path) -> list[dict[str, Any]]:
-    if not Path(path).exists():
-        return []
-    raw = Path(path).read_text(encoding="utf-8").strip()
-    if not raw:
-        return []
-    if raw.startswith("["):
-        return read_episodes(path)
-    return [json.loads(line) for line in raw.splitlines() if line.strip()]
-
-
-__all__ = [
-    "EmbeddingBackend",
-    "HashingEmbeddingBackend",
-    "SentenceTransformerEmbeddingBackend",
-    "retrieve_episodes",
-]
+__all__ = ["EmbeddingBackend", "HashingEmbeddingBackend", "retrieve_episodes"]

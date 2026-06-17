@@ -155,7 +155,7 @@ def build_app():
     try:
         import gradio as gr
     except ImportError as exc:  # pragma: no cover - optional demo dependency
-        raise ImportError("Install demo dependencies with `pip install -r requirements-demo.txt`.") from exc
+        raise ImportError("Install dependencies with `pip install -r requirements.txt`.") from exc
 
     def run(audio_path: str | None, meeting_id: str, asr_backend: str, gemma_backend: str, gemma_model: str):
         try:

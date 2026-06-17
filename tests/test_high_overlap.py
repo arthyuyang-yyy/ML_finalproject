@@ -6,6 +6,8 @@ import numpy as np
 
 from src.candidates.generator import generate_high_overlap_candidates
 from src.high_overlap import HIGH_OVERLAP_PATH, HIGH_OVERLAP_SPEAKER, process_high_overlap_segments
+from src.llm.gemma_client import GemmaClient
+from src.llm.resolver import resolve_high_overlap_segment
 
 
 class CandidateGeneratorTests(unittest.TestCase):
@@ -47,6 +49,43 @@ class HighOverlapPathTests(unittest.TestCase):
         self.assertEqual(segment["speaker_confidence"], 0.35)
         self.assertGreaterEqual(len(segment["candidates"]), 2)
         self.assertIn("speaker attribution is uncertain", segment["uncertainty_note"])
+
+    def test_resolver_fills_high_overlap_transcript_from_llm(self) -> None:
+        segment = {
+            "meeting_id": "meeting_001",
+            "segment_id": "m1_seg_009",
+            "speaker": "MIXED",
+            "start_time": 0.0,
+            "end_time": 6.0,
+            "text": "",
+            "overlap_score": 0.78,
+            "processing_path": HIGH_OVERLAP_PATH,
+            "asr_confidence": 0.54,
+            "speaker_confidence": 0.35,
+            "candidates": [
+                {
+                    "candidate_id": "m1_seg_009_c1",
+                    "speaker": "SPEAKER_01",
+                    "text": "We should test WhisperX first.",
+                    "confidence": 0.62,
+                    "uncertainty_note": "High-overlap segment.",
+                }
+            ],
+            "uncertainty_note": "High-overlap segment; speaker attribution is uncertain.",
+        }
+        client = GemmaClient(lambda _prompt: {
+            "speaker": "SPEAKER_01",
+            "text": "We should test WhisperX first.",
+            "confidence": 0.72,
+            "decision_reason": "Candidate 1 best matches the local context.",
+        })
+
+        resolved = resolve_high_overlap_segment(segment, client=client)
+
+        self.assertEqual(resolved["speaker"], "SPEAKER_01")
+        self.assertEqual(resolved["text"], "We should test WhisperX first.")
+        self.assertEqual(resolved["source"], "llm_resolved")
+        self.assertIn("Candidate 1", resolved["decision_reason"])
 
 
 if __name__ == "__main__":

@@ -60,9 +60,11 @@ class EvidenceSegment(TypedDict):
     language: str
     candidates: list[Candidate]
     uncertainty_note: str
+    source: NotRequired[str]
+    decision_reason: NotRequired[str]
 
 
-EVIDENCE_SEGMENT_FIELDS = tuple(EvidenceSegment.__annotations__)
+EVIDENCE_SEGMENT_FIELDS = tuple(REQUIRED_SEGMENT_FIELDS)
 
 
 def _type_name(expected_type: Any) -> str:

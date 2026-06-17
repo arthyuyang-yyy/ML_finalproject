@@ -199,8 +199,10 @@ class PipelineTests(unittest.TestCase):
             self.assertGreaterEqual(len(high_overlap), 1)
             segment = high_overlap[0]
             self.assertEqual(segment["speaker"], "MIXED")
-            self.assertEqual(segment["text"], "")
+            self.assertTrue(segment["text"].strip())
             self.assertEqual(segment["processing_path"], "high_overlap_candidate")
+            self.assertEqual(segment["source"], "fallback_resolved")
+            self.assertTrue(segment["decision_reason"].strip())
             self.assertGreaterEqual(len(segment["candidates"]), 1)
             self.assertIn("candidate_id", segment["candidates"][0])
             self.assertIn("decode_config", segment["candidates"][0])

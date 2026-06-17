@@ -1,16 +1,22 @@
-# Lightweight, pinned dependencies added as baseline implementations are introduced.
+# Unified project dependencies.
 
-# Core numerics for audio preprocessing and the energy-based VAD baseline.
+# Core runtime
 numpy>=1.26,<3
-
-# Audio backend used by preprocessing, clipping, and the lightweight pipeline.
 soundfile>=0.12
+scipy>=1.11
 
-# Optional high-quality resampler used by preprocessing.resample. The code falls
-# back to linear interpolation when SciPy is unavailable.
-# scipy>=1.11
+# Demo UI
+gradio>=5.0,<6
 
-# Optional ASR backends used by src.asr adapters (loaded lazily). Not required
-# for the unit tests, which use the dependency-free MockASRAdapter.
-# openai-whisper>=20231117   # WhisperAdapter (multilingual / English)
-# funasr>=1.0                # FunASRAdapter / Paraformer (strong for Chinese)
+# Development and checks
+pytest>=8
+ruff>=0.5
+mypy>=1
+
+# Optional production model backends. The code imports these lazily, and model
+# weights are downloaded separately by each backend at runtime.
+openai-whisper>=20231117
+faster-whisper>=1.0
+whisperx>=3.1
+pyannote.audio>=3.1
+funasr>=1.0

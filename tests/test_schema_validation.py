@@ -117,10 +117,12 @@ class SegmentValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "must not contain candidates"):
             validate_metadata_segment(record)
 
-    def test_high_overlap_requires_mixed_speaker_and_empty_text(self) -> None:
+    def test_resolved_high_overlap_allows_speaker_and_text(self) -> None:
         record = _valid_low_overlap()
         record.update({
             "processing_path": "high_overlap_candidate",
+            "speaker": "SPEAKER_00",
+            "text": "resolved transcript",
             "candidates": [{
                 "candidate_id": "c1",
                 "speaker": "SPEAKER_00",
@@ -129,9 +131,10 @@ class SegmentValidationTests(unittest.TestCase):
                 "uncertainty_note": "overlap",
             }],
             "uncertainty_note": "overlap",
+            "source": "llm_resolved",
+            "decision_reason": "Candidate 1 is most consistent.",
         })
-        with self.assertRaisesRegex(ValueError, "speaker='MIXED'"):
-            validate_metadata_segment(record)
+        self.assertEqual(validate_metadata_segment(record), record)
 
     def test_meeting_rejects_duplicate_evidence_ids(self) -> None:
         first = _valid_low_overlap()

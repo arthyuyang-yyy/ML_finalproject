@@ -31,6 +31,8 @@ def build_metadata_segment(
     source_audio_path: str = "",
     language: str = "und",
     route_reason: str = "",
+    source: str = "",
+    decision_reason: str = "",
 ) -> dict[str, Any]:
     """Build and validate one canonical evidence segment."""
     normalized_candidates = _normalize_candidates(candidates or [], segment_id, uncertainty_note)
@@ -53,6 +55,10 @@ def build_metadata_segment(
         "candidates": normalized_candidates,
         "uncertainty_note": str(uncertainty_note),
     }
+    if source:
+        record["source"] = str(source)
+    if decision_reason:
+        record["decision_reason"] = str(decision_reason)
     return validate_metadata_segment(record)
 
 
@@ -153,6 +159,8 @@ def _build_from_processed_segment(
         audio_clip_path=str(segment.get("audio_clip_path", "")),
         source_audio_path=str(segment.get("source_audio_path") or source_audio_path),
         language=str(segment.get("language") or language),
+        source=str(segment.get("source", "")),
+        decision_reason=str(segment.get("decision_reason", "")),
     )
 
 

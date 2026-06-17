@@ -10,6 +10,7 @@ from src.evidence.builder import build_evidence_segments
 from src.high_overlap import process_high_overlap_segments
 from src.llm.event_extractor import extract_meeting_events
 from src.llm.gemma_client import GemmaClient, create_gemma_client
+from src.llm.resolver import resolve_high_overlap_segments
 from src.low_overlap import process_low_overlap_segments
 from src.memory.episodic_store import build_episodes, upsert_episodes
 from src.overlap.detector import estimate_segment_overlap_scores
@@ -85,6 +86,7 @@ def run_meeting_pipeline(
         language=cfg.language,
         diarization_turns=diarization_turns,
     )
+    high_overlap_processed = resolve_high_overlap_segments(high_overlap_processed, client=llm_client)
     evidence_segments = build_evidence_segments(
         low_overlap_processed,
         high_overlap_processed,
@@ -103,8 +105,14 @@ def run_meeting_pipeline(
         segment for segment in evidence_segments if segment["processing_path"] == "high_overlap_candidate"
     ]
 
-    meeting_events = extract_meeting_events(evidence_segments, client=llm_client)
-    episodic_memory = build_episodes(meeting_events, evidence_segments)
+    meeting_events: dict[str, Any]
+    episodic_memory: list[dict[str, Any]]
+    if evidence_segments:
+        meeting_events = extract_meeting_events(evidence_segments, client=llm_client)
+        episodic_memory = build_episodes(meeting_events, evidence_segments)
+    else:
+        meeting_events = {"meeting_id": meeting_id, "meeting_summary": "", "events": []}
+        episodic_memory = []
 
     write_json(paths["low_overlap_segments"], low_overlap_segments)
     write_json(paths["high_overlap_candidates"], high_overlap_segments)

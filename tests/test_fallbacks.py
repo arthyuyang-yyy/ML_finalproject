@@ -2,7 +2,7 @@
 
 These tests guarantee that the lightweight / no-model pipeline produces valid,
 schema-compliant output without whisper, pyannote, faster-whisper, Gemma, or
-sentence-transformers installed.
+an external embedding model installed.
 """
 
 import tempfile

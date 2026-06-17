@@ -18,6 +18,10 @@ venv/
 # Large input data and generated artifacts
 data/raw_audio/*
 data/processed_audio/*
+data/external/
+data/manifests/*.jsonl
+local_results/
+models/
 outputs/*
 
 # Audio and model files
@@ -34,5 +38,6 @@ outputs/*
 # Keep empty research directories visible in Git
 !data/raw_audio/.gitkeep
 !data/processed_audio/.gitkeep
+!data/manifests/.gitkeep
 !outputs/**/
 !outputs/**/.gitkeep
