@@ -17,7 +17,18 @@ from scripts.prepare_alimeeting import (
     parse_textgrid,
     prepare_root,
     textgrid_to_turns,
+    validate_record,
 )
+
+
+def _record(turns, overlap_seconds=0.0):
+    return {
+        "meeting_id": "M",
+        "num_speakers": len({t["speaker"] for t in turns}),
+        "turns": turns,
+        "overlap_regions": [],
+        "overlap_seconds": overlap_seconds,
+    }
 
 
 def make_textgrid(tiers: dict[str, list[tuple[float, float, str]]], xmax: float) -> str:
@@ -164,6 +175,33 @@ class PrepareRootTests(unittest.TestCase):
                 (root / sub / "R0001_M0001.TextGrid").write_text(text, encoding="utf-8")
             with self.assertRaises(ValueError):
                 prepare_root(root, root / "out")
+
+
+class ValidateRecordTests(unittest.TestCase):
+    def test_well_formed_record_passes(self) -> None:
+        turns = [
+            {"speaker": "A", "start_time": 0.0, "end_time": 2.0},
+            {"speaker": "B", "start_time": 1.0, "end_time": 3.0},
+        ]
+        validate_record(_record(turns, overlap_seconds=1.0))  # does not raise
+
+    def test_empty_turns_raises(self) -> None:
+        with self.assertRaisesRegex(ValueError, "no speaker turns"):
+            validate_record(_record([]))
+
+    def test_non_positive_turn_duration_raises(self) -> None:
+        turns = [{"speaker": "A", "start_time": 2.0, "end_time": 2.0}]
+        with self.assertRaisesRegex(ValueError, "non-positive turn duration"):
+            validate_record(_record(turns))
+
+    def test_overlap_exceeding_total_speech_raises(self) -> None:
+        turns = [{"speaker": "A", "start_time": 0.0, "end_time": 2.0}]
+        with self.assertRaisesRegex(ValueError, "outside"):
+            validate_record(_record(turns, overlap_seconds=5.0))
+
+    def test_convert_meeting_output_is_valid(self) -> None:
+        text = make_textgrid({"A": [(0.0, 2.0, "x")], "B": [(1.0, 1.5, "y")]}, xmax=2.0)
+        validate_record(convert_meeting(text, "M0"))  # does not raise
 
 
 if __name__ == "__main__":
