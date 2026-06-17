@@ -24,6 +24,25 @@ class CandidateGeneratorTests(unittest.TestCase):
         self.assertIn("decode_config", candidates[0])
         self.assertIn("High-overlap segment", candidates[0]["uncertainty_note"])
 
+    def test_resolver_accepts_generated_candidate_shape(self) -> None:
+        segment = {
+            "segment_id": "m1_seg_009",
+            "speaker": "MIXED",
+            "text": "",
+            "candidates": generate_high_overlap_candidates(
+                {"segment_id": "m1_seg_009", "text": ""},
+                samples=np.ones(16000, dtype=np.float32),
+                sample_rate=16000,
+            ),
+        }
+
+        resolved = resolve_high_overlap_segment(segment)
+
+        self.assertEqual(resolved["speaker"], "MIXED")
+        self.assertTrue(resolved["text"].strip())
+        self.assertEqual(resolved["source"], "fallback_resolved")
+        self.assertIn("decision_reason", resolved)
+
 
 class HighOverlapPathTests(unittest.TestCase):
     def _high_overlap_segment(self) -> dict:

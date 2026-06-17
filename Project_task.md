@@ -248,7 +248,7 @@ memory/episodic_memory.json
 
 该 embedding 是当前项目保留的轻量特色能力，不依赖外部 embedding 模型。
 
-检索当前刻意保持为 MVP 版本：不使用 transformer embedding，不加入 recency decay、importance prior 或复杂 reranker。这样可以保证结果稳定、依赖轻、测试可重复；代价是排序不会捕捉深层语义相似度、会议时序偏好或事件重要性偏好。后续只有在有标注评估集后再扩展这些信号。
+检索当前刻意保持为 MVP 版本：优先保证 deterministic、低依赖和可测试，不使用 transformer embedding，不加入 recency decay、importance prior 或复杂 reranker。默认过滤规则同样简单：没有 keyword 命中且 hash embedding 相似度低于 `0.35` 的 episode 会被丢弃；有 keyword 命中的 episode 即使 embedding 相似度低也会保留并进入最终分数比较。代价是排序不会捕捉深层语义相似度、会议时序偏好或事件重要性偏好。后续只有在有标注评估集后再扩展这些信号。
 
 ### 4.7 QA
 
@@ -316,7 +316,7 @@ python app.py
 当前已通过：
 
 ```text
-490 passed, 6 skipped, 2 warnings, 7 subtests passed
+491 passed, 6 skipped, 2 warnings, 7 subtests passed
 ruff: All checks passed
 ```
 
