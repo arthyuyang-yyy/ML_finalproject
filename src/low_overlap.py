@@ -22,7 +22,12 @@ def process_low_overlap_segments(
     if not segments:
         return []
 
-    speaker_segments = assign_speakers_to_segments(segments, diarization_turns=diarization_turns)
+    speaker_segments = assign_speakers_to_segments(
+        segments,
+        diarization_turns=diarization_turns,
+        samples=samples,
+        sample_rate=sample_rate,
+    )
     transcribed = transcribe_segments(samples, speaker_segments, adapter=asr_adapter, sample_rate=sample_rate)
     return [
         {

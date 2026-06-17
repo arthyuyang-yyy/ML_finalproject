@@ -1,0 +1,89 @@
+{
+  "description": "Seed manually-authored evaluation set for the evidence-support, hallucination, uncertainty-preservation, and candidate-usefulness experiment. Replace/extend with real human annotations of pipeline outputs before reporting final numbers. Each QA item pairs the system prediction with its gold reference; source_evidence_ids lists every evidence ID that actually exists in the source meeting.",
+  "source_evidence_ids": [
+    "ev_001", "ev_002", "ev_003", "ev_004", "ev_005",
+    "ev_006", "ev_007", "ev_008", "ev_009", "ev_010"
+  ],
+  "evidence_texts": {
+    "ev_001": "we decided to postpone the launch date to next quarter",
+    "ev_002": "Alice will be the owner of the migration task",
+    "ev_003": "the agreed budget is fifty thousand dollars",
+    "ev_004": "we are still discussing the headcount plan and have not reached a decision",
+    "ev_005": "someone raised a security concern during the overlapping discussion",
+    "ev_006": "Bob voiced a strong objection over the proposed timeline",
+    "ev_007": "the team agreed to revisit this topic in the next meeting",
+    "ev_008": "Charlie confirmed that the infrastructure is ready",
+    "ev_009": "there was a brief mention of the old database schema",
+    "ev_010": "the deadline might be moved depending on the test results"
+  },
+  "qa_items": [
+    {
+      "id": "q1_correct_certain",
+      "question": "What did the team decide about the launch date?",
+      "prediction": {"evidence_ids": ["ev_001"], "confidence": "high", "insufficient_evidence": false, "text": "The team decided to postpone the launch date to next quarter."},
+      "reference": {"evidence_ids": ["ev_001"], "uncertain": false, "text": "The team decided to postpone the launch date to next quarter."}
+    },
+    {
+      "id": "q2_over_citation",
+      "question": "Who owns the migration task?",
+      "prediction": {"evidence_ids": ["ev_002", "ev_009"], "confidence": "medium", "insufficient_evidence": false, "text": "Alice owns the migration task."},
+      "reference": {"evidence_ids": ["ev_002"], "uncertain": false, "text": "Alice owns the migration task."}
+    },
+    {
+      "id": "q3_hallucinated_citation",
+      "question": "What was the agreed budget?",
+      "prediction": {"evidence_ids": ["ev_999"], "confidence": "high", "insufficient_evidence": false, "text": "The agreed budget is fifty thousand dollars."},
+      "reference": {"evidence_ids": ["ev_003"], "uncertain": false, "text": "The agreed budget is fifty thousand dollars."}
+    },
+    {
+      "id": "q4_correct_abstention",
+      "question": "Did anyone mention the legal review outcome?",
+      "prediction": {"evidence_ids": [], "confidence": "low", "insufficient_evidence": true},
+      "reference": {"evidence_ids": [], "uncertain": true}
+    },
+    {
+      "id": "q5_overclaim_on_unanswerable",
+      "question": "What is the final headcount plan?",
+      "prediction": {"evidence_ids": ["ev_004"], "confidence": "high", "insufficient_evidence": false, "text": "The final headcount plan is to hire five engineers."},
+      "reference": {"evidence_ids": [], "uncertain": true}
+    },
+    {
+      "id": "q6_uncertain_preserved",
+      "question": "Who raised the security concern during the overlapping discussion?",
+      "prediction": {"evidence_ids": ["ev_005"], "confidence": "low", "insufficient_evidence": false, "uncertainty_note": "speaker attribution uncertain in high-overlap segment", "text": "A security concern was raised during the overlapping discussion."},
+      "reference": {"evidence_ids": ["ev_005"], "uncertain": true, "text": "A security concern was raised during the overlapping discussion."}
+    },
+    {
+      "id": "q7_uncertain_collapsed",
+      "question": "What objection was voiced over the timeline?",
+      "prediction": {"evidence_ids": ["ev_006"], "confidence": "high", "insufficient_evidence": false, "text": "An objection was voiced over the timeline."},
+      "reference": {"evidence_ids": ["ev_006"], "uncertain": true, "text": "An objection was voiced over the timeline."}
+    }
+  ],
+  "candidate_segments": [
+    {
+      "id": "seg_high_overlap_1",
+      "segment": {
+        "candidates": [
+          {"text": "the budget is approved", "speaker": "SPEAKER_00", "confidence": 0.8},
+          {"text": "the project is approved", "speaker": "SPEAKER_01", "confidence": 0.6}
+        ]
+      },
+      "reference": {"text": "the project is approved", "speaker": "SPEAKER_01"}
+    },
+    {
+      "id": "seg_high_overlap_2",
+      "segment": {
+        "candidates": [
+          {"text": "we ship next friday", "speaker": "SPEAKER_02", "confidence": 0.7}
+        ]
+      },
+      "reference": {"text": "we ship next friday", "speaker": "SPEAKER_02"}
+    },
+    {
+      "id": "seg_high_overlap_3_no_candidates",
+      "segment": {"candidates": []},
+      "reference": {"text": "let us revisit this offline", "speaker": "SPEAKER_03"}
+    }
+  ]
+}

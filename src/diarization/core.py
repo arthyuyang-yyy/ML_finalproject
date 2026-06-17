@@ -5,6 +5,7 @@ import os
 from functools import lru_cache
 from typing import Any
 
+from src.errors import BackendExecutionError, BackendUnavailableError
 from src.fallbacks.diarization import cluster_speakers
 
 DEFAULT_SPEAKER_CONFIDENCE = 0.78
@@ -16,23 +17,52 @@ logger = logging.getLogger(__name__)
 
 
 def diarize_audio(audio_path: str) -> list[dict]:
-    """Return timestamped speaker labels and attribution confidence."""
+    """Return timestamped speaker labels and attribution confidence.
+
+    pyannote remains authoritative when configured. Otherwise the audio is
+    segmented and run through unsupervised speaker-embedding clustering, so the
+    public Step 5 interface recovers real speakers in the lightweight mode
+    instead of always returning placeholder labels.
+    """
     pyannote_turns = diarize_with_pyannote(audio_path)
     if pyannote_turns:
         return pyannote_turns
 
-    from ..audio.preprocess import segment_audio
-    return cluster_speakers(segment_audio(audio_path))
+    from ..audio.preprocess import load_audio, segment_waveform
+    from .embedding_cluster import cluster_segments
+
+    samples, sample_rate = load_audio(audio_path)
+    segments = segment_waveform(samples, sample_rate)
+    if not segments:
+        return []
+    return cluster_segments(samples, segments, sample_rate)
 
 
 def assign_speakers_to_segments(
     segments: list[dict[str, Any]],
     diarization_turns: list[dict[str, Any]] | None = None,
+    *,
+    samples: Any | None = None,
+    sample_rate: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Attach speaker labels and confidence to segment timestamps."""
+    """Attach speaker labels and confidence to segment timestamps.
+
+    When pyannote diarization turns are available they remain authoritative.
+    Otherwise, if the waveform is supplied, speakers are recovered by
+    unsupervised speaker-embedding clustering (which also attaches a
+    ``cluster_similarity_distribution``); failing that, the deterministic
+    no-model fallback assigns placeholder labels.
+    """
     if not segments:
         return []
     if not diarization_turns:
+        if samples is not None and len(samples) > 0:
+            from .embedding_cluster import cluster_segments
+
+            from ..audio.preprocess import TARGET_SAMPLE_RATE
+
+            rate = sample_rate or TARGET_SAMPLE_RATE
+            return cluster_segments(samples, segments, rate)
         return cluster_speakers(segments)
 
     assigned: list[dict[str, Any]] = []
@@ -63,23 +93,28 @@ def diarize_with_pyannote(
     model_name: str = PYANNOTE_DIARIZATION_MODEL,
     auth_token: str | None = None,
 ) -> list[dict[str, Any]] | None:
-    """Return pyannote speaker turns, or ``None`` if the backend is unavailable."""
+    """Return pyannote speaker turns when configured.
+
+    A missing token means the optional backend is disabled and returns
+    ``None``. Once configured, dependency, model-loading, and inference
+    failures are surfaced because diarization is then a required service.
+    """
     token = auth_token or os.environ.get("HUGGINGFACE_TOKEN") or os.environ.get("HF_TOKEN")
     if not token:
         logger.info("pyannote diarization disabled because no Hugging Face token is configured")
         return None
 
     try:
-        pipeline = _load_pyannote_pipeline(model_name, token)
-    except ImportError:
-        logger.warning("pyannote diarization unavailable because pyannote.audio is not installed")
-        return None
-
-    try:
+        pipeline = load_pyannote_pipeline(model_name, token)
         output = pipeline(audio_path)
+    except ImportError as exc:
+        raise BackendUnavailableError(
+            "pyannote diarization is configured but pyannote.audio is unavailable"
+        ) from exc
     except Exception as exc:
-        logger.warning("pyannote diarization failed; using deterministic fallback: %s", exc)
-        return None
+        raise BackendExecutionError(
+            f"pyannote diarization failed for model '{model_name}'"
+        ) from exc
 
     turns: list[dict[str, Any]] = []
     if hasattr(output, "itertracks"):
@@ -94,7 +129,7 @@ def diarize_with_pyannote(
 
 
 @lru_cache(maxsize=4)
-def _load_pyannote_pipeline(model_name: str, token: str) -> Any:
+def load_pyannote_pipeline(model_name: str, token: str) -> Any:
     """Load each pyannote model once per process."""
     from pyannote.audio import Pipeline
 

@@ -6,11 +6,13 @@ speech segments. It combines the old pipeline-oriented implementation with the
 newer audio-package location and higher-quality resampling path.
 """
 
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 
 TARGET_SAMPLE_RATE = 16000
+SUPPORTED_AUDIO_HINT = "WAV, FLAC, OGG, MP3, M4A, AAC, MP4, or WMA"
 
 
 def load_audio(
@@ -18,8 +20,32 @@ def load_audio(
     target_sample_rate: int = TARGET_SAMPLE_RATE,
     normalize: bool = True,
     target_peak: float = 0.97,
+    denoise: bool = False,
+    denoise_strength: float = 0.5,
 ) -> tuple[np.ndarray, int]:
-    """Load an audio file as mono float32 samples resampled to the target rate."""
+    """Decode an audio file, then return normalized mono float32 samples.
+
+    ``soundfile`` handles native formats first. Other containers/codecs such as
+    M4A, AAC, MP4, and WMA fall back to PyAV. PyAV preserves the native sample
+    rate; mono conversion and resampling remain here to avoid double resampling.
+    """
+    path = Path(audio_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"audio file does not exist or is not a file: {audio_path}")
+    samples, sample_rate = _decode_audio(path)
+    samples = to_mono(samples)
+    if denoise:
+        samples = reduce_stationary_noise(samples, sample_rate, strength=denoise_strength)
+    if sample_rate != target_sample_rate:
+        samples = resample(samples, sample_rate, target_sample_rate)
+        sample_rate = target_sample_rate
+    if normalize:
+        samples = peak_normalize(samples, target_peak=target_peak)
+    return samples, sample_rate
+
+
+def _decode_audio(audio_path: Path) -> tuple[np.ndarray, int]:
+    """Prefer soundfile and fall back to PyAV for compressed/container formats."""
     try:
         import soundfile as sf
     except ImportError as exc:  # pragma: no cover - exercised only without the backend
@@ -28,14 +54,76 @@ def load_audio(
             "install it with `pip install soundfile`."
         ) from exc
 
-    samples, sample_rate = sf.read(audio_path, dtype="float32", always_2d=True)
-    samples = to_mono(samples)
-    if sample_rate != target_sample_rate:
-        samples = resample(samples, sample_rate, target_sample_rate)
-        sample_rate = target_sample_rate
-    if normalize:
-        samples = peak_normalize(samples, target_peak=target_peak)
-    return samples, sample_rate
+    try:
+        samples, sample_rate = sf.read(str(audio_path), dtype="float32", always_2d=True)
+        return np.asarray(samples, dtype=np.float32), int(sample_rate)
+    except (sf.LibsndfileError, RuntimeError):
+        try:
+            return decode_audio_with_pyav(audio_path)
+        except ImportError as exc:
+            raise RuntimeError(
+                f"unable to decode audio file '{audio_path}'. "
+                f"soundfile could not decode '{audio_path.name}', and PyAV is unavailable. "
+                "Install it with `pip install av`, or convert the file to WAV."
+            ) from exc
+        except Exception as exc:
+            raise RuntimeError(
+                f"unable to decode audio file '{audio_path}'. Ensure it contains a valid audio "
+                f"stream in a supported format ({SUPPORTED_AUDIO_HINT})."
+            ) from exc
+
+
+def decode_audio_with_pyav(audio_path: str | Path) -> tuple[np.ndarray, int]:
+    """Demux and decode the first audio stream to native-rate float32 PCM."""
+    try:
+        import av
+    except ImportError as exc:
+        raise ImportError("PyAV is required to decode this audio container") from exc
+
+    chunks: list[np.ndarray] = []
+    with av.open(str(audio_path)) as container:
+        stream = next((item for item in container.streams if item.type == "audio"), None)
+        if stream is None:
+            raise ValueError("input container does not contain an audio stream")
+        sample_rate = int(stream.codec_context.sample_rate or stream.rate or 0)
+        if sample_rate <= 0:
+            raise ValueError("decoded audio stream does not expose a valid sample rate")
+        layout = stream.codec_context.layout
+        layout_name = layout.name if layout is not None else "mono"
+        decoder = av.audio.resampler.AudioResampler(
+            format="fltp",
+            layout=layout_name,
+            rate=sample_rate,
+        )
+        for frame in container.decode(stream):
+            for decoded in decoder.resample(frame):
+                chunks.append(np.asarray(decoded.to_ndarray(), dtype=np.float32))
+        for decoded in decoder.resample(None):
+            chunks.append(np.asarray(decoded.to_ndarray(), dtype=np.float32))
+
+    if not chunks:
+        raise ValueError("decoded audio stream contains no samples")
+    return np.concatenate(chunks, axis=1).T.astype(np.float32), sample_rate
+
+
+def reduce_stationary_noise(samples: np.ndarray, sample_rate: int, strength: float = 0.5) -> np.ndarray:
+    """Optionally reduce stationary noise; disabled by default."""
+    if not 0.0 <= strength <= 1.0:
+        raise ValueError("denoise strength must be in [0, 1]")
+    try:
+        import noisereduce as nr
+    except ImportError as exc:
+        raise ImportError(
+            "denoising is enabled but 'noisereduce' is unavailable; "
+            "install it with `pip install noisereduce` or disable denoising"
+        ) from exc
+    reduced = nr.reduce_noise(
+        y=np.asarray(samples, dtype=np.float32),
+        sr=sample_rate,
+        stationary=True,
+        prop_decrease=strength,
+    )
+    return np.asarray(reduced, dtype=np.float32)
 
 
 def to_mono(samples: np.ndarray) -> np.ndarray:
@@ -164,15 +252,69 @@ def energy_vad(
     return _split_long_regions(regions, max_segment_s, target_segment_s)
 
 
+def silero_vad(
+    samples: np.ndarray,
+    sample_rate: int = TARGET_SAMPLE_RATE,
+    threshold: float = 0.5,
+    min_silence_ms: int = 500,
+    speech_pad_ms: int = 200,
+    max_segment_s: float = 15.0,
+) -> list[tuple[float, float]]:
+    """Detect speech regions with the silero VAD bundled in ``faster-whisper``.
+
+    Unlike :func:`energy_vad`, the speech/non-speech decision comes from a learned
+    model rather than a fraction of the clip's peak energy, so a single loud
+    transient (a door slam or mic bump in a far-field meeting) no longer inflates
+    the threshold and starves the detector. The silero model operates at 16 kHz,
+    which matches the pipeline's target sample rate.
+
+    Requires ``faster-whisper`` (a heavy backend); callers that must stay
+    dependency-free should use :func:`energy_vad`.
+    """
+    try:
+        from faster_whisper.vad import VadOptions, get_speech_timestamps
+    except ImportError as exc:  # pragma: no cover - only without the heavy backend
+        raise ImportError(
+            "silero VAD needs faster-whisper; install it or use method='energy'."
+        ) from exc
+
+    mono = to_mono(samples).astype(np.float32)
+    if mono.size == 0:
+        return []
+    options = VadOptions(
+        threshold=threshold,
+        min_silence_duration_ms=min_silence_ms,
+        speech_pad_ms=speech_pad_ms,
+        max_speech_duration_s=max_segment_s,
+    )
+    timestamps = get_speech_timestamps(mono, options)
+    return [
+        (round(ts["start"] / sample_rate, 3), round(ts["end"] / sample_rate, 3))
+        for ts in timestamps
+    ]
+
+
 def segment_waveform(
     samples: np.ndarray,
     sample_rate: int = TARGET_SAMPLE_RATE,
     meeting_id: str = "meeting",
     segment_id_prefix: str | None = None,
+    method: str = "energy",
     **vad_kwargs: Any,
 ) -> list[dict[str, Any]]:
-    """Run VAD and return lightweight, timestamped speech segments."""
-    regions = energy_vad(samples, sample_rate, **vad_kwargs)
+    """Run VAD and return lightweight, timestamped speech segments.
+
+    ``method="energy"`` (default) uses the dependency-free energy VAD;
+    ``method="silero"`` uses the faster-whisper silero VAD, which is far more
+    robust on far-field meetings whose loud transients break the energy
+    threshold (see :func:`silero_vad`).
+    """
+    if method == "silero":
+        regions = silero_vad(samples, sample_rate, **vad_kwargs)
+    elif method == "energy":
+        regions = energy_vad(samples, sample_rate, **vad_kwargs)
+    else:
+        raise ValueError(f"unknown VAD method '{method}'; choose 'energy' or 'silero'")
     prefix = segment_id_prefix or f"{meeting_id}_seg"
     return [
         {
@@ -197,6 +339,8 @@ def preprocess_audio(
     target_sample_rate: int = TARGET_SAMPLE_RATE,
     target_peak: float = 0.97,
     target_sr: int | None = None,
+    denoise: bool = False,
+    denoise_strength: float = 0.5,
 ) -> tuple[np.ndarray, int]:
     """Load, mono-convert, resample, normalize, and write a float32 WAV file.
 
@@ -218,6 +362,8 @@ def preprocess_audio(
         target_sample_rate=target_sample_rate,
         normalize=True,
         target_peak=target_peak,
+        denoise=denoise,
+        denoise_strength=denoise_strength,
     )
     sf.write(output_path, samples, sample_rate, subtype="FLOAT")
     return samples, sample_rate
@@ -299,11 +445,13 @@ def _split_long_regions(
 
 __all__ = [
     "TARGET_SAMPLE_RATE",
+    "decode_audio_with_pyav",
     "energy_vad",
     "frame_rms",
     "load_audio",
     "peak_normalize",
     "preprocess_audio",
+    "reduce_stationary_noise",
     "resample",
     "resample_linear",
     "segment_audio",

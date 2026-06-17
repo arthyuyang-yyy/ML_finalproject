@@ -112,6 +112,11 @@ class MockASRFallbackTests(unittest.TestCase):
             adapter = get_adapter("auto")
         self.assertEqual(adapter.name, "mock")
 
+    def test_auto_selects_funasr_with_shared_language_configuration(self) -> None:
+        with patch("src.fallbacks.resolve_asr_backend", return_value="funasr"):
+            adapter = get_adapter("auto", language=None)
+        self.assertEqual(adapter.name, "funasr")
+
     def test_mock_adapter_produces_valid_transcript_shape(self) -> None:
         adapter = MockASRAdapter(confidence=0.8, language="en")
         result = adapter.transcribe_array(_tone(1.0), SAMPLE_RATE)
@@ -347,8 +352,12 @@ class EmbeddingFallbackTests(unittest.TestCase):
             self.assertAlmostEqual(norm, 1.0, places=5)
 
     def test_default_backend_falls_back_to_hashing(self) -> None:
-        backend = _default_embedding_backend()
-        self.assertIsInstance(backend, (HashingEmbeddingBackend, object))
+        with patch(
+            "src.memory.retriever.SentenceTransformerEmbeddingBackend",
+            side_effect=ImportError("unavailable"),
+        ):
+            backend = _default_embedding_backend()
+        self.assertIsInstance(backend, HashingEmbeddingBackend)
         vectors = backend.encode(["test"])
         self.assertEqual(len(vectors), 1)
         self.assertGreater(len(vectors[0]), 0)

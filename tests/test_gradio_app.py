@@ -3,11 +3,19 @@
 import unittest
 from unittest.mock import patch
 
+try:  # gradio is an optional demo dependency (requirements-demo.txt), not needed for unit tests
+    import gradio  # noqa: F401
+
+    _HAS_GRADIO = True
+except ImportError:
+    _HAS_GRADIO = False
+
 from src.ui.gradio_app import (
     answer_demo_question,
     build_app,
     build_memory_rows,
     build_timeline_rows,
+    candidate_audio_path,
     candidate_detail,
     prepare_demo_data,
     run_demo_pipeline,
@@ -83,6 +91,13 @@ class GradioAdapterTests(unittest.TestCase):
             "SPEAKER_00: Use Gemma for post-processing.",
         )
 
+    def test_candidate_audio_path_returns_traceable_clip(self) -> None:
+        state = {"evidence_segments": [_low_segment(), _high_segment()]}
+        self.assertEqual(
+            candidate_audio_path("m1_seg_013", state),
+            "outputs/meeting_001/clips/m1_seg_013.wav",
+        )
+
     def test_memory_table_contains_traceable_fields(self) -> None:
         self.assertEqual(
             build_memory_rows([_episode()]),
@@ -115,6 +130,15 @@ class GradioAdapterTests(unittest.TestCase):
         self.assertEqual(rows, [])
         self.assertTrue(result["insufficient_evidence"])
 
+    def test_unrelated_question_is_insufficient(self) -> None:
+        answer, rows, result = answer_demo_question(
+            "who discovered Neptune?",
+            {"episodic_memory": [_episode()]},
+        )
+        self.assertIn("无法确定", answer)
+        self.assertEqual(rows, [])
+        self.assertTrue(result["insufficient_evidence"])
+
     @patch("src.ui.gradio_app.answer_question")
     def test_qa_passes_configured_gemma_client(self, mocked_answer) -> None:
         mocked_answer.return_value = {"answer": "ok", "insufficient_evidence": False}
@@ -132,15 +156,17 @@ class GradioAdapterTests(unittest.TestCase):
         result = run_demo_pipeline("meeting.wav", "meeting_001")
         mocked_run.assert_called_once()
         self.assertEqual(mocked_run.call_args.args, ("meeting.wav", "meeting_001"))
-        self.assertEqual(mocked_run.call_args.kwargs["config"].low_overlap_asr_model, "auto")
+        self.assertEqual(mocked_run.call_args.kwargs["config"].low_overlap_asr_model, "faster-whisper")
         self.assertEqual(result["meeting_id"], "meeting_001")
 
+    @unittest.skipUnless(_HAS_GRADIO, "gradio not installed (optional demo dependency)")
     def test_build_app_has_five_area_components(self) -> None:
         app = build_app()
         config = app.get_config_file()
         labels = {component.get("props", {}).get("label") for component in config["components"]}
         self.assertIn("Meeting audio", labels)
         self.assertIn("High-overlap segment", labels)
+        self.assertIn("High-overlap audio", labels)
         self.assertIn("Candidate detail", labels)
         self.assertIn("Question", labels)
 

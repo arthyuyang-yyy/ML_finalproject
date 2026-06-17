@@ -47,6 +47,7 @@ def prepare_demo_data(result: dict[str, Any]) -> dict[str, Any]:
         "candidate_choices": choices,
         "selected_candidate": choices[0][1] if choices else None,
         "candidate_detail": candidate_detail(choices[0][1], state) if choices else {},
+        "candidate_audio": candidate_audio_path(choices[0][1], state) if choices else None,
         "memory": build_memory_rows(episodic_memory),
     }
 
@@ -105,6 +106,13 @@ def candidate_detail(segment_id: str | None, state: dict[str, Any] | None) -> di
     return {}
 
 
+def candidate_audio_path(segment_id: str | None, state: dict[str, Any] | None) -> str | None:
+    """Return the audio clip associated with one high-overlap segment."""
+    detail = candidate_detail(segment_id, state)
+    path = str(detail.get("audio_clip_path", "")).strip()
+    return path or None
+
+
 def answer_demo_question(
     question: str,
     state: dict[str, Any] | None,
@@ -134,7 +142,7 @@ def answer_demo_question(
 def run_demo_pipeline(
     audio_path: str | None,
     meeting_id: str,
-    asr_backend: str = "auto",
+    asr_backend: str = "faster-whisper",
     gemma_backend: str = "none",
     gemma_model: str = "gemma3:4b",
 ) -> dict[str, Any]:
@@ -173,6 +181,7 @@ def build_app():
                 view["timeline"],
                 gr.Dropdown(choices=view["candidate_choices"], value=selected),
                 view["candidate_detail"],
+                view["candidate_audio"],
                 view["memory"],
                 "",
                 [],
@@ -185,6 +194,7 @@ def build_app():
                 [],
                 gr.Dropdown(choices=[], value=None),
                 {},
+                None,
                 [],
                 "",
                 [],
@@ -211,11 +221,11 @@ def build_app():
                     asr_backend = gr.Dropdown(
                         label="ASR backend",
                         choices=["auto", "whisperx", "faster-whisper", "whisper", "funasr", "mock"],
-                        value="auto",
+                        value="faster-whisper",
                     )
                     gemma_backend = gr.Dropdown(
                         label="Gemma backend",
-                        choices=["none", "ollama"],
+                        choices=["none", "ollama", "openai", "transformers"],
                         value="none",
                     )
                     gemma_model = gr.Textbox(label="Gemma model", value="gemma3:4b")
@@ -240,6 +250,7 @@ def build_app():
                 value=None,
             )
             candidate_json = gr.JSON(label="Candidate detail", value={})
+            candidate_audio = gr.Audio(label="High-overlap audio", type="filepath", interactive=False)
 
         with gr.Group():
             gr.Markdown("## 4. Meeting Memory")
@@ -279,6 +290,7 @@ def build_app():
                 timeline,
                 candidate_selector,
                 candidate_json,
+                candidate_audio,
                 memory_table,
                 answer,
                 retrieval_table,
@@ -286,9 +298,12 @@ def build_app():
             ],
         )
         candidate_selector.change(
-            candidate_detail,
+            lambda segment_id, current_state: (
+                candidate_detail(segment_id, current_state),
+                candidate_audio_path(segment_id, current_state),
+            ),
             inputs=[candidate_selector, state],
-            outputs=candidate_json,
+            outputs=[candidate_json, candidate_audio],
         )
         ask_button.click(
             ask,
@@ -348,6 +363,7 @@ __all__ = [
     "build_app",
     "build_memory_rows",
     "build_timeline_rows",
+    "candidate_audio_path",
     "candidate_detail",
     "launch",
     "prepare_demo_data",

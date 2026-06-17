@@ -5,8 +5,8 @@ class BackendUnavailableError(Exception):
     """A required external dependency or model backend is not installed.
 
     Raised when a package is missing (e.g. ``pyannote.audio``) or a Hugging
-    Face token is not configured.  Callers should catch this and use the
-    corresponding fallback from :mod:`src.fallbacks`.
+    Face model cannot be loaded. Callers may catch this only when an explicit
+    fallback policy is configured.
     """
 
 

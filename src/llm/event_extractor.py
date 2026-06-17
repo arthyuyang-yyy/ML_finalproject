@@ -1,6 +1,7 @@
 """Evidence-grounded structured meeting event extraction."""
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,8 @@ from .gemma_client import GemmaClient
 from .json_repair import parse_or_repair_json
 from .prompts import build_event_extraction_prompt, build_event_repair_prompt
 from src.fallbacks.events import fallback_event_document
+
+logger = logging.getLogger(__name__)
 
 
 def extract_meeting_events(
@@ -41,7 +44,11 @@ def extract_meeting_events(
                     previous_output,
                     previous_error,
                 )
-            raw_output = client.generate_json(prompt)
+            try:
+                raw_output = client.generate_json(prompt)
+            except Exception as exc:
+                logger.warning("Gemma event extraction failed; using deterministic fallback: %s", exc)
+                break
             previous_output = _serialize_output(raw_output)
             try:
                 document = _coerce_document(raw_output)

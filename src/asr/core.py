@@ -33,6 +33,7 @@ from typing import Any
 import numpy as np
 
 from src.audio.preprocess import TARGET_SAMPLE_RATE
+from src.errors import BackendExecutionError, BackendUnavailableError
 from src.utils import validate_score
 
 
@@ -177,7 +178,7 @@ class WhisperXAdapter(ASRAdapter):
 
 
 class FasterWhisperAdapter(ASRAdapter):
-    """faster-whisper recognizer sharing the cached candidate-generation model."""
+    """Primary real-ASR baseline using the cached faster-whisper model."""
 
     name = "faster-whisper"
 
@@ -187,19 +188,46 @@ class FasterWhisperAdapter(ASRAdapter):
         device: str = "cpu",
         compute_type: str = "int8",
         language: str | None = None,
+        beam_size: int = 5,
+        temperature: float = 0.0,
     ) -> None:
         self.model_size = model_size
         self.device = device
         self.compute_type = compute_type
         self.language = language
+        self.beam_size = beam_size
+        self.temperature = temperature
 
     def transcribe_array(self, samples: np.ndarray, sample_rate: int = TARGET_SAMPLE_RATE) -> dict[str, Any]:
         from src.candidates.generator import _load_faster_whisper_model
 
         samples = _ensure_sample_rate(samples, sample_rate)
-        model = _load_faster_whisper_model(self.model_size, self.device, self.compute_type)
-        raw_segments, info = model.transcribe(samples, language=self.language)
-        decoded = list(raw_segments)
+        try:
+            model = _load_faster_whisper_model(self.model_size, self.device, self.compute_type)
+        except ImportError as exc:
+            raise BackendUnavailableError(
+                "faster-whisper ASR is selected but unavailable; "
+                "install it with `pip install -r requirements-asr.txt`"
+            ) from exc
+        except Exception as exc:
+            raise BackendUnavailableError(
+                f"failed to load faster-whisper model '{self.model_size}' "
+                f"on device '{self.device}' with compute type '{self.compute_type}'"
+            ) from exc
+
+        try:
+            raw_segments, info = model.transcribe(
+                samples,
+                language=self.language,
+                beam_size=self.beam_size,
+                temperature=self.temperature,
+                condition_on_previous_text=False,
+            )
+            decoded = list(raw_segments)
+        except Exception as exc:
+            raise BackendExecutionError(
+                f"faster-whisper transcription failed for model '{self.model_size}'"
+            ) from exc
         segments = [
             {
                 "start_time": round(float(segment.start), 3),
@@ -226,7 +254,9 @@ class FunASRAdapter(ASRAdapter):
 
     FunASR does not expose token log-probabilities, so a neutral
     ``default_confidence`` is attached; the cross-engine disagreement signal is
-    what flags Paraformer's uncertain regions downstream.
+    what flags Paraformer's uncertain regions downstream. ``language`` is
+    accepted for the shared adapter interface but is not forwarded to the
+    default Chinese-specific ``paraformer-zh`` model.
     """
 
     name = "funasr"

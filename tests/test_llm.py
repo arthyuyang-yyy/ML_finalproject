@@ -7,7 +7,7 @@ from pathlib import Path
 
 from src.llm.event_extractor import extract_meeting_events, extract_meeting_events_file
 from src.llm.event_validator import validate_meeting_event, validate_meeting_events_document
-from src.llm.gemma_client import GemmaClient
+from src.llm.gemma_client import GemmaClient, run_gemma
 from src.llm.prompts import build_event_extraction_prompt
 
 
@@ -119,6 +119,11 @@ class StaticClient(GemmaClient):
         return self.outputs.pop(0)
 
 
+class FailingClient(GemmaClient):
+    def generate_json(self, prompt: str) -> dict | str:
+        raise ConnectionError("backend unavailable")
+
+
 class EventExtractionTests(unittest.TestCase):
     def test_empty_segments_returns_empty_document(self) -> None:
         self.assertEqual(
@@ -162,6 +167,10 @@ class EventExtractionTests(unittest.TestCase):
         self.assertEqual(len(client.prompts), 2)
         self.assertIn("previous output was invalid", client.prompts[1])
         self.assertEqual(document["events"][0]["event_type"], "decision")
+
+    def test_backend_failure_uses_evidence_only_fallback(self) -> None:
+        document = extract_meeting_events(_make_evidence_segments(), client=FailingClient())
+        self.assertEqual(document["events"][0]["event_type"], "speaker_stance")
 
     def test_final_invalid_event_is_deleted_when_other_events_are_valid(self) -> None:
         invalid = _valid_document()
@@ -260,13 +269,36 @@ class EventValidationTests(unittest.TestCase):
 
 
 class GemmaClientTests(unittest.TestCase):
-    def test_generate_json_raises_without_generator(self) -> None:
-        with self.assertRaisesRegex(ValueError, "no generator"):
-            GemmaClient().generate_json("test prompt")
+    def test_generate_json_returns_fallback_without_generator(self) -> None:
+        result = GemmaClient().generate_json("test prompt")
+        self.assertIsInstance(result, dict)
+        self.assertIn("fallback", str(result.get("uncertainty_note", "")).lower())
 
     def test_configured_generator_is_used(self) -> None:
         client = GemmaClient(generator=lambda prompt: {"prompt": prompt})
         self.assertEqual(client.generate_json("hello"), {"prompt": "hello"})
+
+    def test_run_gemma_returns_raw_text(self) -> None:
+        client = GemmaClient(generator=lambda prompt: {"prompt": prompt})
+        self.assertEqual(run_gemma("hello", client=client), '{"prompt": "hello"}')
+
+    def test_run_gemma_falls_back_when_backend_fails(self) -> None:
+        self.assertEqual(run_gemma("hello", client=FailingClient()), "{}")
+
+    def test_run_gemma_without_client_uses_env(self) -> None:
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {"GEMMA_BACKEND": "none"}, clear=False):
+            self.assertEqual(run_gemma("hello"), "{}")
+
+    def test_run_gemma_env_invalid_raises(self) -> None:
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {"GEMMA_BACKEND": "invalid"}, clear=False):
+            with self.assertRaises(ValueError):
+                run_gemma("hello")
 
 
 class PromptTests(unittest.TestCase):

@@ -4,8 +4,8 @@ import unittest
 
 from src.asr import MockASRAdapter, get_adapter
 from src.audio.vad import segment_waveform
-from src.candidates.generator import generate_high_overlap_candidates
-from src.diarization import assign_speakers_to_segments
+from src.candidates.generator import generate_candidates
+from src.diarization.speaker_assign import assign_speaker_to_segments
 from src.evaluation.qa_metrics import citation_rate, timestamp_citation_rate
 from src.evidence import build_metadata_segment, validate_evidence_segments
 from src.llm.json_repair import parse_or_repair_json
@@ -37,13 +37,123 @@ class ProjectStructureTests(unittest.TestCase):
         self.assertIsInstance(get_adapter("mock"), MockASRAdapter)
         self.assertEqual(route_segment(0.2), "low_overlap_cluster")
         self.assertTrue(callable(segment_waveform))
-        self.assertTrue(callable(generate_high_overlap_candidates))
-        self.assertTrue(callable(assign_speakers_to_segments))
+        self.assertTrue(callable(generate_candidates))
+        self.assertTrue(callable(assign_speaker_to_segments))
 
     def test_json_repair_handles_fences_and_trailing_comma(self) -> None:
         payload = parse_or_repair_json('```json\n{"meeting_id": "m1", "events": [],}\n```')
         self.assertEqual(payload["meeting_id"], "m1")
         self.assertEqual(payload["events"], [])
+
+    def test_json_repair_normalises_python_literals(self) -> None:
+        payload = parse_or_repair_json('{\n  "flag": True,\n  "ready": False,\n  "value": None\n}')
+        self.assertIs(payload["flag"], True)
+        self.assertIs(payload["ready"], False)
+        self.assertIsNone(payload["value"])
+
+    def test_json_repair_quotes_bare_object_keys(self) -> None:
+        payload = parse_or_repair_json('{meeting_id: "m1", events: [], count: 3}')
+        self.assertEqual(payload["meeting_id"], "m1")
+        self.assertEqual(payload["events"], [])
+        self.assertEqual(payload["count"], 3)
+
+    def test_json_repair_cascades_multiple_errors(self) -> None:
+        raw = '```json\n{meeting_id: "m1", events: [], count: None,}\n```'
+        payload = parse_or_repair_json(raw)
+        self.assertEqual(payload["meeting_id"], "m1")
+        self.assertEqual(payload["events"], [])
+        self.assertIsNone(payload["count"])
+
+    def test_json_repair_does_not_corrupt_strings_with_literals(self) -> None:
+        payload = parse_or_repair_json(
+            '{"msg": "None available", "flag": "True story", "ready": "False alarm"}'
+        )
+        self.assertEqual(payload["msg"], "None available")
+        self.assertEqual(payload["flag"], "True story")
+        self.assertEqual(payload["ready"], "False alarm")
+
+    def test_json_repair_does_not_corrupt_strings_with_colon_patterns(self) -> None:
+        payload = parse_or_repair_json(
+            '{"desc": "key: value pair", "nested": "b: c", "obj": "{opt1: a, opt2: b}"}'
+        )
+        self.assertEqual(payload["desc"], "key: value pair")
+        self.assertEqual(payload["nested"], "b: c")
+        self.assertEqual(payload["obj"], "{opt1: a, opt2: b}")
+
+    def test_json_repair_handles_nested_structures(self) -> None:
+        raw = '{results: [{key: True}, {key: False, items: [{a: None}, {b: 1}]}]}'
+        payload = parse_or_repair_json(raw)
+        self.assertEqual(payload["results"][0]["key"], True)
+        self.assertEqual(payload["results"][1]["key"], False)
+        self.assertIsNone(payload["results"][1]["items"][0]["a"])
+        self.assertEqual(payload["results"][1]["items"][1]["b"], 1)
+
+    def test_json_repair_distinguishes_string_values_from_literals(self) -> None:
+        raw = '{key1: "True", key2: true, key3: "None", key4: null}'
+        payload = parse_or_repair_json(raw)
+        self.assertEqual(payload["key1"], "True")
+        self.assertIs(payload["key2"], True)
+        self.assertEqual(payload["key3"], "None")
+        self.assertIsNone(payload["key4"])
+
+    def test_json_repair_preserves_escaped_quotes(self) -> None:
+        raw = r'{"msg": "He said \"True\" and \"None\"", "val": True}'
+        payload = parse_or_repair_json(raw)
+        self.assertEqual(payload["msg"], 'He said "True" and "None"')
+        self.assertIs(payload["val"], True)
+
+    def test_json_repair_rejects_non_dict_output(self) -> None:
+        with self.assertRaisesRegex(ValueError, "JSON object"):
+            parse_or_repair_json('[1, 2, 3]')
+
+    def test_json_repair_handles_mixed_valid_invalid_literals(self) -> None:
+        raw = '{a: true, b: True, c: false, d: False}'
+        payload = parse_or_repair_json(raw)
+        self.assertIs(payload["a"], True)
+        self.assertIs(payload["b"], True)
+        self.assertIs(payload["c"], False)
+        self.assertIs(payload["d"], False)
+
+    def test_json_repair_preserves_numeric_literals(self) -> None:
+        raw = '{a: 1, b: 1.5, c: -3, d: 1e2}'
+        payload = parse_or_repair_json(raw)
+        self.assertEqual(payload["a"], 1)
+        self.assertEqual(payload["b"], 1.5)
+        self.assertEqual(payload["c"], -3)
+        self.assertEqual(payload["d"], 100)
+
+    def test_json_repair_handles_empty_object(self) -> None:
+        self.assertEqual(parse_or_repair_json('{}'), {})
+        self.assertEqual(parse_or_repair_json('{ }'), {})
+
+    def test_json_repair_raises_on_irreparable_input(self) -> None:
+        with self.assertRaisesRegex(ValueError, "LLM output is not valid JSON"):
+            parse_or_repair_json('{invalid')
+
+    def test_json_repair_preserves_unicode_escapes(self) -> None:
+        raw = r'{"emoji": "❤", "flag": True}'
+        payload = parse_or_repair_json(raw)
+        self.assertEqual(payload["emoji"], "❤")
+        self.assertIs(payload["flag"], True)
+
+    def test_json_repair_extracts_first_block_from_multiple(self) -> None:
+        raw = 'result: {a: 1} notes: {b: 2}'
+        payload = parse_or_repair_json(raw)
+        self.assertEqual(payload["a"], 1)
+
+    def test_json_repair_handles_braces_inside_string_values(self) -> None:
+        raw = '{"url": "https://example.com/{id}", "template": "{name: val}", "ok": True}'
+        payload = parse_or_repair_json(raw)
+        self.assertEqual(payload["url"], "https://example.com/{id}")
+        self.assertEqual(payload["template"], "{name: val}")
+        self.assertIs(payload["ok"], True)
+
+    def test_json_repair_handles_various_whitespace(self) -> None:
+        raw = '{\n\tkey1: True,\n  key2: False,\n\t\tkey3: None\n}'
+        payload = parse_or_repair_json(raw)
+        self.assertIs(payload["key1"], True)
+        self.assertIs(payload["key2"], False)
+        self.assertIsNone(payload["key3"])
 
     def test_evidence_to_memory_to_qa_contract(self) -> None:
         evidence = _evidence()

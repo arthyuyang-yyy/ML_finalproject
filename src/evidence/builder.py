@@ -43,17 +43,17 @@ def build_metadata_segment(
         "speaker": required_text(speaker, "speaker"),
         "start_time": float(start_time),
         "end_time": float(end_time),
-        "text": str(text),
+        "text": _optional_text(text),
         "processing_path": str(processing_path),
         "route_reason": route_reason or f"overlap_score routed to {processing_path}",
         "overlap_score": float(overlap_score),
         "asr_confidence": float(asr_confidence),
         "speaker_confidence": float(speaker_confidence),
-        "audio_clip_path": str(audio_clip_path),
-        "source_audio_path": str(source_audio_path),
-        "language": str(language or "und"),
+        "audio_clip_path": _optional_text(audio_clip_path),
+        "source_audio_path": _optional_text(source_audio_path),
+        "language": _optional_text(language, default="und") or "und",
         "candidates": normalized_candidates,
-        "uncertainty_note": str(uncertainty_note),
+        "uncertainty_note": _optional_text(uncertainty_note),
     }
     if source:
         record["source"] = str(source)
@@ -129,6 +129,7 @@ def _build_from_processed_segment(
 ) -> dict[str, Any]:
     if not isinstance(segment, dict):
         raise ValueError(f"{expected_path} entries must be dictionaries")
+    _validate_optional_distribution(segment)
 
     actual_path = str(segment.get("processing_path") or expected_path)
     if actual_path != expected_path:
@@ -142,25 +143,25 @@ def _build_from_processed_segment(
     generated_route_reason = _route_reason(overlap_score, overlap_threshold, expected_path)
     route_reason = str(segment.get("route_reason") or generated_route_reason)
     return build_metadata_segment(
-        meeting_id=str(segment_meeting_id),
-        segment_id=str(segment.get("segment_id", "")),
+        meeting_id=segment_meeting_id,
+        segment_id=segment.get("segment_id"),
         evidence_id=segment.get("evidence_id"),
-        speaker=str(segment.get("speaker", "")),
+        speaker=segment.get("speaker"),
         start_time=float(segment.get("start_time", 0.0)),
         end_time=float(segment.get("end_time", 0.0)),
-        text=str(segment.get("text", "")),
+        text=_segment_text(segment, expected_path),
         processing_path=expected_path,
         route_reason=route_reason,
         overlap_score=overlap_score,
         asr_confidence=float(segment.get("asr_confidence", 0.0)),
         speaker_confidence=float(segment.get("speaker_confidence", 0.0)),
         candidates=list(segment.get("candidates", [])),
-        uncertainty_note=str(segment.get("uncertainty_note", "")),
-        audio_clip_path=str(segment.get("audio_clip_path", "")),
-        source_audio_path=str(segment.get("source_audio_path") or source_audio_path),
-        language=str(segment.get("language") or language),
-        source=str(segment.get("source", "")),
-        decision_reason=str(segment.get("decision_reason", "")),
+        uncertainty_note=_optional_text(segment.get("uncertainty_note")),
+        audio_clip_path=_optional_text(segment.get("audio_clip_path")),
+        source_audio_path=_optional_text(segment.get("source_audio_path")) or _optional_text(source_audio_path),
+        language=_optional_text(segment.get("language")) or _optional_text(language, default="und") or "und",
+        source=_optional_text(segment.get("source")),
+        decision_reason=_optional_text(segment.get("decision_reason")),
     )
 
 
@@ -223,6 +224,29 @@ def _read_segment_list(path: str | Path) -> list[dict[str, Any]]:
     if not isinstance(payload, list):
         raise ValueError(f"{path} must contain a JSON list")
     return payload
+
+
+def _optional_text(value: Any, default: str = "") -> str:
+    if value is None:
+        return default
+    return str(value)
+
+
+def _segment_text(segment: dict[str, Any], expected_path: str) -> str:
+    value = segment.get("text")
+    if value is None and expected_path == HIGH_OVERLAP_PATH:
+        return ""
+    return _optional_text(value)
+
+
+def _validate_optional_distribution(segment: dict[str, Any]) -> None:
+    distribution = segment.get("cluster_similarity_distribution")
+    if distribution is None:
+        return
+    if not isinstance(distribution, dict):
+        raise ValueError("cluster_similarity_distribution must be a dictionary")
+    if any(not isinstance(key, str) for key in distribution):
+        raise ValueError("cluster_similarity_distribution keys must be strings")
 
 
 __all__ = [

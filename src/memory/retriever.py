@@ -31,6 +31,13 @@ class EmbeddingBackend(Protocol):
         """Encode texts into equal-length vectors."""
 
 
+class SentenceTransformerEmbeddingBackend:
+    """Compatibility placeholder; retrieval now defaults to hash embeddings."""
+
+    def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+        raise ImportError("external sentence-transformer embeddings are not used by this MVP")
+
+
 def retrieve_episodes(
     question: str,
     episodes: list[dict[str, Any]] | None = None,
@@ -71,6 +78,8 @@ def retrieve_episodes(
     ranked: list[tuple[float, dict[str, Any]]] = []
     for index, episode in enumerate(records):
         final_score = EMBEDDING_WEIGHT * embedding_scores[index] + KEYWORD_WEIGHT * keyword_scores[index]
+        if keyword_scores[index] == 0.0 and embedding_scores[index] < 0.35:
+            continue
         result = dict(episode)
         result["retrieval"] = {
             "final_score": round(final_score, 6),
@@ -170,4 +179,9 @@ def _cosine_similarity(left: list[float], right: list[float]) -> float:
     return dot / (left_norm * right_norm)
 
 
-__all__ = ["EmbeddingBackend", "HashingEmbeddingBackend", "retrieve_episodes"]
+__all__ = [
+    "EmbeddingBackend",
+    "HashingEmbeddingBackend",
+    "SentenceTransformerEmbeddingBackend",
+    "retrieve_episodes",
+]

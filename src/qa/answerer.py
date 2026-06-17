@@ -1,5 +1,6 @@
 """Evidence-constrained question answering over retrieved episodes."""
 
+import logging
 from typing import Any
 
 from src.llm.gemma_client import GemmaClient
@@ -10,6 +11,8 @@ from src.utils import confidence_level
 
 from .answer_validator import validate_qa_answer
 from .prompts import build_qa_prompt, build_qa_repair_prompt
+
+logger = logging.getLogger(__name__)
 
 
 def answer_question(
@@ -46,7 +49,11 @@ def answer_question(
                     previous_output,
                     previous_error,
                 )
-            raw_output = client.generate_json(prompt)
+            try:
+                raw_output = client.generate_json(prompt)
+            except Exception as exc:
+                logger.warning("Gemma QA failed; using deterministic fallback: %s", exc)
+                break
             previous_output = _serialize_output(raw_output)
             try:
                 payload = raw_output if isinstance(raw_output, dict) else parse_or_repair_json(raw_output)

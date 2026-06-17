@@ -7,7 +7,7 @@ from src.fallbacks.embeddings import HashingEmbeddingBackend
 from src.memory.retriever import retrieve_episodes
 from src.qa.answerer import answer_question
 from src.qa.prompts import build_qa_prompt
-from src.qa import answer_question_with_evidence
+from src.rag_qa import answer_question_with_evidence
 
 
 def _episode(
@@ -135,6 +135,14 @@ class AnswerWithEvidenceTests(unittest.TestCase):
         client = GemmaClient(generator=lambda _: invalid)
         result = answer_question("谁负责测试？", [_episode()], client=client)
         self.assertEqual(result["timestamp"], "60.200-68.400s")
+
+    def test_backend_failure_triggers_safe_fallback(self) -> None:
+        def fail(_: str) -> dict:
+            raise ConnectionError("backend unavailable")
+
+        result = answer_question("谁负责测试？", [_episode()], client=GemmaClient(generator=fail))
+        self.assertEqual(result["evidence_ids"], ["m1_seg_012"])
+        self.assertIn("60.200-68.400s", result["answer"])
 
     def test_invented_speaker_triggers_safe_fallback(self) -> None:
         invalid = _valid_model_answer()
