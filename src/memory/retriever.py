@@ -10,6 +10,9 @@ from typing import Any, Protocol
 from .episodic_store import DEFAULT_MEMORY_PATH, read_episodes
 from src.fallbacks.embeddings import HashingEmbeddingBackend
 
+# MVP weights: keep hash-embedding similarity as the primary signal while using
+# keyword hits as a deterministic boost. Recalibrate with retrieval metrics
+# before adding recency, importance, or overlap penalties back into the score.
 EMBEDDING_WEIGHT = 0.70
 KEYWORD_WEIGHT = 0.30
 DEFAULT_MIN_RELEVANCE_SCORE = 0.15

@@ -27,7 +27,7 @@
 
 ```text
 python3 -m pytest -q
-491 passed, 6 skipped, 2 warnings, 7 subtests passed
+492 passed, 6 skipped, 2 warnings, 7 subtests passed
 
 python3 -m ruff check src tests main.py app.py
 All checks passed

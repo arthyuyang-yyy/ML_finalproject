@@ -190,7 +190,7 @@ src/fallbacks/embeddings.py
 
 这是当前项目保留的轻量特色能力，不依赖 `sentence-transformers`。
 
-当前检索是 MVP 权衡：优先保证 deterministic、低依赖和可测试，不引入 transformer embedding、recency decay、importance prior 或跨会议个性化排序。QA 返回的 evidence IDs、timestamps 和 uncertainty 信息用于降低误答风险；后续如果有人工评估集，再重新加入更复杂的排序信号。
+当前检索是 MVP 权衡：优先保证 deterministic、低依赖和可测试，不引入 transformer embedding、recency decay、importance prior 或跨会议个性化排序。QA 返回的 evidence IDs、timestamps 和 uncertainty 信息用于降低误答风险。`0.70 / 0.30` 是暂定 MVP 权重；后续如果有人工评估集，再基于 F1、NDCG 或 recall@k 重新校准权重并加入更复杂的排序信号。
 
 默认相关性过滤也保持简单：没有 keyword 命中且 hash embedding 相似度低于 `0.35` 的 episode 会被丢弃；有 keyword 命中的 episode 即使 embedding 相似度低也会保留并进入最终分数比较。
 
@@ -244,7 +244,7 @@ python -m ruff check src tests main.py app.py
 当前验证状态：
 
 ```text
-491 passed, 6 skipped, 2 warnings, 7 subtests passed
+492 passed, 6 skipped, 2 warnings, 7 subtests passed
 ruff: All checks passed
 ```
 

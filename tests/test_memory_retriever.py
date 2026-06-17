@@ -51,6 +51,13 @@ class OrthogonalEmbeddingBackend:
         return [[1.0, 0.0], *([[0.0, 1.0]] * (len(texts) - 1))]
 
 
+class HighSimilarityNoKeywordBackend:
+    def encode(self, texts: list[str]) -> list[list[float]]:
+        vectors = [[1.0, 0.0], [1.0, 0.0]]
+        vectors.extend([[0.0, 1.0]] * (len(texts) - 2))
+        return vectors
+
+
 class MemoryRetrieverTests(unittest.TestCase):
     def setUp(self) -> None:
         self.episodes = [
@@ -167,6 +174,36 @@ class MemoryRetrieverTests(unittest.TestCase):
         self.assertEqual([item["episode_id"] for item in results], ["ep_keyword"])
         self.assertEqual(results[0]["retrieval"]["embedding_similarity"], 0.0)
         self.assertGreater(results[0]["retrieval"]["keyword_score"], 0.0)
+
+    def test_high_embedding_similarity_survives_without_keyword_match(self) -> None:
+        episodes = [
+            _episode(
+                "ep_semantic",
+                event_type="decision",
+                content="semantic-only match",
+                topic="assignment",
+                speakers=["S1"],
+                evidence_text="semantic-only match",
+            ),
+            _episode(
+                "ep_noise",
+                event_type="decision",
+                content="unrelated",
+                topic="other",
+                speakers=["S2"],
+                evidence_text="unrelated",
+            ),
+        ]
+
+        results = retrieve_episodes(
+            "alpha",
+            episodes=episodes,
+            embedding_backend=HighSimilarityNoKeywordBackend(),
+        )
+
+        self.assertEqual([item["episode_id"] for item in results], ["ep_semantic"])
+        self.assertEqual(results[0]["retrieval"]["embedding_similarity"], 1.0)
+        self.assertEqual(results[0]["retrieval"]["keyword_score"], 0.0)
 
     def test_retrieval_does_not_mutate_memory(self) -> None:
         original = deepcopy(self.episodes)
