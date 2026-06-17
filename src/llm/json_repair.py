@@ -18,7 +18,8 @@ def _string_ranges(text: str) -> list[tuple[int, int]]:
             i += 1
             while i < len(text):
                 if text[i] == '\\':
-                    i += 2
+                    # Bounds-guard: a trailing backslash should not overshoot.
+                    i = min(i + 2, len(text))
                 elif text[i] == '"':
                     i += 1
                     break
@@ -53,7 +54,12 @@ def _replace_outside_strings(
 # -- repair helpers ----------------------------------------------------------
 
 def _extract_json_block(text: str) -> str:
-    """Strip Markdown fences and isolate the outermost JSON object or array."""
+    """Strip Markdown fences and isolate the outermost JSON object or array.
+
+    This is a best-effort extraction: if the text contains interleaved
+    braces/brackets the result may be malformed, but the downstream JSON
+    parser will reject it cleanly and the repair cascade will proceed.
+    """
     cleaned = text.strip()
     if cleaned.startswith("```"):
         cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
@@ -135,7 +141,11 @@ def parse_or_repair_json(raw_output: str) -> dict[str, Any]:
     except json.JSONDecodeError:
         pass
 
-    # Attempt 2: trailing commas
+    # Attempt 2: trailing commas only.
+    # Kept as a separate checkpoint because trailing commas are the most
+    # common LLM syntax error; fixing them alone avoids the heavier (and
+    # slightly more invasive) unquoted-key / literal repairs on text that
+    # only needs a comma removed.
     try:
         return _ensure_dict(json.loads(_repair_trailing_commas(text)))
     except json.JSONDecodeError:

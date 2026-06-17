@@ -102,6 +102,34 @@ class ProjectStructureTests(unittest.TestCase):
         self.assertEqual(payload["msg"], 'He said "True" and "None"')
         self.assertIs(payload["val"], True)
 
+    def test_json_repair_rejects_non_dict_output(self) -> None:
+        with self.assertRaisesRegex(ValueError, "JSON object"):
+            parse_or_repair_json('[1, 2, 3]')
+
+    def test_json_repair_handles_mixed_valid_invalid_literals(self) -> None:
+        raw = '{a: true, b: True, c: false, d: False}'
+        payload = parse_or_repair_json(raw)
+        self.assertIs(payload["a"], True)
+        self.assertIs(payload["b"], True)
+        self.assertIs(payload["c"], False)
+        self.assertIs(payload["d"], False)
+
+    def test_json_repair_preserves_numeric_literals(self) -> None:
+        raw = '{a: 1, b: 1.5, c: -3, d: 1e2}'
+        payload = parse_or_repair_json(raw)
+        self.assertEqual(payload["a"], 1)
+        self.assertEqual(payload["b"], 1.5)
+        self.assertEqual(payload["c"], -3)
+        self.assertEqual(payload["d"], 100)
+
+    def test_json_repair_handles_empty_object(self) -> None:
+        self.assertEqual(parse_or_repair_json('{}'), {})
+        self.assertEqual(parse_or_repair_json('{ }'), {})
+
+    def test_json_repair_raises_on_irreparable_input(self) -> None:
+        with self.assertRaisesRegex(ValueError, "LLM output is not valid JSON"):
+            parse_or_repair_json('{invalid')
+
     def test_evidence_to_memory_to_qa_contract(self) -> None:
         evidence = _evidence()
         self.assertEqual(validate_evidence_segments([evidence]), [])
