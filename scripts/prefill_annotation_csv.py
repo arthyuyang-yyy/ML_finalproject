@@ -18,9 +18,15 @@ What it does that ``prepare_alimeeting.py`` does not:
    high-overlap segment keeps its multi-candidate structure. Single-speaker
    utterances each become their own low-overlap segment.
 4. **Computes ``overlap_type``** (none / partial / full) from the fraction of a
-   segment covered by overlap. The partial↔full cut and the minimum overlap to
-   count at all are **provisional** (issue #61 待办③, not yet ratified) and are
-   exposed as CLI flags.
+   segment covered by overlap.
+
+Ratified overlap口径 (team decision, issue #63 — defaults below encode it):
+
+- ``--min-overlap-seconds 1.0``: overlaps shorter than 1s are ignored, so brief
+  crosstalk does not chain distant utterances into one giant segment (``0.0``
+  over-merged ~73% of utterances into uncertainty; ``1.0`` gives a realistic ~38%).
+- ``--full-threshold 0.5``: partial↔full cut, aligned with Step 7b ``gt_fraction=0.5``.
+- ``partial`` counts as high-overlap (partial + full → ``uncertainty`` downstream).
 
 The semantic columns are left blank on purpose — that is the human's job. Feed
 the result to ``build_annotation_set.py`` once filled.
@@ -29,7 +35,7 @@ Usage::
 
     python scripts/prefill_annotation_csv.py --root /path/to/Eval_Ali_near/textgrid_dir
     python scripts/prefill_annotation_csv.py --root TGDIR --out-dir data/annotations/prefilled \\
-        --full-threshold 0.5 --min-overlap-seconds 0.0
+        --full-threshold 0.5 --min-overlap-seconds 1.0
 """
 
 from __future__ import annotations
@@ -164,7 +170,7 @@ class _UnionFind:
 def cluster_segments(
     utterances: list[Utterance],
     full_threshold: float = 0.5,
-    min_overlap_seconds: float = 0.0,
+    min_overlap_seconds: float = 1.0,
 ) -> list[dict[str, Any]]:
     """Group utterances into segments under 口径 B and tag each ``overlap_type``.
 
@@ -282,9 +288,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out-dir", type=Path, default=REPO_ROOT / "data" / "annotations" / "prefilled",
                         help="directory to write one <meeting_id>.csv per meeting")
     parser.add_argument("--full-threshold", type=float, default=0.5,
-                        help="overlap-coverage at/above which overlap_type=full (provisional, issue #61)")
-    parser.add_argument("--min-overlap-seconds", type=float, default=0.0,
-                        help="ignore overlap regions shorter than this before clustering (provisional)")
+                        help="overlap-coverage at/above which overlap_type=full "
+                             "(ratified 0.5, aligned with Step 7b gt_fraction; issue #63)")
+    parser.add_argument("--min-overlap-seconds", type=float, default=1.0,
+                        help="ignore overlap regions shorter than this before clustering "
+                             "(ratified 1.0 to avoid over-merging short crosstalk; issue #63)")
     args = parser.parse_args(argv)
 
     by_meeting = read_meeting_utterances(args.root)
