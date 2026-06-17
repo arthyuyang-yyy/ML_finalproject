@@ -3,7 +3,7 @@
 Runs the implemented evaluation metrics over a manually-annotated set and prints
 a results table. Covers Experiment 5 (evidence support / hallucination) and the
 traceability-related metrics from Experiment 2 (candidate usefulness) and
-Experiment 3 (uncertainty preservation) in [`../../docs/experiment_plan.md`](../../docs/experiment_plan.md).
+Experiment 3 (uncertainty preservation). The previous experiment plan has been retired as the project scope narrowed to a focused MVP; the implemented metrics are described below.
 
 ## Run
 
