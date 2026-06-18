@@ -1,0 +1,76 @@
+"""Tests for semantic auto-labeling of pre-filled annotation CSV rows."""
+
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+
+import auto_label_annotation_csv as labeler  # noqa: E402
+
+
+class AutoLabelAnnotationCsvTests(unittest.TestCase):
+    def test_high_overlap_forces_uncertainty(self) -> None:
+        row = {
+            "speaker": "N_SPK1",
+            "text": "我同意",
+            "is_overlap": "True",
+            "overlap_type": "partial",
+        }
+
+        labeled = labeler.label_row(row)
+
+        self.assertEqual(labeled["event_type"], "uncertainty")
+        self.assertEqual(labeled["content"], labeler.UNCERTAINTY_CONTENT)
+        self.assertEqual(labeled["owner"], "")
+        self.assertTrue(labeled["uncertainty_note"])
+
+    def test_first_person_action_uses_current_speaker_as_owner(self) -> None:
+        row = {
+            "speaker": "N_SPK2",
+            "text": "我来负责明天提交测试报告",
+            "is_overlap": "False",
+            "overlap_type": "none",
+        }
+
+        labeled = labeler.label_row(row)
+
+        self.assertEqual(labeled["event_type"], "action_item")
+        self.assertEqual(labeled["owner"], "N_SPK2")
+        self.assertEqual(labeled["deadline"], "明天")
+
+    def test_named_assignee_without_mapping_is_uncertain(self) -> None:
+        row = {
+            "speaker": "N_SPK3",
+            "text": "李明负责下周五提交测试报告",
+            "is_overlap": "False",
+            "overlap_type": "none",
+        }
+
+        labeled = labeler.label_row(row)
+
+        self.assertEqual(labeled["event_type"], "action_item")
+        self.assertEqual(labeled["owner"], "uncertain")
+
+    def test_csv_roundtrip_writes_labeled_rows(self) -> None:
+        header = (
+            "meeting_id,segment_id,start_time,end_time,speaker,text,is_overlap,"
+            "overlap_type,topic,decision,action_item,event_type,content,owner,deadline,uncertainty_note\n"
+        )
+        body = "m1,s1,0,1,N_SPK1,我们决定采用方案A,False,none,,,,,,,,\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "in.csv"
+            dst = Path(tmp) / "out.csv"
+            src.write_text(header + body, encoding="utf-8-sig")
+
+            total, counts = labeler.label_csv(src, dst)
+
+            self.assertEqual(total, 1)
+            self.assertEqual(counts["decision"], 1)
+            self.assertIn("decision", dst.read_text(encoding="utf-8-sig"))
+
+
+if __name__ == "__main__":
+    unittest.main()
