@@ -23,9 +23,10 @@ data/processed_audio/*
 data/alimeeting/
 outputs/*
 
-# Generated/filled annotation sheets carry corpus transcripts -> never commit them
-# (the blank data/annotations/annotation_template.csv stays tracked).
-data/annotations/prefilled/
+# AI-labeled sheets are heuristic pre-labels awaiting human review. Keep raw
+# prefilled/intermediate files ignored to avoid accidental corpus transcript commits.
+data/annotations/prefilled/*
+!data/annotations/prefilled/*_ai_labeled.csv
 data/annotations/built/
 
 # Audio and model files
