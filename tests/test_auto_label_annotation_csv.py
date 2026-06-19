@@ -10,6 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 import auto_label_annotation_csv as labeler  # noqa: E402
+import build_annotation_set as bas  # noqa: E402
 
 
 class AutoLabelAnnotationCsvTests(unittest.TestCase):
@@ -95,6 +96,42 @@ class AutoLabelAnnotationCsvTests(unittest.TestCase):
         self.assertEqual(labeled["event_type"], "action_item")
         self.assertEqual(labeled["owner"], "uncertain")
 
+    def test_first_person_action_with_empty_speaker_is_uncertain(self) -> None:
+        row = {
+            "speaker": "",
+            "text": "我来负责明天提交测试报告",
+            "is_overlap": "False",
+            "overlap_type": "none",
+        }
+
+        labeled = labeler.label_row(row)
+
+        self.assertEqual(labeled["event_type"], "action_item")
+        self.assertEqual(labeled["owner"], "uncertain")
+        self.assertEqual(labeled["deadline"], "明天")
+
+    def test_deadline_patterns_cover_zh_and_en_and_take_first(self) -> None:
+        self.assertEqual(labeler.extract_deadline("下个月底前提交"), "下个月底")
+        self.assertEqual(labeler.extract_deadline("please deliver by next monday"), "by next monday")
+        self.assertEqual(labeler.extract_deadline("明天或者下周五提交"), "明天")
+
+    def test_empty_csv_roundtrip_writes_header_only(self) -> None:
+        header = (
+            "meeting_id,segment_id,start_time,end_time,speaker,text,is_overlap,"
+            "overlap_type,topic,decision,action_item,event_type,content,owner,deadline,uncertainty_note\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "empty.csv"
+            dst = Path(tmp) / "out.csv"
+            src.write_text(header, encoding="utf-8-sig")
+
+            total, counts = labeler.label_csv(src, dst)
+
+            self.assertEqual(total, 0)
+            self.assertEqual(counts, {})
+            with dst.open(encoding="utf-8-sig", newline="") as handle:
+                self.assertEqual(list(csv.DictReader(handle)), [])
+
     def test_pure_acknowledgement_is_not_decision(self) -> None:
         row = {
             "speaker": "N_SPK5",
@@ -128,6 +165,31 @@ class AutoLabelAnnotationCsvTests(unittest.TestCase):
             self.assertEqual(labeled["event_type"], "decision")
             self.assertEqual(labeled["decision"], "")
             self.assertEqual(labeled["topic"], "")
+
+    def test_labeled_csv_can_feed_annotation_set_builder(self) -> None:
+        header = (
+            "meeting_id,segment_id,start_time,end_time,speaker,text,is_overlap,"
+            "overlap_type,topic,decision,action_item,event_type,content,owner,deadline,uncertainty_note\n"
+        )
+        body = "\n".join(
+            [
+                "m1,s1,0,1,SPEAKER_00,我们决定采用方案A,False,none,,,,,,,,",
+                "m1,s2,1,2,SPEAKER_01,我来负责明天提交测试报告,False,none,,,,,,,,",
+                "m1,s3,2,3,SPEAKER_00,我同意,True,full,,,,,,,,",
+                "",
+            ]
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "in.csv"
+            dst = Path(tmp) / "out.csv"
+            src.write_text(header + body, encoding="utf-8-sig")
+
+            labeler.label_csv(src, dst)
+            document = bas.build_meeting("m1", bas.read_rows(dst))
+
+            self.assertEqual(len(document["evidence_segments"]), 3)
+            event_types = {event["event_type"] for event in document["gold_events"]}
+            self.assertEqual(event_types, {"decision", "action_item", "uncertainty"})
 
 
 if __name__ == "__main__":

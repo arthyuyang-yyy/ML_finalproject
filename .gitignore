@@ -23,8 +23,8 @@ data/processed_audio/*
 data/alimeeting/
 outputs/*
 
-# Reviewed AI-labeled annotation sheets may be inspected through PRs. Keep raw
-# prefilled/intermediate annotation files ignored to avoid accidental commits.
+# AI-labeled sheets are heuristic pre-labels awaiting human review. Keep raw
+# prefilled/intermediate files ignored to avoid accidental corpus transcript commits.
 data/annotations/prefilled/*
 !data/annotations/prefilled/*_ai_labeled.csv
 data/annotations/built/

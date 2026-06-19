@@ -14,6 +14,12 @@ the semantic columns with rule-based labels that annotators can review:
   speaker ID, otherwise ``uncertain``;
 * deadline extraction mirrors the lightweight rule baseline patterns.
 
+Input CSVs are expected to come from the Phase 4 prefill flow tracked in issues
+#63 and #65: AliMeeting-derived rows with objective columns already filled by
+``scripts/prefill_annotation_csv.py``.  The generated ``*_ai_labeled.csv`` files
+are not final gold labels; annotators must review the semantic labels before
+using converted JSON in formal evaluation.
+
 Usage::
 
     python scripts/auto_label_annotation_csv.py data/annotations/prefilled/*.csv
