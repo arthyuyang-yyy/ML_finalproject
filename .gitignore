@@ -23,10 +23,10 @@ data/processed_audio/*
 data/alimeeting/
 outputs/*
 
-# Generated/filled annotation sheets may be reviewed through PRs; keep other
-# intermediate files ignored while allowing CSV annotation sheets.
+# Reviewed AI-labeled annotation sheets may be inspected through PRs. Keep raw
+# prefilled/intermediate annotation files ignored to avoid accidental commits.
 data/annotations/prefilled/*
-!data/annotations/prefilled/*.csv
+!data/annotations/prefilled/*_ai_labeled.csv
 data/annotations/built/
 
 # Audio and model files

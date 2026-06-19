@@ -6,8 +6,12 @@ the semantic columns with rule-based labels that annotators can review:
 
 * high-overlap rows are always ``uncertainty``;
 * low-overlap rows are classified as decision/action/open_question/etc.;
+* only the formal semantic columns from issue #65 are written:
+  ``event_type``, ``content``, ``owner``, ``deadline``, and
+  ``uncertainty_note``;
 * action-item owners are speaker IDs only when the text is a first-person
-  commitment by the current speaker, otherwise ``uncertain``;
+  commitment by the current speaker or explicitly mentions the exact current
+  speaker ID, otherwise ``uncertain``;
 * deadline extraction mirrors the lightweight rule baseline patterns.
 
 Usage::
@@ -52,10 +56,13 @@ DEADLINE_PATTERNS = (
                r"saturday|sunday|\w+day|the\s+\d{1,2}(?:st|nd|rd|th)?)\b"),
 )
 
-SEMANTIC_FIELDS = (
+LEGACY_SEMANTIC_FIELDS = (
     "topic",
     "decision",
     "action_item",
+)
+
+LABEL_FIELDS = (
     "event_type",
     "content",
     "owner",
@@ -63,8 +70,11 @@ SEMANTIC_FIELDS = (
     "uncertainty_note",
 )
 
+SEMANTIC_FIELDS = LEGACY_SEMANTIC_FIELDS + LABEL_FIELDS
+
 UNCERTAINTY_CONTENT = "高重叠语音，内容或说话人归属不确定"
 UNCERTAINTY_NOTE = "多人同时说话，按项目规则标为不确定"
+PURE_ACKNOWLEDGEMENTS = {"对", "同意", "可以", "好", "行"}
 
 FIRST_PERSON_ACTION_PATTERNS = (
     re.compile(r"(我|我们|咱们)(来|会|负责|跟进|处理|完成|整理|提交|确认|安排|落实|做|测试|修改|补充|对接|推进)"),
@@ -149,21 +159,6 @@ def _short_content(text: str, event_type: str) -> str:
     return compact if compact.startswith(prefix) else f"{prefix}{compact}"
 
 
-def _topic(text: str, event_type: str) -> str:
-    compact = _compact_text(text)
-    if len(compact) > 18:
-        compact = compact[:18].rstrip("，。；;：: ") + "..."
-    if compact:
-        return compact
-    return {
-        "decision": "决策",
-        "action_item": "行动项",
-        "open_question": "待确认问题",
-        "uncertainty": "高重叠不确定",
-        "topic_transition": "议题转换",
-    }.get(event_type, "发言观点")
-
-
 def _is_topic_transition(text: str, event_type: str) -> bool:
     if event_type != "speaker_stance":
         return False
@@ -180,15 +175,26 @@ def _is_disagreement(text: str, event_type: str) -> bool:
     return any(cue in text for cue in ("不同意", "不太同意", "不是", "但是我觉得", "反对", "有问题"))
 
 
+def _mentions_exact_speaker_id(text: str, speaker: str) -> bool:
+    if not speaker:
+        return False
+    pattern = re.compile(rf"(?<![A-Za-z0-9_]){re.escape(speaker)}(?![A-Za-z0-9_])")
+    return bool(pattern.search(text))
+
+
 def _owner_for_action(text: str, speaker: str) -> str:
     speaker = speaker.strip()
-    if speaker and speaker in text:
+    if _mentions_exact_speaker_id(text, speaker):
         return speaker
     if any(pattern.search(text) for pattern in FIRST_PERSON_ACTION_PATTERNS):
         return speaker or "uncertain"
     if any(pattern.search(text) for pattern in ASSIGNED_TO_OTHER_PATTERNS):
         return "uncertain"
-    return speaker or "uncertain"
+    return "uncertain"
+
+
+def _is_pure_acknowledgement(text: str) -> bool:
+    return text.strip().lower().strip("。！？!?，, ") in PURE_ACKNOWLEDGEMENTS
 
 
 def label_row(row: dict[str, str]) -> dict[str, str]:
@@ -203,7 +209,6 @@ def label_row(row: dict[str, str]) -> dict[str, str]:
         labeled[field] = ""
 
     if is_overlap:
-        labeled["topic"] = "高重叠不确定"
         labeled["event_type"] = "uncertainty"
         labeled["content"] = UNCERTAINTY_CONTENT
         labeled["uncertainty_note"] = UNCERTAINTY_NOTE
@@ -216,18 +221,14 @@ def label_row(row: dict[str, str]) -> dict[str, str]:
         event_type = "disagreement"
 
     # Keep pure acknowledgements as speaker stances, not decisions.
-    if event_type == "decision" and text.strip("。！？!?，, ") in {"对", "同意", "可以", "好", "行"}:
+    if event_type == "decision" and _is_pure_acknowledgement(text):
         event_type = "speaker_stance"
 
     content = _short_content(text, event_type)
-    labeled["topic"] = _topic(text, event_type)
     labeled["event_type"] = event_type
     labeled["content"] = content
 
-    if event_type == "decision":
-        labeled["decision"] = content
-    elif event_type == "action_item":
-        labeled["action_item"] = content
+    if event_type == "action_item":
         labeled["owner"] = _owner_for_action(text, row.get("speaker", ""))
         deadline = extract_deadline(text)
         if deadline:

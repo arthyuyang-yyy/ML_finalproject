@@ -1,5 +1,6 @@
 """Tests for semantic auto-labeling of pre-filled annotation CSV rows."""
 
+import csv
 import sys
 import tempfile
 import unittest
@@ -54,6 +55,59 @@ class AutoLabelAnnotationCsvTests(unittest.TestCase):
         self.assertEqual(labeled["event_type"], "action_item")
         self.assertEqual(labeled["owner"], "uncertain")
 
+    def test_speaker_id_prefix_does_not_assign_owner(self) -> None:
+        row = {
+            "speaker": "N_SPK1",
+            "text": "请 N_SPK10 明天提交报告",
+            "is_overlap": "False",
+            "overlap_type": "none",
+        }
+
+        labeled = labeler.label_row(row)
+
+        self.assertEqual(labeled["event_type"], "action_item")
+        self.assertEqual(labeled["owner"], "uncertain")
+        self.assertEqual(labeled["deadline"], "明天")
+
+    def test_exact_current_speaker_id_can_assign_owner(self) -> None:
+        row = {
+            "speaker": "N_SPK1",
+            "text": "N_SPK1 负责明天提交报告",
+            "is_overlap": "False",
+            "overlap_type": "none",
+        }
+
+        labeled = labeler.label_row(row)
+
+        self.assertEqual(labeled["event_type"], "action_item")
+        self.assertEqual(labeled["owner"], "N_SPK1")
+
+    def test_action_without_clear_owner_is_uncertain(self) -> None:
+        row = {
+            "speaker": "N_SPK4",
+            "text": "需要明天提交测试报告",
+            "is_overlap": "False",
+            "overlap_type": "none",
+        }
+
+        labeled = labeler.label_row(row)
+
+        self.assertEqual(labeled["event_type"], "action_item")
+        self.assertEqual(labeled["owner"], "uncertain")
+
+    def test_pure_acknowledgement_is_not_decision(self) -> None:
+        row = {
+            "speaker": "N_SPK5",
+            "text": "同意。",
+            "is_overlap": "False",
+            "overlap_type": "none",
+        }
+
+        labeled = labeler.label_row(row)
+
+        self.assertEqual(labeled["event_type"], "speaker_stance")
+        self.assertEqual(labeled["decision"], "")
+
     def test_csv_roundtrip_writes_labeled_rows(self) -> None:
         header = (
             "meeting_id,segment_id,start_time,end_time,speaker,text,is_overlap,"
@@ -69,7 +123,11 @@ class AutoLabelAnnotationCsvTests(unittest.TestCase):
 
             self.assertEqual(total, 1)
             self.assertEqual(counts["decision"], 1)
-            self.assertIn("decision", dst.read_text(encoding="utf-8-sig"))
+            with dst.open(encoding="utf-8-sig", newline="") as handle:
+                labeled = next(csv.DictReader(handle))
+            self.assertEqual(labeled["event_type"], "decision")
+            self.assertEqual(labeled["decision"], "")
+            self.assertEqual(labeled["topic"], "")
 
 
 if __name__ == "__main__":
