@@ -57,8 +57,17 @@ LLM 是结构化事件抽取和答案组织的可选实验组件。RAG 检索、
   including dominant speaker, `MIXED`, and `UNKNOWN` rules. / 集成说话人归属规则。
 - [x] Step 7a - Baseline overlap detection with pyannote OSD, fused signals,
   and a conservative energy fallback. / 完成基础重叠检测和保守 fallback。
-- [ ] Step 7b - Calibrate the overlap threshold against human labels and report
-  routing metrics and cost/quality trade-offs. / 使用人工标注校准阈值并报告实验结果。
+- [x] Step 7b - Calibrate the overlap threshold against human labels and report
+  routing metrics and cost/quality trade-offs. Production-aligned run on 8
+  AliMeeting meetings (fused pyannote score) recommends a routing threshold of
+  ~0.25 (vs default 0.4), lifting held-out test F1 from 0.103 to 0.433-0.779
+  across splits; full write-up and the production-readiness verdict are in
+  `experiments/overlap_threshold/results.md` (Phase 2). Flagged as a calibrated
+  v1 pending VAD alignment with the Pipeline and validation on more meetings.
+  / 使用人工标注校准阈值并报告实验结果：在 8 个 AliMeeting 会议上以融合 pyannote
+  分数完成生产对齐校准，推荐路由阈值约 0.25（默认 0.4），held-out test F1 从 0.103
+  提升到 0.433-0.779；完整结论见 `experiments/overlap_threshold/results.md`
+  （Phase 2）。当前为校准 v1，仍待与 Pipeline 的 VAD 对齐并在更多会议上验证。
 - [x] Step 8 - Configurable dual-path router with default threshold `0.4`. / 可配置双路径路由。
 - [x] Step 9 - Low-overlap path producing speaker, transcript, timestamps, and
   confidence values. / 完成低重叠稳定转写路径。
