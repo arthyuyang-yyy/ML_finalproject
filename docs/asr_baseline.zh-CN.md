@@ -15,7 +15,7 @@
 | beam size | `5` |
 | temperature | `0.0` |
 | condition on previous text | `False` |
-
+ 
 ## 安装
 
 ```bash
