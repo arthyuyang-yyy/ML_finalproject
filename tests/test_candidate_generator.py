@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from src.candidates.generator import generate_high_overlap_candidates
+from src.candidates.generator import _reject_hallucinated_candidate, generate_high_overlap_candidates
 
 
 class FallbackCandidateTests(unittest.TestCase):
@@ -45,8 +45,13 @@ class FallbackCandidateTests(unittest.TestCase):
         segment = {"segment_id": "s1", "text": "test"}
         candidates = generate_high_overlap_candidates(segment, language="zh")
         self.assertEqual(candidates[0]["decode_config"]["language"], "zh")
-        # second decode config should keep its explicit language
-        self.assertIn(candidates[1]["decode_config"]["language"], {"zh", "en", "auto"})
+        self.assertEqual(candidates[1]["decode_config"]["language"], "zh")
+
+    def test_zh_high_overlap_rejects_short_english_hallucinations(self) -> None:
+        self.assertTrue(_reject_hallucinated_candidate("Have a good one!", "zh"))
+        self.assertTrue(_reject_hallucinated_candidate("Bye!", "zh"))
+        self.assertFalse(_reject_hallucinated_candidate("这个目标客户群", "zh"))
+        self.assertFalse(_reject_hallucinated_candidate("Have a good one!", "en"))
 
     def test_empty_samples_forces_fallback(self) -> None:
         segment = {"segment_id": "s1", "text": "test"}

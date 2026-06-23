@@ -9,9 +9,9 @@ import logging
 logger = logging.getLogger(__name__)
 
 _AUTO_BACKENDS = (
-    ("whisperx", "whisperx"),
-    ("faster-whisper", "faster_whisper"),
     ("funasr", "funasr"),
+    ("faster-whisper", "faster_whisper"),
+    ("whisperx", "whisperx"),
     ("whisper", "whisper"),
 )
 

@@ -10,20 +10,17 @@ Run with::
 """
 
 import unittest
-from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import numpy as np
 
 from src.asr import (
-    FasterWhisperAdapter,
-    FunASRAdapter,
+    ASRAdapter,
     MockASRAdapter,
     get_adapter,
     logprob_to_confidence,
     transcribe_segments,
 )
-from src.errors import BackendUnavailableError
 from src.asr.core import (
     _aggregate_confidence,
     _from_funasr_result,
@@ -82,40 +79,6 @@ class MockAdapterTests(unittest.TestCase):
         self.assertGreaterEqual(result["segments"][0]["end_time"], 2.0)
 
 
-class FasterWhisperAdapterTests(unittest.TestCase):
-    @patch("src.candidates.generator._load_faster_whisper_model")
-    def test_transcribes_with_stable_baseline_settings(self, mocked_load) -> None:
-        model = MagicMock()
-        model.transcribe.return_value = (
-            iter([
-                SimpleNamespace(
-                    start=0.0,
-                    end=1.0,
-                    text=" hello",
-                    avg_logprob=-0.1,
-                    no_speech_prob=0.0,
-                )
-            ]),
-            SimpleNamespace(language="en"),
-        )
-        mocked_load.return_value = model
-
-        result = FasterWhisperAdapter(model_size="small").transcribe_array(_tone(1.0))
-
-        self.assertEqual(result["text"], "hello")
-        self.assertEqual(result["language"], "en")
-        model.transcribe.assert_called_once()
-        kwargs = model.transcribe.call_args.kwargs
-        self.assertEqual(kwargs["beam_size"], 5)
-        self.assertEqual(kwargs["temperature"], 0.0)
-        self.assertFalse(kwargs["condition_on_previous_text"])
-
-    @patch("src.candidates.generator._load_faster_whisper_model", side_effect=ImportError)
-    def test_missing_backend_has_install_instruction(self, mocked_load) -> None:
-        with self.assertRaisesRegex(BackendUnavailableError, "requirements-asr.txt"):
-            FasterWhisperAdapter().transcribe_array(_tone(1.0))
-
-
 class FactoryTests(unittest.TestCase):
     def test_builds_known_adapters(self) -> None:
         self.assertIsInstance(get_adapter("mock"), MockASRAdapter)
@@ -127,10 +90,20 @@ class FactoryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             get_adapter("does-not-exist")
 
-    def test_funasr_accepts_shared_language_configuration(self) -> None:
+    def test_funasr_accepts_shared_language_argument(self) -> None:
         adapter = get_adapter("funasr", language=None)
-        self.assertIsInstance(adapter, FunASRAdapter)
+        self.assertEqual(adapter.name, "funasr")
         self.assertIsNone(adapter.language)
+
+    def test_auto_can_select_funasr_with_shared_language_argument(self) -> None:
+        def find_spec(module: str) -> object | None:
+            return object() if module == "funasr" else None
+
+        with patch("src.fallbacks.asr.importlib.util.find_spec", side_effect=find_spec):
+            adapter = get_adapter("auto", language="zh")
+
+        self.assertEqual(adapter.name, "funasr")
+        self.assertEqual(adapter.language, "zh")
 
 
 class TranscribeSegmentsTests(unittest.TestCase):
@@ -152,6 +125,37 @@ class TranscribeSegmentsTests(unittest.TestCase):
         enriched = transcribe_segments(_tone(1.0), segments, MockASRAdapter())
         self.assertEqual(enriched[0]["text"], "")
         self.assertEqual(enriched[0]["asr_confidence"], 0.0)
+
+    def test_context_padding_expands_asr_clip_without_changing_timestamps(self) -> None:
+        class RecordingAdapter(ASRAdapter):
+            name = "recording"
+
+            def __init__(self) -> None:
+                self.durations: list[float] = []
+
+            def transcribe_array(self, samples: np.ndarray, sample_rate: int = SAMPLE_RATE) -> dict:
+                duration = len(samples) / sample_rate
+                self.durations.append(duration)
+                return {
+                    "text": f"{duration:.1f}s",
+                    "language": "und",
+                    "model": self.name,
+                    "asr_confidence": 0.8,
+                    "segments": [],
+                }
+
+        adapter = RecordingAdapter()
+        segments = [{"meeting_id": "m", "segment_id": "m-0000", "start_time": 1.0, "end_time": 2.0}]
+        enriched = transcribe_segments(_tone(4.0), segments, adapter, context_padding_s=0.2)
+
+        self.assertAlmostEqual(adapter.durations[0], 1.4, places=3)
+        self.assertEqual(enriched[0]["start_time"], 1.0)
+        self.assertEqual(enriched[0]["end_time"], 2.0)
+        self.assertEqual(enriched[0]["asr_context_padding_s"], 0.2)
+
+    def test_context_padding_rejects_negative_values(self) -> None:
+        with self.assertRaises(ValueError):
+            transcribe_segments(_tone(1.0), [], MockASRAdapter(), context_padding_s=-0.1)
 
 
 class NormalizerTests(unittest.TestCase):

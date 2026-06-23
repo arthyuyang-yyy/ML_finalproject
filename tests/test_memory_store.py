@@ -74,6 +74,7 @@ def _events(meeting_id: str = "meeting_001") -> dict:
                 "speakers": ["SPEAKER_01"],
                 "evidence_ids": ["m1_seg_012"],
                 "confidence": "high",
+                "keywords": ["WhisperX", "pyannote", "对齐"],
             },
             {
                 "event_id": "ev_002",
@@ -100,6 +101,21 @@ class EpisodeBuildTests(unittest.TestCase):
         self.assertEqual(episode["confidence"], "high")
         self.assertEqual(episode["importance"], 0.90)
         self.assertEqual(episode["audio_clip_paths"], ["outputs/meeting_001/clips/m1_seg_012.wav"])
+        self.assertEqual(episode["event_id"], "ev_001")
+        self.assertEqual(episode["keywords"], ["WhisperX", "pyannote", "对齐"])
+        self.assertEqual(episode["quality_notes"], [])
+        self.assertEqual(episode["validation_warnings"], [])
+        self.assertEqual(
+            episode["evidence_quality"],
+            {
+                "min_asr_confidence": 0.9,
+                "min_speaker_confidence": 0.86,
+                "max_overlap_score": 0.08,
+                "has_high_overlap": False,
+                "has_unresolved_evidence": False,
+                "evidence_count": 1,
+            },
+        )
 
     def test_high_overlap_is_forced_to_uncertainty(self) -> None:
         episode = build_episodes(_events(), [_low_evidence(), _high_evidence()])[1]
@@ -110,6 +126,40 @@ class EpisodeBuildTests(unittest.TestCase):
         self.assertIn("Uncertain interpretation", episode["content"])
         self.assertIn("Candidate interpretations", episode["evidence_text"])
         self.assertIn("High-overlap evidence", episode["uncertainty_note"])
+
+    def test_low_quality_evidence_caps_episode_confidence(self) -> None:
+        evidence = _low_evidence()
+        evidence["asr_confidence"] = 0.60
+        episode = build_episodes(_events(), [evidence, _high_evidence()])[0]
+        self.assertEqual(episode["confidence"], "medium")
+        self.assertEqual(episode["importance"], 0.70)
+        self.assertIn("minimum ASR confidence is 0.60", episode["uncertainty_note"])
+        self.assertTrue(any("minimum ASR confidence is 0.60" in note for note in episode["quality_notes"]))
+        self.assertEqual(episode["evidence_quality"]["min_asr_confidence"], 0.6)
+
+    def test_very_low_speaker_confidence_caps_episode_to_low(self) -> None:
+        evidence = _low_evidence()
+        evidence["speaker_confidence"] = 0.45
+        episode = build_episodes(_events(), [evidence, _high_evidence()])[0]
+        self.assertEqual(episode["confidence"], "low")
+        self.assertEqual(episode["importance"], 0.60)
+        self.assertIn("minimum speaker confidence is 0.45", episode["uncertainty_note"])
+
+    def test_document_validation_warnings_are_preserved_in_episode_notes(self) -> None:
+        events = _events()
+        events["validation_warnings"] = ["events[2]: dropped unsupported action item"]
+        episode = build_episodes(events, [_low_evidence(), _high_evidence()])[0]
+        self.assertIn("dropped unsupported action item", episode["uncertainty_note"])
+
+    def test_event_indexed_validation_warnings_attach_to_matching_episode(self) -> None:
+        events = _events()
+        events["validation_warnings"] = ["events[1]: event cites unsupported speakers"]
+        episodes = build_episodes(events, [_low_evidence(), _high_evidence()])
+        self.assertNotIn("unsupported speakers", episodes[0]["uncertainty_note"])
+        self.assertIn("unsupported speakers", episodes[1]["uncertainty_note"])
+        self.assertEqual(episodes[1]["validation_warnings"], [
+            "Event validation warning for meeting_001: events[1]: event cites unsupported speakers"
+        ])
 
     def test_rejects_unknown_evidence_id(self) -> None:
         events = _events()

@@ -207,7 +207,7 @@ class FasterWhisperAdapter(ASRAdapter):
         except ImportError as exc:
             raise BackendUnavailableError(
                 "faster-whisper ASR is selected but unavailable; "
-                "install it with `pip install -r requirements-asr.txt`"
+                "install it with `pip install -r requirements.txt`"
             ) from exc
         except Exception as exc:
             raise BackendUnavailableError(
@@ -266,7 +266,7 @@ class FunASRAdapter(ASRAdapter):
         model: str = "paraformer-zh",
         vad_model: str = "fsmn-vad",
         punc_model: str = "ct-punc",
-        device: str | None = None,
+        device: str | None = "cpu",
         language: str | None = None,
         default_confidence: float = 0.6,
     ) -> None:
@@ -295,7 +295,15 @@ class FunASRAdapter(ASRAdapter):
         samples = _ensure_sample_rate(samples, sample_rate)
         model = self._ensure_model()
         result = model.generate(input=samples, batch_size=1)[0]
-        return _from_funasr_result(result, self.name, self.default_confidence, len(samples) / TARGET_SAMPLE_RATE)
+        transcript = _from_funasr_result(
+            result,
+            self.name,
+            self.default_confidence,
+            len(samples) / TARGET_SAMPLE_RATE,
+        )
+        if self.language:
+            transcript["language"] = self.language
+        return transcript
 
 
 _ADAPTERS: dict[str, type[ASRAdapter]] = {
@@ -335,6 +343,7 @@ def transcribe_segments(
     segments: list[dict[str, Any]],
     adapter: ASRAdapter,
     sample_rate: int = TARGET_SAMPLE_RATE,
+    context_padding_s: float = 0.0,
 ) -> list[dict[str, Any]]:
     """Attach ``text`` and ``asr_confidence`` to VAD segments from preprocessing.
 
@@ -343,18 +352,28 @@ def transcribe_segments(
     transcribed and the result merged in, leaving the original keys intact so the
     enriched segments can flow into :func:`src.evidence.builder.build_metadata_segment`.
     """
+    if context_padding_s < 0.0:
+        raise ValueError("context_padding_s must be non-negative")
     samples = np.asarray(samples, dtype=np.float32)
+    padding = int(round(context_padding_s * sample_rate))
     enriched: list[dict[str, Any]] = []
     for segment in segments:
         start = int(round(float(segment["start_time"]) * sample_rate))
         end = int(round(float(segment["end_time"]) * sample_rate))
-        clip = samples[max(0, start):max(0, end)]
+        padded_start = max(0, start - padding)
+        padded_end = min(samples.size, max(0, end) + padding)
+        clip = samples[padded_start:padded_end]
         if clip.size == 0:
             text, confidence = "", 0.0
         else:
             result = adapter.transcribe_array(clip, sample_rate)
             text, confidence = result["text"], result["asr_confidence"]
-        enriched.append({**segment, "text": text, "asr_confidence": confidence})
+        enriched.append({
+            **segment,
+            "text": text,
+            "asr_confidence": confidence,
+            "asr_context_padding_s": round(context_padding_s, 3),
+        })
     return enriched
 
 

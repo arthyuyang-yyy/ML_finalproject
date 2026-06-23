@@ -9,24 +9,30 @@ venv/
 .env
 .DS_Store
 
-# IDE
+# Test run artifacts
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+
+# IDE — share workspace config but ignore user/host-specific state
 .idea/
-.vscode/
+.vscode/.venv-*
+.vscode/launch.local.*
+.vscode/tasks.local.*
+.vscode/*.code-workspace
+.vscode/ipynb_checkpoints/
 *.swp
 *.swo
 
 # Large input data and generated artifacts
 data/raw_audio/*
 data/processed_audio/*
-# Evaluation corpora (AliMeeting / AISHELL-4 / AMI): audio + derived annotations
-# must never be committed. Keep data/README.md and scripts under version control.
-data/alimeeting/
+data/external/
+data/manifests/*.jsonl
+local_results/
+models/
 outputs/*
-
-# Generated/filled annotation sheets carry corpus transcripts -> never commit them
-# (the blank data/annotations/annotation_template.csv stays tracked).
-data/annotations/prefilled/
-data/annotations/built/
 
 # Audio and model files
 *.wav
@@ -42,5 +48,6 @@ data/annotations/built/
 # Keep empty research directories visible in Git
 !data/raw_audio/.gitkeep
 !data/processed_audio/.gitkeep
+!data/manifests/.gitkeep
 !outputs/**/
 !outputs/**/.gitkeep

@@ -1,6 +1,33 @@
 """Shared lightweight utilities."""
 
+import os
+from pathlib import Path
 from typing import Any
+
+
+def load_dotenv(dotenv_path: Path | str | None = None) -> None:
+    """Load ``.env`` file into ``os.environ`` without any external dependency.
+
+    If *dotenv_path* is not given, looks for ``.env`` in the project root
+    (two levels above this module). Lines starting with ``#`` are comments,
+    blank lines are skipped, and lines without ``=`` are ignored.
+    """
+    if dotenv_path is None:
+        dotenv_path = Path(__file__).resolve().parent.parent / ".env"
+    env_file = Path(dotenv_path)
+    if not env_file.is_file():
+        return
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if "=" not in stripped:
+            continue
+        key, _, value = stripped.partition("=")
+        key = key.strip()
+        value = value.strip().strip("\"'")
+        if key:
+            os.environ.setdefault(key, value)
 
 
 def validate_score(score: float, name: str = "score") -> float:

@@ -1,7 +1,4 @@
-"""Dependency-free multilingual character n-gram embedding baseline.
-
-Used when sentence-transformers is unavailable.
-"""
+"""Dependency-free multilingual BLAKE2 character n-gram embeddings."""
 
 import hashlib
 import math

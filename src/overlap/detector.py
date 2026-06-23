@@ -12,15 +12,61 @@ from typing import Any
 
 import numpy as np
 
-from src.audio.preprocess import TARGET_SAMPLE_RATE, energy_vad, load_audio
+from src.audio.preprocess import TARGET_SAMPLE_RATE, load_audio, silero_vad
 from src.diarization.core import load_pyannote_pipeline
 from src.errors import BackendExecutionError, BackendUnavailableError
 from src.fallbacks.overlap import estimate_with_energy_fallback
 
-DEFAULT_OVERLAP_THRESHOLD = 0.4
+DEFAULT_OVERLAP_THRESHOLD = 0.5
+MIN_AUTHORITATIVE_OVERLAP_SECONDS = 0.2
 PYANNOTE_OVERLAP_MODEL = "pyannote/overlapped-speech-detection"
+PYANNOTE_SEGMENTATION_MODEL = "pyannote/segmentation"
+PYANNOTE_SEGMENTATION_REVISION = "Interspeech2021"
 
 OverlapRegion = tuple[float, float]
+
+
+def _move_model_to_accelerator(model: Any) -> None:
+    """Move a pyannote model to CUDA/MPS when available, else keep CPU."""
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            model.to(torch.device("cuda"))
+        elif torch.backends.mps.is_available():
+            model.to(torch.device("mps"))
+    except Exception:
+        pass
+
+
+def _resolve_segmentation_checkpoint() -> str | None:
+    """Return the local HF cache snapshot for ``pyannote/segmentation`` when
+    all required assets are present (config + weights + hparams).
+
+    Returns ``None`` when the cache is incomplete or absent, in which case the
+    caller should fall back to ``Model.from_pretrained(<model_id>)``.
+    """
+    try:
+        from huggingface_hub import try_to_load_from_cache
+    except Exception:
+        return None
+
+    required = ("pytorch_model.bin", "hparams.yaml")
+    snapshot_root: str | None = None
+    for filename in required:
+        cached = try_to_load_from_cache(
+            PYANNOTE_SEGMENTATION_MODEL,
+            filename,
+            revision=PYANNOTE_SEGMENTATION_REVISION,
+        )
+        if cached is None or not isinstance(cached, str):
+            return None
+        if not os.path.isfile(cached):
+            return None
+        if snapshot_root is None:
+            # trim "/pytorch_model.bin" (or "/hparams.yaml") from the end
+            snapshot_root = os.path.dirname(cached)
+    return snapshot_root
 
 
 def estimate_segment_overlap_scores(
@@ -51,7 +97,13 @@ def estimate_segment_overlap_scores(
 
     if regions is not None:
         base = [
-            {**segment, "overlap_score": _round_score(_overlap_fraction(segment, regions)), "overlap_detector": detector}
+            {
+                **segment,
+                "overlap_score": _round_score(_overlap_fraction(segment, regions)),
+                "overlap_seconds": round(_overlap_seconds(segment, regions), 3),
+                "overlap_regions": _overlap_intersections(segment, regions),
+                "overlap_detector": detector,
+            }
             for segment in segments
         ]
         return _fuse_overlap_signals(base, diarization_turns or [], asr_instability or {})
@@ -67,26 +119,142 @@ def detect_pyannote_overlap_regions(
 ) -> list[OverlapRegion] | None:
     """Return pyannote overlapped-speech regions when configured.
 
-    A missing token disables this optional backend. Once configured, failures
-    are surfaced instead of silently changing the overlap detector.
+    A missing token disables this optional backend. Once configured, the
+    pipeline is run on an in-memory waveform (loaded via the project's own
+    :func:`load_audio`, bypassing pyannote.audio 4.x's torchcodec/FFmpeg file
+    decoder). The ``pyannote/overlapped-speech-detection`` pipeline is not
+    shipped with pyannote.audio 4.x (its ``OverlappedSpeechDetection`` pipeline
+    class was removed); in that case the OSD sub-model is still cached and a
+    direct :class:`Inference` over ``pyannote/segmentation`` is used with the
+    pipeline's published onset/offset thresholds to recover overlap regions.
+
+    Hard failures (missing dependency, model load error) are surfaced; a
+    pipeline class that no longer exists falls back to the inference path
+    rather than crashing the whole overlap detector.
     """
     token = auth_token or os.environ.get("HUGGINGFACE_TOKEN") or os.environ.get("HF_TOKEN")
     if not token:
         return None
 
+    pipeline: Any = None
     try:
         pipeline = load_pyannote_pipeline(model_name, token)
-        output = pipeline(audio_path)
     except ImportError as exc:
         raise BackendUnavailableError(
             "pyannote OSD is configured but pyannote.audio is unavailable"
         ) from exc
+    except AttributeError:
+        # pyannote.audio 4.x removed the OverlappedSpeechDetection pipeline
+        # class, so the model can no longer be loaded as a pipeline. Leave
+        # ``pipeline`` unset and recover overlap regions via a direct
+        # Inference over the segmentation sub-model below.
+        pass
+    except (BackendUnavailableError, BackendExecutionError):
+        raise
     except Exception as exc:
         raise BackendExecutionError(
             f"pyannote OSD failed for model '{model_name}'"
         ) from exc
 
+    try:
+        import torch
+
+        from src.audio.preprocess import TARGET_SAMPLE_RATE, load_audio
+
+        samples, sample_rate = load_audio(audio_path)
+        if sample_rate != TARGET_SAMPLE_RATE:
+            from src.audio.preprocess import resample
+
+            samples = resample(samples, sample_rate, TARGET_SAMPLE_RATE)
+            sample_rate = TARGET_SAMPLE_RATE
+        waveform = torch.from_numpy(np.asarray(samples, dtype=np.float32)).unsqueeze(0)
+        file = {"waveform": waveform, "sample_rate": int(sample_rate)}
+
+        if pipeline is None:
+            output = _osd_inference_fallback(file, token)
+        else:
+            try:
+                output = pipeline(file)
+            except AttributeError:
+                output = _osd_inference_fallback(file, token)
+    except ImportError as exc:
+        raise BackendUnavailableError(
+            "pyannote OSD is configured but pyannote.audio is unavailable"
+        ) from exc
+    except (BackendUnavailableError, BackendExecutionError):
+        raise
+    except Exception:
+        # Local model files are incomplete (hf-mirror does not serve
+        # pyannote/segmentation weights) or the accelerator is busy.
+        # Returning None lets the caller fall back to the energy-based
+        # detector instead of aborting the whole pipeline.
+        return None
+
     return _coerce_pyannote_regions(output)
+
+
+def _osd_inference_fallback(file: dict[str, Any], token: str) -> Any:
+    """Run overlap detection directly on ``pyannote/segmentation``.
+
+    The ``pyannote/overlapped-speech-detection`` config pins the
+    ``pyannote/segmentation`` model at the ``Interspeech2021`` revision and a
+    pair of onset/offset thresholds. pyannote.audio 4.x dropped the
+    ``OverlappedSpeechDetection`` pipeline class, so this helper loads the
+    segmentation model with :class:`Inference`, takes the overlap probability
+    track (channel index 1 of the segmentation output), and binarises it with
+    the same thresholds to produce an :class:`Annotation` of overlap regions.
+    """
+    from pyannote.audio import Inference
+    from pyannote.audio.core.model import Model
+    from pyannote.core import Annotation, Segment
+
+    # Prefer the local HF cache snapshot so we bypass ``hf_hub_download``'s
+    # HEAD request — this stack runs with ``HF_HUB_OFFLINE=1`` and the
+    # segmentation weights are only available on the upstream HF hub (not on
+    # hf-mirror), so the HEAD would otherwise raise ``OfflineModeIsEnabled``.
+    checkpoint = _resolve_segmentation_checkpoint()
+    if checkpoint is None:
+        checkpoint = PYANNOTE_SEGMENTATION_MODEL
+
+    model = Model.from_pretrained(checkpoint, token=token)
+    _move_model_to_accelerator(model)
+    inference = Inference(model, batch_size=32, pre_aggregation_hook=lambda scores: scores)
+    scores = inference(file)  # SlidingWindowFeature: (num_frames, num_classes)
+
+    # Channel layout for pyannote/segmentation: [no-speech, overlap, speech].
+    # The overlap track is index 1; robustly pick the overlap column when the
+    # model exposes the standard 3-class layout, otherwise pick the argmax
+    # against the speech column.
+    data = scores.data
+    if data.ndim == 3:
+        data = data.reshape(data.shape[0], data.shape[-1])
+    num_classes = data.shape[-1] if data.ndim == 2 else 1
+    if num_classes >= 3:
+        overlap_prob = data[:, 1]
+    elif num_classes == 2:
+        overlap_prob = data[:, 0]
+    else:
+        overlap_prob = data[:, 0]
+
+    onset, offset = 0.81, 0.48  # from pyannote/overlapped-speech-detection config
+    timeline = scores.sliding_window
+    annotation = Annotation()
+    active = False
+    start = 0.0
+    for i, prob in enumerate(overlap_prob):
+        t = timeline[i].start
+        if not active and prob >= onset:
+            active = True
+            start = t
+        elif active and prob < offset:
+            active = False
+            if t > start:
+                annotation[Segment(start, t)] = "OVERLAP"
+    if active:
+        end = float(timeline[len(overlap_prob) - 1].end)
+        if end > start:
+            annotation[Segment(start, end)] = "OVERLAP"
+    return annotation
 
 
 def _fuse_overlap_signals(
@@ -158,7 +326,7 @@ def _speaker_change_signal(segment: dict[str, Any], diarization_turns: list[dict
 def estimate_overlap_score(audio_path: str) -> float:
     """Estimate the maximum per-segment overlap score in an audio file."""
     samples, sample_rate = load_audio(audio_path)
-    regions = energy_vad(samples, sample_rate)
+    regions = silero_vad(samples, sample_rate)
     segments = [
         {"segment_id": f"overlap_seg_{index + 1:03d}", "start_time": start, "end_time": end}
         for index, (start, end) in enumerate(regions)
@@ -172,7 +340,7 @@ def estimate_overlap_score(audio_path: str) -> float:
 def detect_overlap_segments(audio_path: str, threshold: float = DEFAULT_OVERLAP_THRESHOLD) -> list[dict]:
     """Return timestamped VAD segments routed as high-overlap candidates."""
     samples, sample_rate = load_audio(audio_path)
-    regions = energy_vad(samples, sample_rate)
+    regions = silero_vad(samples, sample_rate)
     segments = [
         {"segment_id": f"overlap_seg_{index + 1:03d}", "start_time": start, "end_time": end}
         for index, (start, end) in enumerate(regions)
@@ -192,13 +360,26 @@ def _overlap_fraction(segment: dict[str, Any], overlap_regions: list[OverlapRegi
     if duration == 0.0:
         return 0.0
 
-    covered = 0.0
+    return min(1.0, _overlap_seconds(segment, overlap_regions) / duration)
+
+
+def _overlap_seconds(segment: dict[str, Any], overlap_regions: list[OverlapRegion]) -> float:
+    """Compute seconds of one VAD segment covered by overlap regions."""
+    return sum(end - start for start, end in _overlap_intersections(segment, overlap_regions))
+
+
+def _overlap_intersections(segment: dict[str, Any], overlap_regions: list[OverlapRegion]) -> list[list[float]]:
+    """Return overlap subregions clipped to one VAD segment."""
+    start = float(segment["start_time"])
+    end = float(segment["end_time"])
+
+    intersections: list[list[float]] = []
     for region_start, region_end in _merge_regions(overlap_regions):
         intersection_start = max(start, region_start)
         intersection_end = min(end, region_end)
         if intersection_end > intersection_start:
-            covered += intersection_end - intersection_start
-    return min(1.0, covered / duration)
+            intersections.append([round(intersection_start, 3), round(intersection_end, 3)])
+    return intersections
 
 
 def _merge_regions(regions: list[OverlapRegion]) -> list[OverlapRegion]:

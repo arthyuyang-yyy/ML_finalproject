@@ -1,153 +1,79 @@
 # System Architecture
 
-## Design Goal
+This document is the compact architecture reference for the current MVP. The
+main project contract lives in `README.md` and `Project_task.md`; this file only
+records the stable module boundaries and tradeoffs. Older API references and
+historical proposals were removed because they no longer matched the runnable
+pipeline.
 
-The architecture separates audio processing, uncertainty representation, LLM reasoning, and memory retrieval. Every downstream conclusion should remain traceable to source segments.
-
-## Data Flow (Actual Implementation)
+## Pipeline
 
 ```text
-Audio
-  -> preprocess_audio (normalize to 16kHz mono float32 WAV)
-  -> load_audio
-  -> segment_waveform (energy-based VAD with merge & split)
-  -> estimate_segment_overlap_scores
-       -> pyannote OSD (if HF_TOKEN set; configured failures are fatal)
-       -> explicit overlap regions
-       -> energy fallback (conservative, max 0.39)
-  -> route_segment (threshold 0.4)
-       -> low_overlap_cluster
-          -> process_low_overlap_segments
-             -> WhisperX/Whisper/Paraformer/Mock ASR
-             -> pyannote/WhisperX diarization turns or deterministic fallback
-       -> high_overlap_candidate
-          -> process_high_overlap_segments
-             -> faster-whisper multi-decode candidates or explicit fallback candidates
-  -> build_metadata_segment (17 required + 1 optional field evidence record)
-  -> write_segment_clips (export per-segment WAV)
-  -> validate_metadata_segment
-  -> extract_meeting_events (LLM or fallback)
-  -> build_episodes (event-level episodes; force overlap uncertainty)
-  -> upsert_episodes (atomic JSON replacement by meeting ID)
-  -> write_json (per-meeting JSON artifacts)
+input audio
+-> preprocess audio
+-> VAD segmentation
+-> diarization
+-> overlap scoring
+-> route by overlap_score
+   -> low_overlap_cluster: ASR + speaker attribution
+   -> high_overlap_candidate: candidate generation + resolver
+-> evidence_segments.json
+-> meeting_events.json
+-> episodic_memory.json
+-> evidence-backed QA
 ```
 
-See [pipeline_walkthrough.md](pipeline_walkthrough.md) for the complete 14-step call chain.
+## Segment Paths
 
-## Module Responsibilities
+Low-overlap segments are handled by `src/low_overlap.py` and ASR adapters. They
+must produce a final `speaker`, `text`, ASR confidence, speaker confidence, and
+an empty `candidates` list.
 
-### Core Pipeline
+High-overlap segments are handled by `src/high_overlap.py`,
+`src/candidates/generator.py`, optional `src/speech_separation.py` adapters, and
+`src/llm/resolver.py`. Candidate generation keeps alternate transcripts and
+decode settings. The resolver then selects a final text by calling a configured
+Gemma/Ollama client, or falls back to the highest-confidence candidate. If no
+candidate exists, the segment is marked `unresolved` instead of inventing text.
 
-| Module | File | Responsibility |
-| --- | --- | --- |
-| Preprocessing | `src/audio/preprocess.py` | Demux/decode common formats with soundfile/PyAV, optionally denoise, mono-convert, polyphase-resample once, peak-normalize, VAD-segment, and export float32 WAV |
-| Clip export | `src/audio/clipper.py` | Write per-evidence-segment WAV clips to disk |
-| Overlap detection | `src/overlap/detector.py` | Score overlap: pyannote OSD adapter (priority), explicit region coverage, or energy fallback (max 0.39) |
-| Dual-path router | `src/overlap/router.py` | Route segments by overlap threshold (default 0.4) |
-| Low-overlap path | `src/low_overlap.py` | Produce stable text, speaker, timestamps, ASR confidence, and speaker confidence for low-overlap segments |
-| ASR | `src/asr/core.py` | Pluggable adapters (Mock/WhisperX/Whisper/Paraformer) with calibrated confidence; WhisperX is the preferred heavy backend for low-overlap segments |
-| Diarization | `src/diarization/core.py` | pyannote speaker turns when configured, otherwise deterministic speaker-labeling fallback |
-| Speech separation | `src/speech_separation.py`, `src/nmf_separation.py` | Replaceable adapters: a dependency-free from-scratch NMF baseline (`nmf`) and an optional SpeechBrain SepFormer baseline (`sepformer`), disabled by default with safe fallback |
-| High-overlap path | `src/high_overlap.py` | Prefer per-source ASR candidates after optional separation; otherwise use multi-decode candidates while preserving a mixed/empty main record |
-| Candidate generator | `src/candidates/generator.py` | Produce multiple transcript/speaker hypotheses with faster-whisper beam/temperature/language variations, with fallback candidates for lightweight runs |
-| Evidence builder | `src/evidence/builder.py` | Merge low/high-overlap results, normalize candidates, sort by time, and emit the shared evidence schema (17 required + 1 optional field) |
-| Schema validation | `src/evidence/validator.py` | Validates evidence-packet records, candidate structure, and per-meeting lists |
-### Fallbacks (Deterministic Lightweight Backends)
+Speech separation is optional. The default backend is `none`; `mock`, `nmf`, and
+`sepformer` can be enabled to add separated-source candidates before resolver
+selection.
 
-| Module | File | Responsibility |
-| --- | --- | --- |
-| ASR fallback | `src/fallbacks/asr.py` | ASR backend auto-selection |
-| Candidate fallback | `src/fallbacks/candidates.py` | Uncertainty-preserving candidate generation |
-| Diarization fallback | `src/fallbacks/diarization.py` | Deterministic speaker clustering |
-| Overlap fallback | `src/fallbacks/overlap.py` | Energy-based overlap estimation |
-| Event fallback | `src/fallbacks/events.py` | Deterministic meeting event extraction |
-| QA fallback | `src/fallbacks/qa.py` | Evidence-cited deterministic QA |
-| Embeddings fallback | `src/fallbacks/embeddings.py` | Hash-based character n-gram embeddings |
+## Evidence Contract
 
-### Pipeline Orchestration
+`src/evidence/` is the boundary between audio processing and downstream memory.
+Every segment must expose timestamps, speaker, text, route metadata, confidence
+scores, audio paths, candidates, and uncertainty notes. Resolved high-overlap
+segments may additionally expose:
 
-| Module | File | Responsibility |
-| --- | --- | --- |
-| Run pipeline | `src/pipeline/run_pipeline.py` | `run_meeting_pipeline()` — end-to-end orchestration from audio to artifacts |
-| Config | `src/pipeline/config.py` | `PipelineConfig` frozen dataclass (paths, SR, threshold, language) |
-| I/O | `src/pipeline/io.py` | `ensure_meeting_dirs()`, `write_json()`, `read_json()` |
+- `source`: `llm_resolved`, `fallback_resolved`, or `unresolved`
+- `decision_reason`: short explanation of the resolver decision
 
-### LLM Subsystem
+High-overlap evidence keeps the original `candidates` list after resolution so
+QA, review, and future evaluation can inspect alternatives.
 
-| Module | File | Responsibility |
-| --- | --- | --- |
-| Event extractor | `src/llm/event_extractor.py` | Produce structured meeting documents with JSON repair, retry, invalid-event filtering, and deterministic fallback |
-| Event validator | `src/llm/event_validator.py` | Enforce event types, real evidence IDs, supported speakers/owners, action-item fields, and overlap-confidence rules |
-| Gemma client | `src/llm/gemma_client.py` | Injectable local or remote Gemma JSON-generation function |
-| Prompts | `src/llm/prompts.py` | Build strict JSON-schema extraction and repair prompts grounded in evidence |
+## Memory and Retrieval
 
-### Memory & QA
+`src/memory/episodic_store.py` converts meeting events into episodes.
+`src/memory/retriever.py` ranks episodes with:
 
-| Module | File | Responsibility |
-| --- | --- | --- |
-| Episodic memory | `src/memory/episodic_store.py` | Convert events to traceable episodes, enforce overlap uncertainty, and atomically upsert long-term JSON memory by meeting |
-| Hybrid retrieval | `src/memory/retriever.py` | Rank episodes with BM25, embeddings, importance, recency, and overlap-aware penalties |
-| RAG QA | `src/qa/answerer.py` | Let Gemma answer from top-k episodes only, validate citations, and fall back safely when output is invalid |
+```text
+0.70 * embedding_similarity + 0.30 * keyword_score
+```
 
-### Evaluation & Data
+The embedding backend is the custom BLAKE2 character n-gram hash embedding in
+`src/fallbacks/embeddings.py`. This is an MVP tradeoff: it is deterministic,
+lightweight, and easy to test, but it does not provide transformer-level semantic
+matching, recency weighting, or event-importance priors.
 
-| Module | File | Responsibility |
-| --- | --- | --- |
-| Evaluation | `src/evaluation/core.py` | WER, CER, overlap-routing metrics, speaker-attribution accuracy, evidence quality (stub) |
-| Data synthesis | `src/data_synthesis.py` | Controlled two-speaker overlap mixtures with SNR and ground-truth annotations |
-| Utilities | `src/utils.py` | `validate_score()` utility |
+## Optional Backends
 
-### UI
+Large models are loaded only when selected at runtime. Tests and demos can run
+with mock/fallback adapters. Model weights, raw audio, generated outputs, and
+local environment files should remain outside git.
 
-| Module | File | Responsibility |
-| --- | --- | --- |
-| Gradio app | `src/ui/gradio_app.py` | Five-area demo for upload, evidence timeline, high-overlap candidates, long-term memory, and cross-meeting QA |
-
-### Package Facades
-
-| Package | Re-exports |
-| --- | --- |
-| `src/overlap/` | `detect_overlap_segments`, `estimate_segment_overlap_scores`, `detect_pyannote_overlap_regions`, `DEFAULT_OVERLAP_THRESHOLD` |
-| `src/evidence/` | `build_evidence_segments`, `build_evidence_file`, `build_metadata_segment`, `validate_metadata_segment`, `validate_meeting`, `validate_candidate` |
-| `src/llm/` | `extract_meeting_events`, `validate_meeting_event` |
-| `src/memory/` | `build_episodes`, `build_episodes_file`, `upsert_episodes`, `read_episodes`, `retrieve_episodes` |
-| `src/qa/` | `answer_question`, `validate_qa_answer`, prompt builders, and compatibility QA entry points |
-| `src/candidates/` | `generate_high_overlap_candidates` |
-
-## Key Contracts
-
-- Scores use the range `[0.0, 1.0]`.
-- Times are seconds from the beginning of the meeting audio.
-- High-overlap records retain candidate lists and uncertainty notes.
-- High-overlap main records use `speaker="MIXED"` and `text=""`; transcript content is kept in `candidates` rather than forced into one answer.
-- Energy fallback overlap scores are capped at 0.39 (below the default routing threshold of 0.4).
-- Low-overlap records are single-hypothesis evidence records: stable `text`, `speaker`, timestamps, `asr_confidence`, `speaker_confidence`, empty `candidates`, and empty `uncertainty_note`.
-- Decisions and action items must carry timestamped evidence.
-- Storage and retrieval backends remain replaceable during early experiments.
-
-## IO Artifact Paths
-
-Per-meeting outputs are written to `outputs/{meeting_id}/`:
-
-| Artifact | Path | Description |
-| --- | --- | --- |
-| Preprocessed audio | `preprocessed.wav` | 16kHz mono float32 WAV |
-| VAD segments | `vad_segments.json` | Timestamped speech regions |
-| Overlap scores | `overlap.json` | VAD segments with overlap scores |
-| Low-overlap segments | `low_overlap_segments.json` | Evidence records routed to low-overlap path |
-| High-overlap candidates | `high_overlap_candidates.json` | Evidence records routed to high-overlap path |
-| Evidence segments | `evidence_segments.json` | All validated evidence records |
-| Meeting events | `meeting_events.json` | LLM-extracted meeting events |
-| Episodic memory | `episodic_memory.json` | Episode records |
-| Long-term episodic memory | `memory/episodic_memory.json` | Cross-meeting episodes; reprocessing a meeting replaces its previous records |
-| Audio clips | `clips/{evidence_id}.wav` | Per-segment WAV exports |
-
-## Implementation Status
-
-| Phase | Status |
-| --- | --- |
-| 1. Validate metadata and annotation contracts | Completed |
-| 2. Baseline overlap detection, ASR, and diarization | Completed (pyannote adapters + conservative fallbacks, low-overlap ASR/speaker path, mock defaults for tests) |
-| 3. Candidate generation and uncertainty-aware prompts | Completed (multi-decode candidate interface, fallback candidates, LLM event extraction) |
-| 4. Local episode storage and retrieval | Completed (atomic long-term JSON upsert, BM25 + embedding hybrid retrieval) |
-| 5. Run ablations and evidence-quality evaluation | Pending (requires annotated evaluation split, heavy-model integration) |
+To add a backend, implement the existing adapter interface for that area
+(`ASRAdapter`, diarization adapter, speech-separation adapter, or `LLMBackend`),
+keep imports lazy, and add focused tests that can run without downloading model
+weights.

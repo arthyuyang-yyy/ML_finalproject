@@ -41,7 +41,7 @@ python main.py data/raw_audio/meeting_001.wav \
 SepFormer 后端需要先装重依赖：
 
 ```bash
-python -m pip install -r requirements-separation.txt
+python -m pip install -r requirements.txt
 
 python main.py data/raw_audio/meeting_001.wav \
   --meeting-id meeting_001 \

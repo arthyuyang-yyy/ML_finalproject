@@ -66,6 +66,11 @@ def validate_meeting_event(
         raise ValueError("event.speakers must be a list of strings")
     normalized["speakers"] = [value.strip() for value in speakers if value.strip()]
     normalized["confidence"] = confidence_level(event["confidence"])
+    keywords = event.get("keywords", [])
+    if keywords:
+        if not isinstance(keywords, list) or any(not isinstance(value, str) for value in keywords):
+            raise ValueError("event.keywords must be a list of strings")
+        normalized["keywords"] = [value.strip() for value in keywords if value.strip()]
 
     if event_type == "action_item":
         normalized["task"] = required_text(event.get("task"), "action_item.task")
@@ -100,6 +105,9 @@ def validate_meeting_event(
         )
     if event_type == "uncertainty":
         normalized["confidence"] = "low"
+        note = "The event extractor marked this event as uncertain."
+        current_note = str(normalized.get("uncertainty_note", event.get("uncertainty_note", "")))
+        normalized["uncertainty_note"] = current_note if note in current_note else _append_note(current_note, note)
 
     return normalized
 

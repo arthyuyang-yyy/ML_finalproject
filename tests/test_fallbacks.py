@@ -2,7 +2,7 @@
 
 These tests guarantee that the lightweight / no-model pipeline produces valid,
 schema-compliant output without whisper, pyannote, faster-whisper, Gemma, or
-sentence-transformers installed.
+an external embedding model installed.
 """
 
 import tempfile
@@ -28,6 +28,7 @@ from src.fallbacks import (
     fallback_candidates,
     fallback_event_document,
     fallback_answer,
+    resolve_asr_backend,
 )
 
 
@@ -116,6 +117,15 @@ class MockASRFallbackTests(unittest.TestCase):
         with patch("src.fallbacks.resolve_asr_backend", return_value="funasr"):
             adapter = get_adapter("auto", language=None)
         self.assertEqual(adapter.name, "funasr")
+
+    def test_auto_prefers_funasr_when_multiple_real_backends_exist(self) -> None:
+        available_modules = {"funasr", "whisperx", "faster_whisper"}
+
+        def find_spec(module_name: str):
+            return object() if module_name in available_modules else None
+
+        with patch("src.fallbacks.asr.importlib.util.find_spec", side_effect=find_spec):
+            self.assertEqual(resolve_asr_backend(), "funasr")
 
     def test_mock_adapter_produces_valid_transcript_shape(self) -> None:
         adapter = MockASRAdapter(confidence=0.8, language="en")
@@ -434,7 +444,16 @@ class LightweightPipelineInvariants(unittest.TestCase):
                 overlap_threshold=0.4,
                 language="und",
             )
-            result = run_meeting_pipeline(str(input_path), "meeting_fb", config=config)
+            # silero VAD won't fire on a synthetic sine tone; stub one segment so
+            # the fallback pipeline produces schema-valid evidence.
+            with patch("src.pipeline.run_pipeline.segment_waveform",
+                       side_effect=lambda samples, sample_rate, meeting_id="meeting", **_: [{
+                           "meeting_id": meeting_id,
+                           "segment_id": f"{meeting_id}_seg_001",
+                           "start_time": 0.0,
+                           "end_time": round(min(1.0, len(samples) / sample_rate), 3),
+                       }]):
+                result = run_meeting_pipeline(str(input_path), "meeting_fb", config=config)
 
             evidence = read_json(Path(result["output_dir"]) / "evidence_segments.json")
             errors = validate_evidence_segments(evidence)

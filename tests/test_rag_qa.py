@@ -3,6 +3,8 @@
 import unittest
 
 from src.llm.gemma_client import GemmaClient
+from src.fallbacks.embeddings import HashingEmbeddingBackend
+from src.memory.retriever import retrieve_episodes
 from src.qa.answerer import answer_question
 from src.qa.prompts import build_qa_prompt
 from src.rag_qa import answer_question_with_evidence
@@ -64,6 +66,26 @@ def _valid_model_answer() -> dict:
 class AnswerWithEvidenceTests(unittest.TestCase):
     def test_empty_episodes_returns_explicit_insufficient_answer(self) -> None:
         result = answer_question_with_evidence("谁负责？", [])
+        self.assertTrue(result["insufficient_evidence"])
+        self.assertIn("无法确定", result["answer"])
+        self.assertEqual(result["evidence_ids"], [])
+
+    def test_irrelevant_memory_returns_explicit_insufficient_answer(self) -> None:
+        budget_episode = _episode(
+            event_type="decision",
+            content="The budget was approved.",
+        )
+        budget_episode["topic"] = "budget"
+        budget_episode["evidence_text"] = "The budget was approved."
+        retrieved = retrieve_episodes(
+            "Who discovered Neptune?",
+            episodes=[budget_episode],
+            embedding_backend=HashingEmbeddingBackend(),
+        )
+
+        result = answer_question("Who discovered Neptune?", retrieved)
+
+        self.assertEqual(retrieved, [])
         self.assertTrue(result["insufficient_evidence"])
         self.assertIn("无法确定", result["answer"])
         self.assertEqual(result["evidence_ids"], [])

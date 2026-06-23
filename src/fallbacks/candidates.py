@@ -11,15 +11,17 @@ def fallback_candidates(
     """Return explicit uncertainty-preserving candidates when ASR backend is absent."""
     segment_id = str(segment.get("segment_id") or segment.get("evidence_id") or "segment")
     text = str(segment.get("text", "")).strip()
+    is_placeholder = False
     if not text:
         text = "[high-overlap transcript candidate pending ASR decode]"
+        is_placeholder = True
 
     return [
         {
             "candidate_id": f"{segment_id}_c{index}",
             "speaker": _speaker_hypothesis(index, speaker_hypotheses),
             "text": text,
-            "confidence": round(max(0.0, 0.62 - 0.07 * (index - 1)), 3),
+            "confidence": 0.0 if is_placeholder else round(max(0.0, 0.62 - 0.07 * (index - 1)), 3),
             "uncertainty_note": _decode_note(config, backend="fallback"),
             "decode_config": {
                 "beam_size": int(config["beam_size"]),

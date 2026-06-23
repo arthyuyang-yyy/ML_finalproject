@@ -17,6 +17,7 @@ def process_low_overlap_segments(
     asr_adapter: ASRAdapter,
     sample_rate: int = TARGET_SAMPLE_RATE,
     diarization_turns: list[dict[str, Any]] | None = None,
+    asr_context_padding_s: float = 0.0,
 ) -> list[dict[str, Any]]:
     """Return low-overlap segments with text, speaker labels, timestamps, and confidence."""
     if not segments:
@@ -28,7 +29,13 @@ def process_low_overlap_segments(
         samples=samples,
         sample_rate=sample_rate,
     )
-    transcribed = transcribe_segments(samples, speaker_segments, adapter=asr_adapter, sample_rate=sample_rate)
+    transcribed = transcribe_segments(
+        samples,
+        speaker_segments,
+        adapter=asr_adapter,
+        sample_rate=sample_rate,
+        context_padding_s=asr_context_padding_s,
+    )
     return [
         {
             **segment,
@@ -37,4 +44,5 @@ def process_low_overlap_segments(
             "uncertainty_note": "",
         }
         for segment in transcribed
+        if str(segment.get("text", "")).strip()
     ]

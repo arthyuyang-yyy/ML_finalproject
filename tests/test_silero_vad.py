@@ -1,4 +1,4 @@
-"""Tests for the silero VAD backend and segment_waveform method dispatch."""
+"""Tests for the silero VAD backend and segment_waveform dispatch."""
 
 import importlib.util
 import unittest
@@ -12,22 +12,19 @@ _HAS_FASTER_WHISPER = importlib.util.find_spec("faster_whisper") is not None
 
 
 class SegmentWaveformDispatchTests(unittest.TestCase):
-    def test_unknown_method_raises(self) -> None:
-        with self.assertRaisesRegex(ValueError, "unknown VAD method"):
-            segment_waveform(np.zeros(16000, dtype=np.float32), 16000, method="bogus")
-
-    def test_energy_is_default_and_routes_to_energy_vad(self) -> None:
-        with patch("src.audio.preprocess.energy_vad", return_value=[(0.0, 1.0)]) as energy:
-            segs = segment_waveform(np.zeros(16000, dtype=np.float32), 16000, meeting_id="m")
-        energy.assert_called_once()
-        self.assertEqual(segs[0]["segment_id"], "m_seg_001")
-        self.assertEqual((segs[0]["start_time"], segs[0]["end_time"]), (0.0, 1.0))
-
-    def test_silero_method_routes_to_silero_vad(self) -> None:
+    def test_segment_waveform_runs_silero_vad(self) -> None:
         with patch("src.audio.preprocess.silero_vad", return_value=[(1.0, 3.0)]) as silero:
-            segs = segment_waveform(np.zeros(16000, dtype=np.float32), 16000, method="silero")
+            segs = segment_waveform(np.zeros(16000, dtype=np.float32), 16000, meeting_id="m")
         silero.assert_called_once()
         self.assertEqual((segs[0]["start_time"], segs[0]["end_time"]), (1.0, 3.0))
+        self.assertEqual(segs[0]["segment_id"], "m_seg_001")
+
+    def test_segment_waveform_forwards_vad_kwargs(self) -> None:
+        with patch("src.audio.preprocess.silero_vad", return_value=[(0.0, 1.0)]) as silero:
+            segment_waveform(np.zeros(16000, dtype=np.float32), 16000, threshold=0.4, min_silence_ms=300)
+        _, kwargs = silero.call_args
+        self.assertEqual(kwargs["threshold"], 0.4)
+        self.assertEqual(kwargs["min_silence_ms"], 300)
 
 
 @unittest.skipUnless(_HAS_FASTER_WHISPER, "faster-whisper not installed")

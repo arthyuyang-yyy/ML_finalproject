@@ -1,0 +1,107 @@
+{
+  // Tasks visible via Terminal → Run Task…  (Ctrl+Shift+P → "Tasks: Run Task").
+  // Each task runs through ``.venv/bin/python`` so it's identical regardless
+  // of whether you invoke it from the menu, the command palette, or ``make``.
+
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "pytest",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/python",
+      "args": ["-m", "pytest", "-q"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": ["$pytest"],
+      "group": { "kind": "test", "isDefault": true },
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "ruff check",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/python",
+      "args": ["-m", "ruff", "check", "src", "tests", "main.py", "app.py", "experiments/scripts"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": ["$ruff"],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "ruff format",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/python",
+      "args": ["-m", "ruff", "format", "src", "tests", "main.py", "app.py", "experiments/scripts"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "run pipeline",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/python",
+      "args": [
+        "main.py",
+        "${workspaceFolder}/data/alimeeting/Eval_Ali/Eval_Ali_far/audio_dir/R8009_M8018_MS809.wav",
+        "--meeting-id", "R8009_M8018_MS809",
+        "--asr", "faster-whisper",
+        "--asr-device", "cuda",
+        "--asr-compute-type", "float16"
+      ],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "build matrix",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/python",
+      "args": ["experiments/scripts/build_matrix.py"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "run matrix",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/python",
+      "args": ["experiments/scripts/run_matrix.py", "--gpus", "0,1", "--deepseek"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "isBackground": true,
+      "presentation": { "reveal": "always", "panel": "dedicated", "close": false }
+    },
+    {
+      "label": "evaluate",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/python",
+      "args": ["experiments/scripts/evaluate_runs.py", "--runs-root", "experiments/runs", "--force"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "aggregate",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/python",
+      "args": ["experiments/scripts/aggregate.py"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "setup models",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/python",
+      "args": ["scripts/setup_models.py"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "setup venv",
+      "type": "shell",
+      "command": "bash",
+      "args": ["${workspaceFolder}/scripts/setup_venv.sh"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "shared" }
+    }
+  ]
+}

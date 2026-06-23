@@ -1,4 +1,4 @@
-"""High-overlap path: preserve multiple candidates instead of one transcript."""
+"""High-overlap path: generate candidates before resolver finalization."""
 
 from typing import Any
 
@@ -25,7 +25,7 @@ def process_high_overlap_segments(
     separation_adapter: SpeechSeparationAdapter | None = None,
     asr_config: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return high-overlap records with empty main text and candidate hypotheses."""
+    """Return high-overlap candidate records before LLM/fallback resolution."""
     processed: list[dict[str, Any]] = []
     for segment in segments:
         clip = _slice_segment(samples, segment, sample_rate)
@@ -37,6 +37,13 @@ def process_high_overlap_segments(
             "speaker_confidence": HIGH_OVERLAP_SPEAKER_CONFIDENCE,
             "processing_path": HIGH_OVERLAP_PATH,
         }
+        decode_start = float(segment.get("decode_start_time", segment["start_time"]))
+        decode_end = float(segment.get("decode_end_time", segment["end_time"]))
+        if decode_start != float(segment["start_time"]) or decode_end != float(segment["end_time"]):
+            candidate_source.update({
+                "decode_start_time": round(decode_start, 3),
+                "decode_end_time": round(decode_end, 3),
+            })
         speaker_hypotheses = _speakers_for_segment(segment, diarization_turns or [])
         sources = separate_waveform(clip, sample_rate, separation_adapter)
         candidates = generate_separated_source_candidates(
@@ -130,8 +137,10 @@ def _merge_candidates(
 
 def _slice_segment(samples: np.ndarray, segment: dict[str, Any], sample_rate: int) -> np.ndarray:
     """Extract one segment waveform from full meeting samples."""
-    start = max(0, int(round(float(segment["start_time"]) * sample_rate)))
-    end = max(start, int(round(float(segment["end_time"]) * sample_rate)))
+    start_time = float(segment.get("decode_start_time", segment["start_time"]))
+    end_time = float(segment.get("decode_end_time", segment["end_time"]))
+    start = max(0, int(round(start_time * sample_rate)))
+    end = max(start, int(round(end_time * sample_rate)))
     return samples[start:end]
 
 

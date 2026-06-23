@@ -62,7 +62,9 @@ class GemmaClient:
         backend: LLMBackend | None = None,
         generator: GemmaGenerator | None = None,
     ) -> None:
-        if backend is not None:
+        if backend is not None and not hasattr(backend, "generate") and callable(backend):
+            self._backend = _CallableBackend(backend)  # type: ignore[arg-type]
+        elif backend is not None:
             self._backend = backend
         elif generator is not None:
             self._backend = _CallableBackend(generator)
@@ -122,11 +124,16 @@ def create_gemma_client(
         return None
     if normalized == "ollama":
         return OllamaGemmaClient(model=model, base_url=base_url)
-    if normalized == "openai":
+    if normalized in {"openai", "deepseek"}:
+        if normalized == "deepseek":
+            model = model or os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+            base_url = base_url or os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
+            api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+            return GemmaClient(backend=OpenAIBackend(model=model, base_url=base_url, api_key=api_key, trust_env=False))
         return GemmaClient(backend=OpenAIBackend(model=model, base_url=base_url))
     if normalized == "transformers":
         return GemmaClient(backend=TransformersBackend(model_name=model))
-    raise ValueError("gemma backend must be one of: none, ollama, openai, transformers")
+    raise ValueError("gemma backend must be one of: none, ollama, openai, deepseek, transformers")
 
 
 def run_gemma(prompt: str, client: GemmaClient | None = None) -> str:

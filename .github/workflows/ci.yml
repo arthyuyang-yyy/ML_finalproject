@@ -21,13 +21,13 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      # 3) Install dev/test dependencies (numpy, soundfile, pytest, ruff, mypy).
-      #    Optional demo extras (e.g. gradio) are intentionally NOT installed so
-      #    the suite verifies that unit tests stay dependency-free.
-      - name: Install dev dependencies
+      # 3) Install only the lightweight dependencies needed by unit tests.
+      #    Heavy model backends stay lazy-imported and are covered by adapter
+      #    tests without downloading model stacks in CI.
+      - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
+          pip install numpy soundfile scipy pytest ruff
 
       # 4) Lint. Non-blocking for now (continue-on-error) until the existing
       #    codebase is fully ruff-clean; flip to a hard gate afterwards.
