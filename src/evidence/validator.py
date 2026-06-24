@@ -100,12 +100,23 @@ def validate_metadata_segment(
             "to preserve uncertainty for downstream reasoning"
         )
     if record["processing_path"] == "high_overlap_candidate":
-        if record["speaker"] != "MIXED":
-            raise ValueError("high_overlap_candidate segments must use speaker='MIXED'")
-        if record["text"].strip():
-            raise ValueError("high_overlap_candidate segments must keep the primary text empty")
         if not record["uncertainty_note"].strip():
             raise ValueError("high_overlap_candidate segments must explain their uncertainty")
+        if not record["text"].strip() and record.get("source") in {"llm_resolved", "fallback_resolved"}:
+            raise ValueError("resolved high_overlap_candidate segments must contain transcript text")
+        if "resolution_mode" in record and record["resolution_mode"] not in {
+            "selected",
+            "merged",
+            "corrected",
+            "unresolved",
+            "baseline_preserved",
+        }:
+            raise ValueError("high_overlap_candidate resolution_mode is invalid")
+        if "source_candidate_ids" in record and (
+            not isinstance(record["source_candidate_ids"], list)
+            or any(not isinstance(value, str) or not value.strip() for value in record["source_candidate_ids"])
+        ):
+            raise ValueError("high_overlap_candidate source_candidate_ids must contain non-empty strings")
     else:
         if not record["text"].strip():
             raise ValueError("low_overlap_cluster segments must contain transcript text")

@@ -208,7 +208,7 @@ def _to_model_batch(samples: np.ndarray) -> Any:
         import torch
     except ImportError as exc:
         raise BackendUnavailableError(
-            "SepFormer requires SpeechBrain and PyTorch; install requirements-separation.txt"
+            "SepFormer requires SpeechBrain and PyTorch; install requirements.txt"
         ) from exc
     return torch.from_numpy(np.asarray(samples, dtype=np.float32)).unsqueeze(0)
 
@@ -222,7 +222,7 @@ def _load_sepformer(model_source: str, savedir: str, device: str) -> Any:
             from speechbrain.pretrained import SepformerSeparation
     except ImportError as exc:
         raise BackendUnavailableError(
-            "SepFormer requires SpeechBrain and PyTorch; install requirements-separation.txt"
+            "SepFormer requires SpeechBrain and PyTorch; install requirements.txt"
         ) from exc
     try:
         return SepformerSeparation.from_hparams(

@@ -237,6 +237,16 @@ class EventValidationTests(unittest.TestCase):
         validated = validate_meeting_events_document(document, _make_evidence_segments())
         self.assertEqual(validated["events"][1]["owner"], "uncertain")
 
+    def test_event_keywords_must_be_strings(self) -> None:
+        document = _valid_document()
+        document["events"][0]["keywords"] = ["baseline", "WhisperX"]
+        validated = validate_meeting_events_document(document, _make_evidence_segments())
+        self.assertEqual(validated["events"][0]["keywords"], ["baseline", "WhisperX"])
+
+        document["events"][0]["keywords"] = ["baseline", 42]
+        with self.assertRaisesRegex(ValueError, "keywords"):
+            validate_meeting_events_document(document, _make_evidence_segments())
+
     def test_event_speaker_must_be_supported_by_cited_evidence(self) -> None:
         document = _valid_document()
         document["events"][0]["speakers"] = ["SPEAKER_99"]
@@ -307,12 +317,16 @@ class PromptTests(unittest.TestCase):
         self.assertIn("Allowed event_type values", prompt)
         self.assertIn("action_item", prompt)
         self.assertIn("evidence_ids", prompt)
+        self.assertIn("keywords", prompt)
+        self.assertIn("smallest sufficient evidence_ids", prompt)
         self.assertIn("Use WhisperX as the baseline", prompt)
 
     def test_prompt_forbids_high_confidence_overlap_claims(self) -> None:
         prompt = build_event_extraction_prompt(_make_evidence_segments(include_high=True))
         self.assertIn("Never mark an event \"high\"", prompt)
         self.assertIn("owner", prompt)
+        self.assertIn("omit this field entirely", prompt)
+        self.assertIn("Use event_type=\"decision\" only", prompt)
 
 
 if __name__ == "__main__":

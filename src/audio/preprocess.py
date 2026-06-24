@@ -62,6 +62,7 @@ def _decode_audio(audio_path: Path) -> tuple[np.ndarray, int]:
             return decode_audio_with_pyav(audio_path)
         except ImportError as exc:
             raise RuntimeError(
+                f"unable to decode audio file '{audio_path}'. "
                 f"soundfile could not decode '{audio_path.name}', and PyAV is unavailable. "
                 "Install it with `pip install av`, or convert the file to WAV."
             ) from exc
@@ -176,81 +177,6 @@ def peak_normalize(samples: np.ndarray, target_peak: float = 0.97) -> np.ndarray
     return (samples * (target_peak / peak)).astype(np.float32)
 
 
-def frame_rms(samples: np.ndarray, frame_length: int, hop_length: int) -> tuple[np.ndarray, np.ndarray]:
-    """Return per-frame RMS energy and each frame's start sample index."""
-    if frame_length <= 0 or hop_length <= 0:
-        raise ValueError("frame_length and hop_length must be positive")
-    if samples.size < frame_length:
-        return np.zeros(0, dtype=np.float32), np.zeros(0, dtype=np.int64)
-    starts = np.arange(0, samples.size - frame_length + 1, hop_length, dtype=np.int64)
-    rms = np.empty(starts.size, dtype=np.float32)
-    for i, start in enumerate(starts):
-        frame = samples[start : start + frame_length]
-        rms[i] = np.sqrt(np.mean(frame.astype(np.float64) ** 2))
-    return rms, starts
-
-
-def energy_vad(
-    samples: np.ndarray,
-    sample_rate: int = TARGET_SAMPLE_RATE,
-    frame_ms: float = 25.0,
-    hop_ms: float = 10.0,
-    threshold_ratio: float = 0.3,
-    min_speech_ms: float = 1000.0,
-    min_silence_ms: float = 300.0,
-    speech_pad_ms: float = 50.0,
-    merge_short_gap_s: float = 1.0,
-    max_segment_s: float = 20.0,
-    target_segment_s: float = 12.0,
-) -> list[tuple[float, float]]:
-    """Detect meeting-friendly speech regions with an energy-threshold VAD.
-
-    The raw frame decisions are post-processed so meeting segments are useful
-    downstream: adjacent pauses are bridged, short neighboring segments are
-    merged where possible, isolated sub-second fragments are dropped, and long
-    regions are split to keep clips around the 5-15 second range without
-    exceeding ``max_segment_s``.
-    """
-    samples = to_mono(samples)
-    if samples.size == 0:
-        return []
-    if min_speech_ms <= 0 or min_silence_ms < 0 or speech_pad_ms < 0:
-        raise ValueError("VAD duration thresholds must be non-negative, with positive min_speech_ms")
-    if merge_short_gap_s < 0 or max_segment_s <= 0 or target_segment_s <= 0:
-        raise ValueError("VAD merge/split settings must be non-negative, with positive segment lengths")
-
-    frame_length = max(1, int(round(frame_ms * sample_rate / 1000.0)))
-    hop_length = max(1, int(round(hop_ms * sample_rate / 1000.0)))
-    rms, starts = frame_rms(samples, frame_length, hop_length)
-    if rms.size == 0:
-        return []
-
-    peak = float(rms.max())
-    if peak == 0.0:
-        return []
-    voiced = rms >= (threshold_ratio * peak)
-
-    duration_s = samples.size / sample_rate
-    regions: list[tuple[float, float]] = []
-    region_start: float | None = None
-    for i, is_voiced in enumerate(voiced):
-        frame_start_s = float(starts[i]) / sample_rate
-        if is_voiced and region_start is None:
-            region_start = frame_start_s
-        elif not is_voiced and region_start is not None:
-            regions.append((region_start, frame_start_s))
-            region_start = None
-    if region_start is not None:
-        regions.append((region_start, duration_s))
-
-    min_speech_s = min_speech_ms / 1000.0
-    regions = _bridge_short_gaps(regions, min_silence_ms / 1000.0)
-    regions = _merge_short_regions(regions, min_speech_s, merge_short_gap_s)
-    regions = [r for r in regions if (r[1] - r[0]) >= min_speech_s]
-    regions = _pad_regions(regions, speech_pad_ms / 1000.0, duration_s)
-    return _split_long_regions(regions, max_segment_s, target_segment_s)
-
-
 def silero_vad(
     samples: np.ndarray,
     sample_rate: int = TARGET_SAMPLE_RATE,
@@ -261,20 +187,19 @@ def silero_vad(
 ) -> list[tuple[float, float]]:
     """Detect speech regions with the silero VAD bundled in ``faster-whisper``.
 
-    Unlike :func:`energy_vad`, the speech/non-speech decision comes from a learned
-    model rather than a fraction of the clip's peak energy, so a single loud
-    transient (a door slam or mic bump in a far-field meeting) no longer inflates
-    the threshold and starves the detector. The silero model operates at 16 kHz,
-    which matches the pipeline's target sample rate.
+    The speech/non-speech decision comes from a learned model rather than an
+    energy fraction of the clip's peak, so a single loud transient (a door slam
+    or mic bump in a far-field meeting) no longer inflates the threshold and
+    starves the detector. The silero model operates at 16 kHz, which matches the
+    pipeline's target sample rate.
 
-    Requires ``faster-whisper`` (a heavy backend); callers that must stay
-    dependency-free should use :func:`energy_vad`.
+    Requires ``faster-whisper`` (a heavy backend).
     """
     try:
         from faster_whisper.vad import VadOptions, get_speech_timestamps
     except ImportError as exc:  # pragma: no cover - only without the heavy backend
         raise ImportError(
-            "silero VAD needs faster-whisper; install it or use method='energy'."
+            "silero VAD needs faster-whisper; install it with `pip install faster-whisper`."
         ) from exc
 
     mono = to_mono(samples).astype(np.float32)
@@ -298,22 +223,14 @@ def segment_waveform(
     sample_rate: int = TARGET_SAMPLE_RATE,
     meeting_id: str = "meeting",
     segment_id_prefix: str | None = None,
-    method: str = "energy",
     **vad_kwargs: Any,
 ) -> list[dict[str, Any]]:
-    """Run VAD and return lightweight, timestamped speech segments.
+    """Run silero VAD and return lightweight, timestamped speech segments.
 
-    ``method="energy"`` (default) uses the dependency-free energy VAD;
-    ``method="silero"`` uses the faster-whisper silero VAD, which is far more
-    robust on far-field meetings whose loud transients break the energy
-    threshold (see :func:`silero_vad`).
+    Extra keyword arguments are forwarded to :func:`silero_vad`
+    (``threshold``, ``min_silence_ms``, ``speech_pad_ms``, ``max_segment_s``).
     """
-    if method == "silero":
-        regions = silero_vad(samples, sample_rate, **vad_kwargs)
-    elif method == "energy":
-        regions = energy_vad(samples, sample_rate, **vad_kwargs)
-    else:
-        raise ValueError(f"unknown VAD method '{method}'; choose 'energy' or 'silero'")
+    regions = silero_vad(samples, sample_rate, **vad_kwargs)
     prefix = segment_id_prefix or f"{meeting_id}_seg"
     return [
         {
@@ -368,85 +285,9 @@ def preprocess_audio(
     return samples, sample_rate
 
 
-def _bridge_short_gaps(regions: list[tuple[float, float]], min_silence_s: float) -> list[tuple[float, float]]:
-    """Merge adjacent regions separated by a gap shorter than ``min_silence_s``."""
-    if not regions:
-        return []
-    merged = [regions[0]]
-    for start, end in regions[1:]:
-        prev_start, prev_end = merged[-1]
-        if start - prev_end < min_silence_s:
-            merged[-1] = (prev_start, end)
-        else:
-            merged.append((start, end))
-    return merged
-
-
-def _pad_regions(regions: list[tuple[float, float]], pad_s: float, duration_s: float) -> list[tuple[float, float]]:
-    """Pad each region by ``pad_s`` on both sides, clamped to the signal bounds."""
-    padded: list[tuple[float, float]] = []
-    for start, end in regions:
-        padded.append((max(0.0, start - pad_s), min(duration_s, end + pad_s)))
-    return _bridge_short_gaps(padded, 1e-9)
-
-
-def _merge_short_regions(
-    regions: list[tuple[float, float]],
-    min_duration_s: float,
-    max_gap_s: float,
-) -> list[tuple[float, float]]:
-    """Merge sub-minimum regions with close neighbors before filtering."""
-    if not regions:
-        return []
-
-    merged: list[tuple[float, float]] = []
-    i = 0
-    while i < len(regions):
-        start, end = regions[i]
-        while (end - start) < min_duration_s and i + 1 < len(regions):
-            next_start, next_end = regions[i + 1]
-            if next_start - end > max_gap_s:
-                break
-            end = next_end
-            i += 1
-        if merged and (end - start) < min_duration_s and start - merged[-1][1] <= max_gap_s:
-            prev_start, _ = merged[-1]
-            merged[-1] = (prev_start, end)
-        else:
-            merged.append((start, end))
-        i += 1
-    return merged
-
-
-def _split_long_regions(
-    regions: list[tuple[float, float]],
-    max_segment_s: float,
-    target_segment_s: float,
-) -> list[tuple[float, float]]:
-    """Split long speech regions into bounded meeting-sized chunks."""
-    split: list[tuple[float, float]] = []
-    chunk_s = min(max_segment_s, target_segment_s)
-    for start, end in regions:
-        duration = end - start
-        if duration <= max_segment_s:
-            split.append((start, end))
-            continue
-
-        cursor = start
-        while end - cursor > max_segment_s:
-            next_end = min(cursor + chunk_s, end)
-            split.append((cursor, next_end))
-            cursor = next_end
-        if end > cursor:
-            split.append((cursor, end))
-    return split
-
-
 __all__ = [
     "TARGET_SAMPLE_RATE",
     "decode_audio_with_pyav",
-    "energy_vad",
-    "frame_rms",
     "load_audio",
     "peak_normalize",
     "preprocess_audio",
@@ -455,5 +296,6 @@ __all__ = [
     "resample_linear",
     "segment_audio",
     "segment_waveform",
+    "silero_vad",
     "to_mono",
 ]

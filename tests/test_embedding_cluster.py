@@ -10,6 +10,7 @@ Confidence is the top-1/top-2 cluster-similarity margin, and degenerate inputs
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 
@@ -363,7 +364,15 @@ class DiarizeAudioIntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "two_speakers.wav"
             sf.write(path, waveform, SAMPLE_RATE)
-            result = diarize_audio(str(path))
+            # silero VAD is a learned speech detector and does not reliably fire
+            # on synthetic harmonic tones, so stub two segments aligned with the
+            # two voices; the test verifies the clustering fallback, not the VAD.
+            vad_segments = [
+                {"meeting_id": "meeting", "segment_id": "meeting_seg_001", "start_time": 0.0, "end_time": 1.2},
+                {"meeting_id": "meeting", "segment_id": "meeting_seg_002", "start_time": 2.0, "end_time": 3.2},
+            ]
+            with patch("src.audio.preprocess.segment_waveform", return_value=vad_segments):
+                result = diarize_audio(str(path))
 
         self.assertTrue(result)
         # The new clustering path attaches this field; the old placeholder did not.

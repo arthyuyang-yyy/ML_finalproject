@@ -1,0 +1,18 @@
+{
+  // Recommendations shown by VSCode / Cursor / Trae when the user opens this
+  // workspace. PyCharm users can ignore this; their plugin system is separate.
+  "recommendations": [
+    "ms-python.python",
+    "ms-python.vscode-pylance",
+    "ms-python.debugpy",
+    "charliermarsh.ruff",
+    "ms-python.mypy-type-checker",
+    "tamasfe.even-better-toml",
+    "redhat.vscode-yaml",
+    "eamodio.gitlens",
+    "ms-toolsai.jupyter"
+  ],
+  "unwantedRecommendations": [
+    "ms-python.black-formatter"
+  ]
+}

@@ -1,0 +1,86 @@
+{
+  // Workspace settings shared by every IDE that reads .vscode/settings.json
+  // (VSCode, Cursor, Trae, WindSurf, ...). PyCharm ignores this file but uses
+  // pyproject.toml + the .venv convention below.
+  //
+  // The point: clone the repo, open the folder, the IDE picks up:
+  //   - the .venv interpreter
+  //   - the right PYTHONPATH (src/, scripts/, experiments/)
+  //   - the project's .env (so HF_TOKEN, DEEPSEEK_API_KEY, ... load automatically)
+  //   - ruff as formatter/linter
+  //   - pytest as the test runner
+  //   - the right search/file exclusions (no indexing 5 GB of model weights)
+
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+  "python.analysis.autoImportSources": ["src", "scripts", "experiments/scripts"],
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}",
+    "${workspaceFolder}/src",
+    "${workspaceFolder}/scripts",
+    "${workspaceFolder}/experiments/scripts"
+  ],
+  "python.analysis.typeCheckingMode": "basic",
+  "python.analysis.useLibraryCodeForTypes": false,
+
+  // Load .env automatically so HF_TOKEN, OPENAI_API_KEY, ... are in scope
+  // for both run/debug and for tools that shell out (pytest, ruff).
+  "python.envFile": "${workspaceFolder}/.env",
+
+  // Test runner
+  "pytest.enabled": true,
+  "pytest.args": ["-q"],
+  "pytest.rootdir": "${workspaceFolder}",
+  "pytest.testPaths": ["tests"],
+
+  // Lint + format on save
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.fixAll.ruff": "explicit",
+      "source.organizeImports.ruff": "explicit"
+    }
+  },
+
+  // File handling
+  "files.eol": "\n",
+  "files.insertFinalNewline": true,
+  "files.trimTrailingWhitespace": true,
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/.pytest_cache": true,
+    "**/.mypy_cache": true,
+    "**/.ruff_cache": true,
+    "**/.coverage": true,
+    "**/htmlcov": true
+  },
+
+  // Search exclusions — don't grep through model weights, processed audio,
+  // or large experiment runs. Saves minutes on every search.
+  "search.exclude": {
+    "**/.venv/**": true,
+    "**/outputs/**": true,
+    "**/experiments/runs/**/outputs/**": true,
+    "**/experiments/runs/**/run.log": true,
+    "**/models/**": true,
+    "**/data/raw_audio/**": true,
+    "**/data/processed_audio/**": true,
+    "**/*.safetensors": true,
+    "**/*.pt": true,
+    "**/*.bin": true,
+    "**/*.wav": true,
+    "**/*.mp3": true,
+    "**/*.flac": true
+  },
+
+  // Bigger context for ASR / pipeline files which have long log strings
+  "editor.rulers": [100, 120],
+  "editor.tabSize": 4,
+  "editor.formatOnSave": true,
+
+  // Don't ask every time we run a long pipeline via tasks.json
+  "task.allowAutomaticTasks": ["run matrix", "evaluate", "aggregate", "build matrix"],
+
+  // Disable telemetry noise; the project never needs VSCode's crash reports
+  "telemetry.telemetryLevel": "off"
+}

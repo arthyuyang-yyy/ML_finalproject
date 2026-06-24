@@ -7,6 +7,7 @@ import numpy as np
 
 from src.overlap.detector import (
     DEFAULT_OVERLAP_THRESHOLD,
+    MIN_AUTHORITATIVE_OVERLAP_SECONDS,
     _merge_regions,
     _overlap_fraction,
     detect_pyannote_overlap_regions,
@@ -32,7 +33,11 @@ class OverlapScoringTests(unittest.TestCase):
         )
 
         self.assertEqual(scored[0]["overlap_score"], 0.5)
+        self.assertEqual(scored[0]["overlap_seconds"], 5.0)
+        self.assertEqual(scored[0]["overlap_regions"], [[2.0, 7.0]])
         self.assertEqual(scored[1]["overlap_score"], 0.2)
+        self.assertEqual(scored[1]["overlap_seconds"], 2.0)
+        self.assertEqual(scored[1]["overlap_regions"], [[12.0, 14.0]])
         self.assertEqual(scored[0]["overlap_detector"], "provided_regions")
 
     def test_energy_fallback_stays_below_routing_threshold(self) -> None:
@@ -92,10 +97,29 @@ class OverlapScoringTests(unittest.TestCase):
 
 
 class RoutingThresholdTests(unittest.TestCase):
-    def test_default_threshold_is_point_four(self) -> None:
-        self.assertEqual(DEFAULT_OVERLAP_THRESHOLD, 0.4)
-        self.assertEqual(route_segment(0.399), "low_overlap_cluster")
-        self.assertEqual(route_segment(0.4), "high_overlap_candidate")
+    def test_default_threshold_is_point_five(self) -> None:
+        self.assertEqual(DEFAULT_OVERLAP_THRESHOLD, 0.5)
+        self.assertEqual(route_segment(0.499), "low_overlap_cluster")
+        self.assertEqual(route_segment(0.5), "high_overlap_candidate")
+
+    def test_pyannote_overlap_hit_overrides_generic_fraction_threshold(self) -> None:
+        self.assertEqual(MIN_AUTHORITATIVE_OVERLAP_SECONDS, 0.2)
+        self.assertEqual(
+            route_segment(0.1, overlap_detector="pyannote", overlap_seconds=0.25),
+            "high_overlap_candidate",
+        )
+
+    def test_energy_fallback_still_uses_generic_score_threshold(self) -> None:
+        self.assertEqual(
+            route_segment(0.1, overlap_detector="energy_fallback", overlap_seconds=0.25),
+            "low_overlap_cluster",
+        )
+
+    def test_authoritative_overlap_hit_has_minimum_duration(self) -> None:
+        self.assertEqual(
+            route_segment(0.1, overlap_detector="pyannote", overlap_seconds=0.19),
+            "low_overlap_cluster",
+        )
 
     def test_route_segment_rejects_out_of_range_score(self) -> None:
         with self.assertRaises(ValueError):
@@ -107,10 +131,14 @@ class RoutingThresholdTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             route_segment(0.5, threshold=1.5)
 
-    def test_detect_overlap_segments_uses_point_four_threshold(self) -> None:
+    def test_route_segment_rejects_negative_overlap_seconds(self) -> None:
+        with self.assertRaises(ValueError):
+            route_segment(0.1, overlap_detector="pyannote", overlap_seconds=-0.1)
+
+    def test_detect_overlap_segments_uses_default_threshold(self) -> None:
         samples = np.zeros(16000 * 10, dtype=np.float32)
         segments = [{"segment_id": "m1_seg_001", "start_time": 0.0, "end_time": 10.0}]
-        scored = estimate_segment_overlap_scores(samples, segments, overlap_regions=[(0.0, 4.0)])
+        scored = estimate_segment_overlap_scores(samples, segments, overlap_regions=[(0.0, 5.0)])
         high = [segment for segment in scored if route_segment(segment["overlap_score"]) == "high_overlap_candidate"]
 
         self.assertEqual(len(high), 1)

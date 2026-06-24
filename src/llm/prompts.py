@@ -32,7 +32,9 @@ Return one JSON object with exactly this top-level shape:
       "content": "string",
       "speakers": ["speaker labels"],
       "evidence_ids": ["existing evidence_id values"],
-      "confidence": "high|medium|low"
+      "confidence": "high|medium|low",
+      "uncertainty_note": "optional uncertainty or evidence-quality note",
+      "keywords": ["optional retrieval keywords"]
     }}
   ]
 }}
@@ -40,7 +42,7 @@ Return one JSON object with exactly this top-level shape:
 Additional action_item fields:
 - task: required non-empty string
 - owner: required speaker label, or "uncertain" when the owner is unclear
-- deadline: optional string
+- deadline: optional string; omit this field entirely when no deadline is stated
 
 Rules:
 1. Every event must cite at least one existing evidence_id.
@@ -51,6 +53,15 @@ Rules:
 6. Exclude small talk and unsupported conclusions.
 7. Output valid JSON only. Do not use Markdown fences or explanatory text.
 8. Include a concise topic for each event when it can be derived from evidence.
+9. The speakers array must be a subset of speakers supported by the cited evidence or its candidates.
+10. Use event_type="decision" only for explicit decisions, agreements, approvals, or finalized conclusions.
+11. Use event_type="speaker_stance" for opinions, suggestions, preferences, objections, or proposals.
+12. Use event_type="disagreement" only when cited evidence supports at least two conflicting positions.
+13. For disagreement, write both sides in content and cite evidence for each side.
+14. Prefer the smallest sufficient evidence_ids set; do not cite unrelated context.
+15. Add uncertainty_note when ASR confidence, speaker attribution, overlap, or evidence support is weak.
+16. Include 2-6 concise keywords for retrieval when useful; use terms present in or directly supported by evidence.
+17. Do not turn a discussion trend into a final conclusion unless the evidence explicitly closes the issue.
 
 Evidence segments:
 {payload}

@@ -1,4 +1,4 @@
-"""Tests for audio preprocessing and the energy-based VAD baseline.
+"""Tests for audio preprocessing and the silero VAD backend.
 
 Run with::
 
@@ -13,8 +13,6 @@ import numpy as np
 
 from src.audio.preprocess import (
     decode_audio_with_pyav,
-    energy_vad,
-    frame_rms,
     load_audio,
     peak_normalize,
     preprocess_audio,
@@ -23,6 +21,7 @@ from src.audio.preprocess import (
     resample_linear,
     segment_audio,
     segment_waveform,
+    silero_vad,
     to_mono,
 )
 
@@ -32,32 +31,6 @@ SAMPLE_RATE = 16000
 def _tone(duration_s: float, freq: float = 220.0, amplitude: float = 0.5) -> np.ndarray:
     t = np.arange(int(duration_s * SAMPLE_RATE)) / SAMPLE_RATE
     return (amplitude * np.sin(2 * np.pi * freq * t)).astype(np.float32)
-
-
-def _silence(duration_s: float) -> np.ndarray:
-    return np.zeros(int(duration_s * SAMPLE_RATE), dtype=np.float32)
-
-
-def _two_burst_signal() -> np.ndarray:
-    # 0.5s silence | 1.0s speech | 1.0s silence | 1.0s speech | 0.5s silence
-    return np.concatenate([
-        _silence(0.5),
-        _tone(1.0),
-        _silence(1.0),
-        _tone(1.0),
-        _silence(0.5),
-    ])
-
-
-def _short_gap_signal() -> np.ndarray:
-    # 0.5s silence | 0.4s speech | 0.4s silence | 0.4s speech | 0.5s silence
-    return np.concatenate([
-        _silence(0.5),
-        _tone(0.4),
-        _silence(0.4),
-        _tone(0.4),
-        _silence(0.5),
-    ])
 
 
 def _write_aac_container(path, samples: np.ndarray, sample_rate: int = SAMPLE_RATE, container_format=None) -> None:
@@ -102,21 +75,6 @@ class HelperTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             resample_linear(_tone(0.1), -1, 16000)
 
-    def test_frame_rms_positive_length_required(self) -> None:
-        with self.assertRaises(ValueError):
-            frame_rms(_tone(0.1), 0, 160)
-
-    def test_frame_rms_short_signal_returns_empty(self) -> None:
-        rms, starts = frame_rms(_tone(0.01), 400, 160)
-        self.assertEqual(rms.size, 0)
-        self.assertEqual(starts.size, 0)
-
-    def test_frame_rms_computes_expected_values(self) -> None:
-        samples = np.array([0.0, 1.0, 0.0, 1.0, 0.0], dtype=np.float32)
-        rms, starts = frame_rms(samples, frame_length=3, hop_length=1)
-        self.assertEqual(starts.size, 3)
-        self.assertGreater(rms[0], 0.0)
-
     def test_segment_audio_integration(self) -> None:
         try:
             import soundfile as sf
@@ -127,8 +85,11 @@ class HelperTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             wav_path = Path(tmp_dir) / "test.wav"
             sf.write(wav_path, _tone(2.0, amplitude=0.99), SAMPLE_RATE, subtype="FLOAT")
-            segments = segment_audio(str(wav_path), meeting_id="test")
-            self.assertGreaterEqual(len(segments), 1)
+            # silero VAD is a learned model and does not fire on a pure sine tone,
+            # so stub the detector to exercise the segment_audio load+dispatch path.
+            with patch("src.audio.preprocess.silero_vad", return_value=[(0.0, 1.0)]):
+                segments = segment_audio(str(wav_path), meeting_id="test")
+            self.assertEqual(len(segments), 1)
             self.assertEqual(segments[0]["meeting_id"], "test")
 
     def test_audio_package_wrapper_uses_shared_preprocess(self) -> None:
@@ -248,54 +209,31 @@ class AudioDecodeTests(unittest.TestCase):
             reduce_stationary_noise(_tone(1.0), SAMPLE_RATE, strength=1.5)
 
 
-class EnergyVadTests(unittest.TestCase):
-    def test_detects_two_speech_regions(self) -> None:
-        regions = energy_vad(_two_burst_signal(), SAMPLE_RATE)
-        self.assertEqual(len(regions), 2)
-
-    def test_regions_align_with_bursts(self) -> None:
-        regions = energy_vad(_two_burst_signal(), SAMPLE_RATE)
-        (s1, e1), (s2, e2) = regions
-        # First burst spans ~0.5-1.5s, second ~2.5-3.5s (with small padding).
-        self.assertAlmostEqual(s1, 0.5, delta=0.1)
-        self.assertAlmostEqual(e1, 1.5, delta=0.1)
-        self.assertAlmostEqual(s2, 2.5, delta=0.1)
-        self.assertAlmostEqual(e2, 3.5, delta=0.1)
-
-    def test_silence_yields_no_regions(self) -> None:
-        self.assertEqual(energy_vad(_silence(2.0), SAMPLE_RATE), [])
-
+class SileroVadTests(unittest.TestCase):
     def test_empty_signal_yields_no_regions(self) -> None:
-        self.assertEqual(energy_vad(np.zeros(0, dtype=np.float32), SAMPLE_RATE), [])
+        self.assertEqual(silero_vad(np.zeros(0, dtype=np.float32), SAMPLE_RATE), [])
 
-    def test_regions_are_ordered_and_non_overlapping(self) -> None:
-        regions = energy_vad(_two_burst_signal(), SAMPLE_RATE)
-        for (s, e) in regions:
-            self.assertLess(s, e)
-        for earlier, later in zip(regions, regions[1:]):
-            self.assertLessEqual(earlier[1], later[0])
-
-    def test_short_neighboring_regions_are_merged(self) -> None:
-        regions = energy_vad(_short_gap_signal(), SAMPLE_RATE)
-        self.assertEqual(len(regions), 1)
-        self.assertGreaterEqual(regions[0][1] - regions[0][0], 1.0)
-
-    def test_long_regions_are_split(self) -> None:
-        regions = energy_vad(_tone(31.0), SAMPLE_RATE, max_segment_s=20.0, target_segment_s=12.0)
-        self.assertGreaterEqual(len(regions), 2)
-        for start, end in regions:
-            self.assertLessEqual(end - start, 20.0)
+    def test_forwards_threshold_and_padding_to_detector(self) -> None:
+        with patch("faster_whisper.vad.get_speech_timestamps",
+                   return_value=[{"start": 0, "end": 16000}]) as detector:
+            silero_vad(_tone(1.0), SAMPLE_RATE, threshold=0.4, min_silence_ms=300, speech_pad_ms=100)
+        options = detector.call_args[0][1]
+        self.assertEqual(options.threshold, 0.4)
+        self.assertEqual(options.min_silence_duration_ms, 300)
+        self.assertEqual(options.speech_pad_ms, 100)
 
 
 class SegmentWaveformTests(unittest.TestCase):
-    def test_returns_schema_compatible_segments(self) -> None:
-        segments = segment_waveform(_two_burst_signal(), SAMPLE_RATE, meeting_id="demo")
+    def test_runs_silero_vad_and_maps_schema(self) -> None:
+        with patch("src.audio.preprocess.silero_vad", return_value=[(0.5, 1.5), (2.5, 3.5)]) as silero:
+            segments = segment_waveform(np.zeros(16000, dtype=np.float32), SAMPLE_RATE, meeting_id="demo")
+        silero.assert_called_once()
         self.assertEqual(len(segments), 2)
         first = segments[0]
         self.assertEqual(set(first), {"meeting_id", "segment_id", "start_time", "end_time"})
         self.assertEqual(first["meeting_id"], "demo")
         self.assertEqual(first["segment_id"], "demo_seg_001")
-        self.assertLess(first["start_time"], first["end_time"])
+        self.assertEqual((first["start_time"], first["end_time"]), (0.5, 1.5))
 
 
 if __name__ == "__main__":

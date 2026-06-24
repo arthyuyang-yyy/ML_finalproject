@@ -1,4 +1,4 @@
-"""Tests for BM25 and embedding hybrid episodic-memory retrieval."""
+"""Tests for hash-embedding episodic-memory retrieval."""
 
 import json
 import tempfile
@@ -46,6 +46,18 @@ class FixedEmbeddingBackend:
         return [[1.0, 0.0], [0.8, 0.6], [0.0, 1.0]]
 
 
+class OrthogonalEmbeddingBackend:
+    def encode(self, texts: list[str]) -> list[list[float]]:
+        return [[1.0, 0.0], *([[0.0, 1.0]] * (len(texts) - 1))]
+
+
+class HighSimilarityNoKeywordBackend:
+    def encode(self, texts: list[str]) -> list[list[float]]:
+        vectors = [[1.0, 0.0], [1.0, 0.0]]
+        vectors.extend([[0.0, 1.0]] * (len(texts) - 2))
+        return vectors
+
+
 class MemoryRetrieverTests(unittest.TestCase):
     def setUp(self) -> None:
         self.episodes = [
@@ -89,12 +101,11 @@ class MemoryRetrieverTests(unittest.TestCase):
         results = retrieve_episodes("有哪些不确定的重叠片段？", episodes=self.episodes)
         self.assertEqual(results[0]["episode_id"], "ep_uncertain")
 
-    def test_recent_decision_query_uses_event_type_and_recency(self) -> None:
-        results = retrieve_episodes("上次决定了什么？", episodes=self.episodes)
+    def test_decision_query_uses_event_type_text(self) -> None:
+        results = retrieve_episodes("decision baseline", episodes=self.episodes)
         self.assertEqual(results[0]["episode_id"], "ep_decision")
-        self.assertEqual(results[0]["retrieval"]["recency"], 1.0)
 
-    def test_score_uses_documented_weights(self) -> None:
+    def test_score_uses_documented_hash_and_keyword_weights(self) -> None:
         episodes = [
             _episode(
                 "ep_match",
@@ -124,38 +135,75 @@ class MemoryRetrieverTests(unittest.TestCase):
         )[0]
         components = result["retrieval"]
         expected = (
-            0.45 * components["embedding_similarity"]
-            + 0.25 * components["keyword_score"]
-            + 0.15 * components["importance"]
-            + 0.10 * components["recency"]
-            - 0.20 * components["overlap_penalty"]
+            0.70 * components["embedding_similarity"]
+            + 0.30 * components["keyword_score"]
         )
         self.assertAlmostEqual(components["final_score"], expected, places=6)
         self.assertEqual(components["embedding_backend"], "FixedEmbeddingBackend")
 
-    def test_high_overlap_penalty_skips_uncertainty_events(self) -> None:
-        certain = _episode(
-            "ep_certain",
-            event_type="decision",
-            content="Gemma post-processing",
-            topic="Gemma",
-            speakers=["S1"],
-            evidence_text="Gemma",
-            overlap_score=0.9,
+    def test_default_backend_is_custom_hash_embedding(self) -> None:
+        results = retrieve_episodes("WhisperX", episodes=self.episodes)
+        self.assertEqual(results[0]["retrieval"]["embedding_backend"], "HashingEmbeddingBackend")
+
+    def test_keyword_match_survives_low_embedding_similarity(self) -> None:
+        episodes = [
+            _episode(
+                "ep_keyword",
+                event_type="decision",
+                content="alpha owner",
+                topic="assignment",
+                speakers=["S1"],
+                evidence_text="alpha owner",
+            ),
+            _episode(
+                "ep_noise",
+                event_type="decision",
+                content="beta",
+                topic="other",
+                speakers=["S2"],
+                evidence_text="beta",
+            ),
+        ]
+
+        results = retrieve_episodes(
+            "alpha",
+            episodes=episodes,
+            embedding_backend=OrthogonalEmbeddingBackend(),
         )
-        uncertain = _episode(
-            "ep_uncertain",
-            event_type="uncertainty",
-            content="Gemma post-processing",
-            topic="Gemma",
-            speakers=["MIXED"],
-            evidence_text="Gemma",
-            overlap_score=0.9,
+
+        self.assertEqual([item["episode_id"] for item in results], ["ep_keyword"])
+        self.assertEqual(results[0]["retrieval"]["embedding_similarity"], 0.0)
+        self.assertGreater(results[0]["retrieval"]["keyword_score"], 0.0)
+
+    def test_high_embedding_similarity_survives_without_keyword_match(self) -> None:
+        episodes = [
+            _episode(
+                "ep_semantic",
+                event_type="decision",
+                content="semantic-only match",
+                topic="assignment",
+                speakers=["S1"],
+                evidence_text="semantic-only match",
+            ),
+            _episode(
+                "ep_noise",
+                event_type="decision",
+                content="unrelated",
+                topic="other",
+                speakers=["S2"],
+                evidence_text="unrelated",
+            ),
+        ]
+
+        results = retrieve_episodes(
+            "alpha",
+            episodes=episodes,
+            embedding_backend=HighSimilarityNoKeywordBackend(),
         )
-        results = retrieve_episodes("Gemma", episodes=[certain, uncertain])
-        by_id = {item["episode_id"]: item for item in results}
-        self.assertEqual(by_id["ep_uncertain"]["retrieval"]["overlap_penalty"], 0.0)
-        self.assertGreater(by_id["ep_certain"]["retrieval"]["overlap_penalty"], 0.0)
+
+        self.assertEqual([item["episode_id"] for item in results], ["ep_semantic"])
+        self.assertEqual(results[0]["retrieval"]["embedding_similarity"], 1.0)
+        self.assertEqual(results[0]["retrieval"]["keyword_score"], 0.0)
 
     def test_retrieval_does_not_mutate_memory(self) -> None:
         original = deepcopy(self.episodes)

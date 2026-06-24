@@ -3,7 +3,7 @@
 import unittest
 from unittest.mock import patch
 
-try:  # gradio is an optional demo dependency (requirements-demo.txt), not needed for unit tests
+try:  # gradio is an optional demo dependency, not needed for unit tests
     import gradio  # noqa: F401
 
     _HAS_GRADIO = True
@@ -153,10 +153,20 @@ class GradioAdapterTests(unittest.TestCase):
     @patch("src.ui.gradio_app.run_meeting_pipeline")
     def test_run_pipeline_calls_shared_pipeline(self, mocked_run) -> None:
         mocked_run.return_value = {"meeting_id": "meeting_001"}
-        result = run_demo_pipeline("meeting.wav", "meeting_001")
+        result = run_demo_pipeline(
+            "meeting.wav",
+            "meeting_001",
+            output_root="outputs/ui_test",
+            overlap_threshold=0.5,
+            high_overlap_decode_context_s=2.0,
+        )
         mocked_run.assert_called_once()
         self.assertEqual(mocked_run.call_args.args, ("meeting.wav", "meeting_001"))
-        self.assertEqual(mocked_run.call_args.kwargs["config"].low_overlap_asr_model, "faster-whisper")
+        config = mocked_run.call_args.kwargs["config"]
+        self.assertEqual(config.low_overlap_asr_model, "faster-whisper")
+        self.assertEqual(str(config.outputs_root), "outputs/ui_test")
+        self.assertEqual(config.overlap_threshold, 0.5)
+        self.assertEqual(config.high_overlap_decode_context_s, 2.0)
         self.assertEqual(result["meeting_id"], "meeting_001")
 
     @unittest.skipUnless(_HAS_GRADIO, "gradio not installed (optional demo dependency)")

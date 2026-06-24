@@ -1,5 +1,6 @@
 """Five-area Gradio demo for the meeting-memory pipeline."""
 
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -145,15 +146,35 @@ def run_demo_pipeline(
     asr_backend: str = "faster-whisper",
     gemma_backend: str = "none",
     gemma_model: str = "gemma3:4b",
+    output_root: str = "outputs/ui",
+    overlap_threshold: float | None = None,
+    suspected_overlap_threshold: float = 0.3,
+    high_overlap_min_segment_s: float = 2.0,
+    high_overlap_decode_context_s: float = 2.0,
+    asr_context_padding_s: float = 0.2,
+    speech_separation_backend: str = "none",
+    language: str = "zh",
 ) -> dict[str, Any]:
     """Validate UI input and execute the shared application pipeline."""
     if not audio_path:
         raise ValueError("请先上传会议音频。")
     normalized_id = _meeting_id(meeting_id or Path(audio_path).stem)
+    kwargs: dict[str, Any] = {
+        "outputs_root": Path(output_root or "outputs/ui"),
+        "low_overlap_asr_model": asr_backend,
+        "gemma_backend": gemma_backend,
+        "gemma_model": gemma_model,
+        "suspected_overlap_threshold": suspected_overlap_threshold,
+        "high_overlap_min_segment_s": high_overlap_min_segment_s,
+        "high_overlap_decode_context_s": high_overlap_decode_context_s,
+        "asr_context_padding_s": asr_context_padding_s,
+        "speech_separation_backend": speech_separation_backend,
+        "language": language,
+    }
+    if overlap_threshold is not None:
+        kwargs["overlap_threshold"] = overlap_threshold
     config = PipelineConfig(
-        low_overlap_asr_model=asr_backend,
-        gemma_backend=gemma_backend,
-        gemma_model=gemma_model,
+        **kwargs,
     )
     return run_meeting_pipeline(audio_path, normalized_id, config=config)
 
@@ -163,11 +184,39 @@ def build_app():
     try:
         import gradio as gr
     except ImportError as exc:  # pragma: no cover - optional demo dependency
-        raise ImportError("Install demo dependencies with `pip install -r requirements-demo.txt`.") from exc
+        raise ImportError("Install dependencies with `pip install -r requirements.txt`.") from exc
 
-    def run(audio_path: str | None, meeting_id: str, asr_backend: str, gemma_backend: str, gemma_model: str):
+    def run(
+        audio_path: str | None,
+        meeting_id: str,
+        asr_backend: str,
+        gemma_backend: str,
+        gemma_model: str,
+        output_root: str,
+        language: str,
+        overlap_threshold: float,
+        suspected_overlap_threshold: float,
+        high_overlap_min_segment_s: float,
+        high_overlap_decode_context_s: float,
+        asr_context_padding_s: float,
+        speech_separation_backend: str,
+    ):
         try:
-            result = run_demo_pipeline(audio_path, meeting_id, asr_backend, gemma_backend, gemma_model)
+            result = run_demo_pipeline(
+                audio_path,
+                meeting_id,
+                asr_backend,
+                gemma_backend,
+                gemma_model,
+                output_root=output_root,
+                language=language,
+                overlap_threshold=overlap_threshold,
+                suspected_overlap_threshold=suspected_overlap_threshold,
+                high_overlap_min_segment_s=high_overlap_min_segment_s,
+                high_overlap_decode_context_s=high_overlap_decode_context_s,
+                asr_context_padding_s=asr_context_padding_s,
+                speech_separation_backend=speech_separation_backend,
+            )
             view = prepare_demo_data(result)
             selected = view["selected_candidate"]
             status = (
@@ -225,10 +274,47 @@ def build_app():
                     )
                     gemma_backend = gr.Dropdown(
                         label="Gemma backend",
-                        choices=["none", "ollama", "openai", "transformers"],
+                        choices=["none", "ollama", "openai", "deepseek", "transformers"],
                         value="none",
                     )
                     gemma_model = gr.Textbox(label="Gemma model", value="gemma3:4b")
+                    output_root = gr.Textbox(label="Output folder", value="outputs/ui")
+                    language = gr.Dropdown(label="Language", choices=["zh", "en", "und"], value="zh")
+                    with gr.Accordion("Tuning parameters", open=False):
+                        overlap_threshold = gr.Slider(
+                            label="Overlap threshold",
+                            minimum=0.0,
+                            maximum=1.0,
+                            value=0.5,
+                            step=0.05,
+                        )
+                        suspected_overlap_threshold = gr.Slider(
+                            label="Suspected overlap threshold",
+                            minimum=0.0,
+                            maximum=1.0,
+                            value=0.3,
+                            step=0.05,
+                        )
+                        high_overlap_min_segment_s = gr.Number(
+                            label="High-overlap min segment seconds",
+                            value=2.0,
+                            minimum=0.0,
+                        )
+                        high_overlap_decode_context_s = gr.Number(
+                            label="Short-overlap decode context seconds",
+                            value=2.0,
+                            minimum=0.0,
+                        )
+                        asr_context_padding_s = gr.Number(
+                            label="Low-overlap ASR context padding seconds",
+                            value=0.2,
+                            minimum=0.0,
+                        )
+                        speech_separation_backend = gr.Dropdown(
+                            label="Speech separation",
+                            choices=["none", "nmf", "sepformer"],
+                            value="none",
+                        )
                     run_button = gr.Button("Run Pipeline", variant="primary")
                     status = gr.Markdown("等待上传音频。")
 
@@ -283,7 +369,21 @@ def build_app():
 
         run_button.click(
             run,
-            inputs=[audio, meeting_id, asr_backend, gemma_backend, gemma_model],
+            inputs=[
+                audio,
+                meeting_id,
+                asr_backend,
+                gemma_backend,
+                gemma_model,
+                output_root,
+                language,
+                overlap_threshold,
+                suspected_overlap_threshold,
+                high_overlap_min_segment_s,
+                high_overlap_decode_context_s,
+                asr_context_padding_s,
+                speech_separation_backend,
+            ],
             outputs=[
                 state,
                 status,
@@ -321,7 +421,10 @@ def build_app():
 
 def launch() -> None:
     """Launch the Gradio app."""
-    build_app().launch()
+    server_name = os.environ.get("GRADIO_SERVER_NAME", "127.0.0.1")
+    server_port = int(os.environ.get("GRADIO_SERVER_PORT", "7860"))
+    share = os.environ.get("GRADIO_SHARE", "").strip().lower() in {"1", "true", "yes"}
+    build_app().launch(server_name=server_name, server_port=server_port, share=share)
 
 
 def _read_artifact(result: dict[str, Any], name: str, default: Any) -> Any:

@@ -13,10 +13,19 @@ class PipelineConfig:
     outputs_root: Path = Path("outputs")
     target_sample_rate: int = 16000
     overlap_threshold: float = DEFAULT_OVERLAP_THRESHOLD
+    suspected_overlap_threshold: float = 0.3
     language: str = "und"
-    # Keep library/test runs deterministic. CLI and UI explicitly select the
-    # primary real baseline, faster-whisper.
+    # Keep library/test runs deterministic. CLI and UI can select "auto", which
+    # currently prefers FunASR for Chinese meetings when available.
     low_overlap_asr_model: str = "mock"
+    vad_max_segment_s: float = 30.0
+    vad_speech_pad_ms: int = 400
+    vad_min_silence_ms: int = 500
+    asr_context_padding_s: float = 0.2
+    high_overlap_min_segment_s: float = 2.0
+    high_overlap_decode_context_s: float = 2.0
+    suspected_overlap_min_confidence_gain: float = 0.15
+    suspected_overlap_max_text_cer: float = 0.35
     faster_whisper_model_size: str = "small"
     faster_whisper_device: str = "cpu"
     faster_whisper_compute_type: str = "int8"

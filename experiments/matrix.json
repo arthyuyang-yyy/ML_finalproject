@@ -1,0 +1,304 @@
+{
+  "axes": {
+    "asr": [
+      "faster-whisper",
+      "funasr",
+      "whisperx"
+    ],
+    "osd": [
+      "pyannote",
+      "energy_fallback"
+    ],
+    "resolver": [
+      "none",
+      "openai"
+    ],
+    "separation": [
+      "none",
+      "sepformer"
+    ]
+  },
+  "defaults": {
+    "language": "zh",
+    "asr_device": "cuda",
+    "asr_compute_type": "float16",
+    "faster_whisper_model": "small"
+  },
+  "cells": [
+    {
+      "cell_id": "asr=faster-whisper_osd=pyannote_resolver=none_sep=none",
+      "asr": "faster-whisper",
+      "osd": "pyannote",
+      "resolver": "none",
+      "separation": "none",
+      "language": "zh",
+      "asr_device": "cuda",
+      "asr_compute_type": "float16",
+      "faster_whisper_model": "small"
+    },
+    {
+      "cell_id": "asr=faster-whisper_osd=pyannote_resolver=none_sep=sepformer",
+      "asr": "faster-whisper",
+      "osd": "pyannote",
+      "resolver": "none",
+      "separation": "sepformer",
+      "language": "zh",
+      "asr_device": "cuda",
+      "asr_compute_type": "float16",
+      "faster_whisper_model": "small"
+    },
+    {
+      "cell_id": "asr=faster-whisper_osd=pyannote_resolver=openai_sep=none",
+      "asr": "faster-whisper",
+      "osd": "pyannote",
+      "resolver": "openai",
+      "separation": "none",
+      "language": "zh",
+      "asr_device": "cuda",
+      "asr_compute_type": "float16",
+      "faster_whisper_model": "small"
+    },
+    {
+      "cell_id": "asr=faster-whisper_osd=pyannote_resolver=openai_sep=sepformer",
+      "asr": "faster-whisper",
+      "osd": "pyannote",
+      "resolver": "openai",
+      "separation": "sepformer",
+      "language": "zh",
+      "asr_device": "cuda",
+      "asr_compute_type": "float16",
+      "faster_whisper_model": "small"
+    },
+    {
+      "cell_id": "asr=faster-whisper_osd=energy_fallback_resolver=none_sep=none",
+      "asr": "faster-whisper",
+      "osd": "energy_fallback",
+      "resolver": "none",
+      "separation": "none",
+      "language": "zh",
+      "asr_device": "cuda",
+      "asr_compute_type": "float16",
+      "faster_whisper_model": "small"
+    },
+    {
+      "cell_id": "asr=faster-whisper_osd=energy_fallback_resolver=none_sep=sepformer",
+      "asr": "faster-whisper",
+      "osd": "energy_fallback",
+      "resolver": "none",
+      "separation": "sepformer",
+      "language": "zh",
+      "asr_device": "cuda",
+      "asr_compute_type": "float16",
+      "faster_whisper_model": "small"
+    },
+    {
+      "cell_id": "asr=faster-whisper_osd=energy_fallback_resolver=openai_sep=none",
+      "asr": "faster-whisper",
+      "osd": "energy_fallback",
+      "resolver": "openai",
+      "separation": "none",
+      "language": "zh",
+      "asr_device": "cuda",
+      "asr_compute_type": "float16",
+      "faster_whisper_model": "small"
+    },
+    {
+      "cell_id": "asr=faster-whisper_osd=energy_fallback_resolver=openai_sep=sepformer",
+      "asr": "faster-whisper",
+      "osd": "energy_fallback",
+      "resolver": "openai",
+      "separation": "sepformer",
+      "language": "zh",
+      "asr_device": "cuda",
+      "asr_compute_type": "float16",
+      "faster_whisper_model": "small"
+    },
+    {
+      "cell_id": "asr=funasr_osd=pyannote_resolver=none_sep=none",
+      "asr": "funasr",
+      "osd": "pyannote",
+      "resolver": "none",
+      "separation": "none",
+      "language": "zh",
+      "asr_device": "cuda",
+      "asr_compute_type": "float16",
+      "faster_whisper_model": "small"
+    },
+    {
+      "cell_id": "asr=funasr_osd=pyannote_resolver=none_sep=sepformer",
+      "asr": "funasr",
+      "osd": "pyannote",
+      "resolver": "none",
+      "separation": "sepformer",
+      "language": "zh",
+      "asr_device": "cuda",
+      "asr_compute_type": "float16",
+      "faster_whisper_model": "small"
+    },
+    {
+      "cell_id": "asr=funasr_osd=pyannote_resolver=openai_sep=none",
+      "asr": "funasr",
+      "osd": "pyannote",
+      "resolver": "openai",
+      "separation": "none",
+      "language": "zh",
+      "asr_device": "cuda",
+      "asr_compute_type": "float16",
+      "faster_whisper_model": "small"
+    },
+    {
+      "cell_id": "asr=funasr_osd=pyannote_resolver=openai_sep=sepformer",
+      "asr": "funasr",
+      "osd": "pyannote",
+      "resolver": "openai",
+      "separation": "sepformer",
+      "language": "zh",
+      "asr_device": "cuda",
+      "asr_compute_type": "float16",
+      "faster_whisper_model": "small"
+    },
+    {
+      "cell_id": "asr=funasr_osd=energy_fallback_resolver=none_sep=none",
+      "asr": "funasr",
+      "osd": "energy_fallback",
+      "resolver": "none",
+      "separation": "none",
+      "language": "zh",
+      "asr_device": "cuda",
+      "asr_compute_type": "float16",
+      "faster_whisper_model": "small"
+    },
+    {
+      "cell_id": "asr=funasr_osd=energy_fallback_resolver=none_sep=sepformer",
+      "asr": "funasr",
+      "osd": "energy_fallback",
+      "resolver": "none",
+      "separation": "sepformer",
+      "language": "zh",
+      "asr_device": "cuda",
+      "asr_compute_type": "float16",
+      "faster_whisper_model": "small"
+    },
+    {
+      "cell_id": "asr=funasr_osd=energy_fallback_resolver=openai_sep=none",
+      "asr": "funasr",
+      "osd": "energy_fallback",
+      "resolver": "openai",
+      "separation": "none",
+      "language": "zh",
+      "asr_device": "cuda",
+      "asr_compute_type": "float16",
+      "faster_whisper_model": "small"
+    },
+    {
+      "cell_id": "asr=funasr_osd=energy_fallback_resolver=openai_sep=sepformer",
+      "asr": "funasr",
+      "osd": "energy_fallback",
+      "resolver": "openai",
+      "separation": "sepformer",
+      "language": "zh",
+      "asr_device": "cuda",
+      "asr_compute_type": "float16",
+      "faster_whisper_model": "small"
+    },
+    {
+      "cell_id": "asr=whisperx_osd=pyannote_resolver=none_sep=none",
+      "asr": "whisperx",
+      "osd": "pyannote",
+      "resolver": "none",
+      "separation": "none",
+      "language": "zh",
+      "asr_device": "cuda",
+      "asr_compute_type": "float16",
+      "faster_whisper_model": "small"
+    },
+    {
+      "cell_id": "asr=whisperx_osd=pyannote_resolver=none_sep=sepformer",
+      "asr": "whisperx",
+      "osd": "pyannote",
+      "resolver": "none",
+      "separation": "sepformer",
+      "language": "zh",
+      "asr_device": "cuda",
+      "asr_compute_type": "float16",
+      "faster_whisper_model": "small"
+    },
+    {
+      "cell_id": "asr=whisperx_osd=pyannote_resolver=openai_sep=none",
+      "asr": "whisperx",
+      "osd": "pyannote",
+      "resolver": "openai",
+      "separation": "none",
+      "language": "zh",
+      "asr_device": "cuda",
+      "asr_compute_type": "float16",
+      "faster_whisper_model": "small"
+    },
+    {
+      "cell_id": "asr=whisperx_osd=pyannote_resolver=openai_sep=sepformer",
+      "asr": "whisperx",
+      "osd": "pyannote",
+      "resolver": "openai",
+      "separation": "sepformer",
+      "language": "zh",
+      "asr_device": "cuda",
+      "asr_compute_type": "float16",
+      "faster_whisper_model": "small"
+    },
+    {
+      "cell_id": "asr=whisperx_osd=energy_fallback_resolver=none_sep=none",
+      "asr": "whisperx",
+      "osd": "energy_fallback",
+      "resolver": "none",
+      "separation": "none",
+      "language": "zh",
+      "asr_device": "cuda",
+      "asr_compute_type": "float16",
+      "faster_whisper_model": "small"
+    },
+    {
+      "cell_id": "asr=whisperx_osd=energy_fallback_resolver=none_sep=sepformer",
+      "asr": "whisperx",
+      "osd": "energy_fallback",
+      "resolver": "none",
+      "separation": "sepformer",
+      "language": "zh",
+      "asr_device": "cuda",
+      "asr_compute_type": "float16",
+      "faster_whisper_model": "small"
+    },
+    {
+      "cell_id": "asr=whisperx_osd=energy_fallback_resolver=openai_sep=none",
+      "asr": "whisperx",
+      "osd": "energy_fallback",
+      "resolver": "openai",
+      "separation": "none",
+      "language": "zh",
+      "asr_device": "cuda",
+      "asr_compute_type": "float16",
+      "faster_whisper_model": "small"
+    },
+    {
+      "cell_id": "asr=whisperx_osd=energy_fallback_resolver=openai_sep=sepformer",
+      "asr": "whisperx",
+      "osd": "energy_fallback",
+      "resolver": "openai",
+      "separation": "sepformer",
+      "language": "zh",
+      "asr_device": "cuda",
+      "asr_compute_type": "float16",
+      "faster_whisper_model": "small"
+    },
+    {
+      "cell_id": "asr=mock_osd=pyannote_resolver=none_sep=none",
+      "asr": "mock",
+      "osd": "pyannote",
+      "resolver": "none",
+      "separation": "none",
+      "language": "und",
+      "asr_device": "cpu",
+      "asr_compute_type": "int8",
+      "faster_whisper_model": "small"
+    }
+  ]
+}

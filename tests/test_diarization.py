@@ -55,6 +55,28 @@ class ClusterSpeakersTests(unittest.TestCase):
         assigned = assign_speakers_to_segments(segments, turns)
         self.assertEqual([item["speaker"] for item in assigned], ["A", "MIXED", "UNKNOWN"])
 
+    def test_short_segments_accept_partial_diarization_coverage(self) -> None:
+        segments = [
+            {"segment_id": "short", "start_time": 15.0, "end_time": 16.776},
+        ]
+        turns = [
+            {"speaker": "A", "start_time": 15.168, "end_time": 15.775},
+            {"speaker": "A", "start_time": 15.927, "end_time": 16.417},
+        ]
+        assigned = assign_speakers_to_segments(segments, turns)
+        self.assertEqual(assigned[0]["speaker"], "A")
+        self.assertAlmostEqual(assigned[0]["speaker_confidence"], 0.618, places=3)
+
+    def test_short_segments_still_need_some_diarization_support(self) -> None:
+        segments = [
+            {"segment_id": "short", "start_time": 15.0, "end_time": 16.5},
+        ]
+        turns = [
+            {"speaker": "A", "start_time": 16.4, "end_time": 16.5},
+        ]
+        assigned = assign_speakers_to_segments(segments, turns)
+        self.assertEqual(assigned[0]["speaker"], "UNKNOWN")
+
     def test_preserves_existing_speaker_when_present(self) -> None:
         segments = [{"segment_id": "s1", "speaker": "ALICE", "start_time": 0.0, "end_time": 1.0}]
         clustered = cluster_speakers(segments)

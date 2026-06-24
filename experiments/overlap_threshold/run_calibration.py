@@ -205,9 +205,7 @@ def score_meeting_segments(
 
     - ``"fixed"`` (default): tile into ``window_seconds`` windows — matches the
       exploratory experiment and stays robust on long far-field recordings;
-    - ``"energy"``: the project's energy VAD;
-    - ``"silero"``: the faster-whisper silero VAD (production-aligned; requires
-      the ``segment_waveform(method="silero")`` backend from PR #52).
+    - ``"silero"``: the faster-whisper silero VAD (production-aligned).
 
     ``fuse_diarization`` mirrors the production pipeline: when set, pyannote
     diarization turns are fed into the scorer so the result is the **fused**
@@ -225,14 +223,12 @@ def score_meeting_segments(
     meeting_id = Path(audio_path).stem
     if vad_method == "silero":
         try:
-            segments = segment_waveform(samples, sample_rate, meeting_id=meeting_id, method="silero")
+            segments = segment_waveform(samples, sample_rate, meeting_id=meeting_id)
         except ImportError as exc:
             raise RuntimeError(
                 "--vad-method silero needs faster-whisper, which is not installed. "
-                "Install it (pip install -r requirements-asr.txt) or use --vad-method energy/fixed."
+                "Install it (pip install -r requirements.txt) or use --vad-method fixed."
             ) from exc
-    elif vad_method == "energy":
-        segments = segment_waveform(samples, sample_rate, meeting_id=meeting_id)
     else:  # "fixed"
         duration = len(samples) / sample_rate if sample_rate else 0.0
         segments = window_segments(duration, window_seconds, meeting_id=meeting_id)
@@ -469,9 +465,9 @@ def main() -> None:
                         help="ground-truth overlap coverage to label a segment high-overlap")
     parser.add_argument("--window-seconds", type=float, default=2.0,
                         help="fixed window length when --vad-method=fixed")
-    parser.add_argument("--vad-method", default="fixed", choices=["fixed", "energy", "silero"],
-                        help="segmentation: fixed windows (default), energy VAD, or silero VAD "
-                             "(silero needs the segment_waveform method from PR #52)")
+    parser.add_argument("--vad-method", default="fixed", choices=["fixed", "silero"],
+                        help="segmentation: fixed windows (default) or silero VAD "
+                             "(silero needs faster-whisper)")
     parser.add_argument("--fuse-diarization", action="store_true",
                         help="feed pyannote diarization into the scorer for the production-aligned "
                              "fused overlap score (needs pyannote.audio + HF_TOKEN)")

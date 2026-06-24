@@ -1,25 +1,13 @@
 """Tests for high-overlap candidate generation."""
 
 import unittest
-from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
 
 import numpy as np
 
-from src.candidates.generator import (
-    generate_high_overlap_candidates,
-    generate_separated_source_candidates,
-)
-from src.high_overlap import HIGH_OVERLAP_PATH, HIGH_OVERLAP_SPEAKER, process_high_overlap_segments
-from src.speech_separation import MockSpeechSeparationAdapter
-
-
-def _decoded(text: str):
-    """A faster-whisper-style (segments, info) tuple for one transcript."""
-    segments = (
-        [SimpleNamespace(text=text, avg_logprob=-0.1, no_speech_prob=0.0)] if text.strip() else []
-    )
-    return iter(segments), SimpleNamespace(language="en")
+from src.candidates.generator import generate_high_overlap_candidates
+from src.high_overlap import HIGH_OVERLAP_PATH, HIGH_OVERLAP_SPEAKER, _slice_segment, process_high_overlap_segments
+from src.llm.gemma_client import GemmaClient
+from src.llm.resolver import resolve_high_overlap_segment
 
 
 class CandidateGeneratorTests(unittest.TestCase):
@@ -36,58 +24,58 @@ class CandidateGeneratorTests(unittest.TestCase):
         self.assertIn("decode_config", candidates[0])
         self.assertIn("High-overlap segment", candidates[0]["uncertainty_note"])
 
-    @patch.dict("sys.modules", {"faster_whisper": MagicMock()})
-    @patch("src.candidates.generator._load_faster_whisper_model")
-    def test_identical_tracks_collapse_to_one_candidate(self, mocked_load) -> None:
-        model = MagicMock()
-        model.transcribe.side_effect = [_decoded("hello"), _decoded("hello")]
-        mocked_load.return_value = model
-        clip = np.ones(16000, dtype=np.float32) * 0.1
+    def test_resolver_accepts_generated_candidate_shape(self) -> None:
+        segment = {
+            "segment_id": "m1_seg_009",
+            "speaker": "MIXED",
+            "text": "",
+            "candidates": generate_high_overlap_candidates(
+                {"segment_id": "m1_seg_009", "text": ""},
+                samples=np.ones(16000, dtype=np.float32),
+                sample_rate=16000,
+            ),
+        }
 
-        candidates = generate_separated_source_candidates(
-            {"segment_id": "m1_seg_009"}, [clip, clip.copy()], sample_rate=16000, separation_backend="nmf"
-        )
+        resolved = resolve_high_overlap_segment(segment)
 
-        self.assertEqual(len(candidates), 1)
-
-    @patch.dict("sys.modules", {"faster_whisper": MagicMock()})
-    @patch("src.candidates.generator._load_faster_whisper_model")
-    def test_silent_track_is_not_sent_to_asr(self, mocked_load) -> None:
-        model = MagicMock()
-        model.transcribe.return_value = _decoded("hi")
-        mocked_load.return_value = model
-        loud = np.ones(16000, dtype=np.float32) * 0.1
-        silent = np.zeros(16000, dtype=np.float32)
-
-        candidates = generate_separated_source_candidates(
-            {"segment_id": "m1_seg_009"}, [loud, silent], sample_rate=16000, separation_backend="nmf"
-        )
-
-        self.assertEqual(len(candidates), 1)
-        self.assertEqual(model.transcribe.call_count, 1)
-
-    @patch.dict("sys.modules", {"faster_whisper": MagicMock()})
-    @patch("src.candidates.generator._load_faster_whisper_model")
-    def test_separated_candidates_honor_asr_config(self, mocked_load) -> None:
-        model = MagicMock()
-        model.transcribe.return_value = _decoded("hi")
-        mocked_load.return_value = model
-        src = np.ones(16000, dtype=np.float32) * 0.1
-
-        generate_separated_source_candidates(
-            {"segment_id": "m1_seg_009"},
-            [src],
-            sample_rate=16000,
-            separation_backend="nmf",
-            asr_config={"model": "large-v3", "device": "cuda", "compute_type": "float16"},
-        )
-
-        # The CLI/pipeline ASR config must reach the separated-source decoder
-        # instead of silently defaulting to small/cpu/int8.
-        mocked_load.assert_called_with("large-v3", "cuda", "float16")
+        self.assertEqual(resolved["speaker"], "MIXED")
+        self.assertTrue(resolved["text"].strip())
+        self.assertEqual(resolved["source"], "fallback_resolved")
+        self.assertIn("decision_reason", resolved)
 
 
 class HighOverlapPathTests(unittest.TestCase):
+    def _high_overlap_segment(self) -> dict:
+        return {
+            "meeting_id": "meeting_001",
+            "segment_id": "m1_seg_009",
+            "speaker": "MIXED",
+            "start_time": 0.0,
+            "end_time": 6.0,
+            "text": "",
+            "overlap_score": 0.78,
+            "processing_path": HIGH_OVERLAP_PATH,
+            "asr_confidence": 0.54,
+            "speaker_confidence": 0.35,
+            "candidates": [
+                {
+                    "candidate_id": "m1_seg_009_c1",
+                    "speaker": "SPEAKER_01",
+                    "text": "We should test WhisperX first.",
+                    "confidence": 0.62,
+                    "uncertainty_note": "High-overlap segment.",
+                },
+                {
+                    "candidate_id": "m1_seg_009_c2",
+                    "speaker": "SPEAKER_02",
+                    "text": "Let's test the baseline first.",
+                    "confidence": 0.51,
+                    "uncertainty_note": "High-overlap segment.",
+                },
+            ],
+            "uncertainty_note": "High-overlap segment; speaker attribution is uncertain.",
+        }
+
     def test_high_overlap_record_keeps_main_transcript_empty(self) -> None:
         samples = np.ones(16000 * 6, dtype=np.float32) * 0.1
         segments = [
@@ -112,184 +100,226 @@ class HighOverlapPathTests(unittest.TestCase):
         self.assertGreaterEqual(len(segment["candidates"]), 2)
         self.assertIn("speaker attribution is uncertain", segment["uncertainty_note"])
 
-    @patch.dict("sys.modules", {"faster_whisper": MagicMock()})
-    @patch("src.candidates.generator._load_faster_whisper_model")
-    def test_separated_sources_become_distinct_asr_candidates(self, mocked_load) -> None:
-        model = MagicMock()
-        model.transcribe.side_effect = [
-            (
-                iter([SimpleNamespace(text=" source one", avg_logprob=-0.1, no_speech_prob=0.0)]),
-                SimpleNamespace(language="en"),
-            ),
-            (
-                iter([SimpleNamespace(text=" source two", avg_logprob=-0.2, no_speech_prob=0.0)]),
-                SimpleNamespace(language="en"),
-            ),
+    def test_slice_segment_uses_decode_context_window(self) -> None:
+        samples = np.arange(16000 * 5, dtype=np.float32)
+        segment = {
+            "start_time": 2.0,
+            "end_time": 2.1,
+            "decode_start_time": 1.0,
+            "decode_end_time": 3.0,
+        }
+
+        clip = _slice_segment(samples, segment, sample_rate=16000)
+
+        self.assertEqual(clip.size, 16000 * 2)
+        self.assertEqual(float(clip[0]), 16000.0)
+
+    def test_resolver_fills_high_overlap_transcript_from_llm(self) -> None:
+        segment = self._high_overlap_segment()
+        client = GemmaClient(lambda _prompt: {
+            "speaker": "SPEAKER_01",
+            "text": "We should test WhisperX first.",
+            "confidence": 0.72,
+            "resolution_mode": "selected",
+            "source_candidate_ids": ["m1_seg_009_c1"],
+            "decision_reason": "Candidate 1 best matches the local context.",
+        })
+
+        resolved = resolve_high_overlap_segment(segment, client=client)
+
+        self.assertEqual(resolved["speaker"], "SPEAKER_01")
+        self.assertEqual(resolved["text"], "We should test WhisperX first.")
+        self.assertEqual(resolved["source"], "llm_resolved")
+        self.assertEqual(resolved["resolution_mode"], "selected")
+        self.assertEqual(resolved["source_candidate_ids"], ["m1_seg_009_c1"])
+        self.assertIn("Candidate 1", resolved["decision_reason"])
+        self.assertEqual(len(resolved["candidates"]), 2)
+
+    def test_resolver_prompt_includes_context_and_accepts_merged_output(self) -> None:
+        segment = self._high_overlap_segment()
+        captured: dict[str, str] = {}
+
+        def generate(prompt: str) -> dict:
+            captured["prompt"] = prompt
+            return {
+                "speaker": "SPEAKER_01",
+                "text": "We should test the WhisperX baseline first.",
+                "confidence": 0.68,
+                "resolution_mode": "merged",
+                "source_candidate_ids": ["m1_seg_009_c1", "m1_seg_009_c2"],
+                "decision_reason": "Merged the stable action from candidate 1 with the baseline wording from candidate 2.",
+            }
+
+        context = [
+            {
+                "speaker": "SPEAKER_00",
+                "start_time": -4.0,
+                "end_time": -1.0,
+                "text": "We need one baseline before the alignment test.",
+            }
         ]
-        mocked_load.return_value = model
-        samples = np.ones(16000 * 2, dtype=np.float32) * 0.1
-        segments = [{
-            "meeting_id": "meeting_001",
-            "segment_id": "m1_seg_009",
-            "start_time": 0.0,
-            "end_time": 2.0,
-            "overlap_score": 0.78,
-            "processing_path": HIGH_OVERLAP_PATH,
+        resolved = resolve_high_overlap_segment(segment, client=GemmaClient(generate), context_segments=context)
+
+        self.assertIn("Adjacent reliable context", captured["prompt"])
+        self.assertIn("one baseline", captured["prompt"])
+        self.assertEqual(resolved["text"], "We should test the WhisperX baseline first.")
+        self.assertEqual(resolved["resolution_mode"], "merged")
+        self.assertEqual(resolved["source_candidate_ids"], ["m1_seg_009_c1", "m1_seg_009_c2"])
+
+    def test_resolver_allows_llm_to_mark_unresolved(self) -> None:
+        segment = self._high_overlap_segment()
+        client = GemmaClient(lambda _prompt: {
+            "speaker": "MIXED",
+            "text": "",
+            "confidence": 0.0,
+            "resolution_mode": "unresolved",
+            "source_candidate_ids": [],
+            "decision_reason": "Candidates conflict and context does not support either wording.",
+        })
+
+        resolved = resolve_high_overlap_segment(segment, client=client)
+
+        self.assertEqual(resolved["speaker"], "MIXED")
+        self.assertEqual(resolved["text"], "")
+        self.assertEqual(resolved["source"], "unresolved")
+        self.assertEqual(resolved["resolution_mode"], "unresolved")
+
+    def test_resolver_falls_back_when_llm_output_is_invalid(self) -> None:
+        segment = self._high_overlap_segment()
+        client = GemmaClient(lambda _prompt: {
+            "speaker": "SPEAKER_02",
+            "text": "This invalid confidence should not be accepted.",
+            "confidence": 1.2,
+            "decision_reason": "Out of range confidence.",
+        })
+
+        resolved = resolve_high_overlap_segment(segment, client=client)
+
+        self.assertEqual(resolved["speaker"], "SPEAKER_01")
+        self.assertEqual(resolved["text"], "We should test WhisperX first.")
+        self.assertEqual(resolved["asr_confidence"], 0.62)
+        self.assertEqual(resolved["source"], "fallback_resolved")
+        self.assertEqual(resolved["resolution_mode"], "selected")
+        self.assertEqual(resolved["source_candidate_ids"], ["m1_seg_009_c1"])
+        self.assertIn("highest-confidence candidate", resolved["decision_reason"])
+
+    def test_resolver_preserves_segment_speaker_when_best_candidate_is_unknown(self) -> None:
+        segment = self._high_overlap_segment()
+        segment["speaker"] = "MIXED"
+        segment["candidates"] = [{
+            "candidate_id": "m1_seg_009_c1",
+            "speaker": "UNKNOWN",
+            "text": "The speaker is unclear.",
+            "confidence": 0.82,
+            "uncertainty_note": "High-overlap segment.",
         }]
 
-        processed = process_high_overlap_segments(
-            samples,
-            segments,
-            diarization_turns=[
-                {"speaker": "SPEAKER_00", "start_time": 0.0, "end_time": 2.0},
-                {"speaker": "SPEAKER_01", "start_time": 0.0, "end_time": 2.0},
-            ],
-            separation_adapter=MockSpeechSeparationAdapter([
-                samples * 0.6,
-                samples * 0.4,
-            ]),
-        )
+        resolved = resolve_high_overlap_segment(segment)
 
-        candidates = processed[0]["candidates"]
-        self.assertEqual([candidate["text"] for candidate in candidates], ["source one", "source two"])
-        self.assertEqual(
-            [candidate["speaker"] for candidate in candidates],
-            ["SEPARATED_SOURCE_01", "SEPARATED_SOURCE_02"],
-        )
-        self.assertTrue(all(candidate["decode_config"]["backend"] == "mock" for candidate in candidates))
+        self.assertEqual(resolved["speaker"], "MIXED")
+        self.assertEqual(resolved["text"], "The speaker is unclear.")
+        self.assertEqual(resolved["source"], "fallback_resolved")
 
-    @patch.dict("sys.modules", {"faster_whisper": MagicMock()})
-    @patch("src.candidates.generator._load_faster_whisper_model")
-    def test_partial_separation_supplements_multi_decode_fallback(self, mocked_load) -> None:
-        model = MagicMock()
-        # Source 1 transcribes; source 2 returns empty text (degraded track).
-        # The remaining calls feed the multi-decode fallback that must kick in.
-        model.transcribe.side_effect = [
-            _decoded(" alpha"),
-            _decoded(""),
-            _decoded(" beta"),
-            _decoded(" gamma"),
-            _decoded(" delta"),
-            _decoded(" epsilon"),
+    def test_resolver_tie_breaks_equal_confidence_by_candidate_order(self) -> None:
+        segment = self._high_overlap_segment()
+        segment["candidates"] = [
+            {
+                "candidate_id": "m1_seg_009_c1",
+                "speaker": "SPEAKER_01",
+                "text": "First equal-confidence candidate.",
+                "confidence": 0.7,
+                "uncertainty_note": "High-overlap segment.",
+            },
+            {
+                "candidate_id": "m1_seg_009_c2",
+                "speaker": "SPEAKER_02",
+                "text": "Second equal-confidence candidate.",
+                "confidence": 0.7,
+                "uncertainty_note": "High-overlap segment.",
+            },
         ]
-        mocked_load.return_value = model
-        samples = np.ones(16000 * 2, dtype=np.float32) * 0.1
-        segments = [{
-            "meeting_id": "meeting_001",
-            "segment_id": "m1_seg_009",
-            "start_time": 0.0,
-            "end_time": 2.0,
-            "overlap_score": 0.78,
-            "processing_path": HIGH_OVERLAP_PATH,
+
+        resolved = resolve_high_overlap_segment(segment)
+
+        self.assertEqual(resolved["speaker"], "SPEAKER_01")
+        self.assertEqual(resolved["text"], "First equal-confidence candidate.")
+        self.assertEqual(resolved["source"], "fallback_resolved")
+
+    def test_suspected_overlap_preserves_baseline_when_candidate_diverges(self) -> None:
+        segment = self._high_overlap_segment()
+        segment.update({
+            "route_mode": "suspected_high_overlap",
+            "baseline_text": "We should test WhisperX first.",
+            "baseline_speaker": "SPEAKER_00",
+            "baseline_asr_confidence": 0.74,
+            "baseline_speaker_confidence": 0.9,
+        })
+        segment["candidates"] = [{
+            "candidate_id": "m1_seg_009_c1",
+            "speaker": "SPEAKER_01",
+            "text": "Completely different unsupported wording.",
+            "confidence": 0.95,
+            "uncertainty_note": "High-overlap segment.",
         }]
 
-        processed = process_high_overlap_segments(
-            samples,
-            segments,
-            separation_adapter=MockSpeechSeparationAdapter([samples * 0.6, samples * 0.4]),
-        )
+        resolved = resolve_high_overlap_segment(segment)
 
-        candidates = processed[0]["candidates"]
-        texts = [candidate["text"] for candidate in candidates]
-        # The one good separated candidate survives, AND multi-decode hypotheses
-        # are added so the second speaker is not silently dropped.
-        self.assertIn("alpha", texts)
-        self.assertTrue(any(c["speaker"] == "SEPARATED_SOURCE_01" for c in candidates))
-        self.assertGreater(len(candidates), 1)
+        self.assertEqual(resolved["speaker"], "SPEAKER_00")
+        self.assertEqual(resolved["text"], "We should test WhisperX first.")
+        self.assertEqual(resolved["source"], "baseline_preserved")
+        self.assertEqual(resolved["resolution_mode"], "baseline_preserved")
+        self.assertEqual(resolved["asr_confidence"], 0.74)
 
-    @patch.dict("sys.modules", {"faster_whisper": MagicMock()})
-    @patch("src.candidates.generator._load_faster_whisper_model")
-    def test_single_separated_source_still_keeps_multiple_candidates(self, mocked_load) -> None:
-        model = MagicMock()
-        # Separator recovers ONE source that transcribes successfully; without
-        # supplementing, the segment would collapse to a single candidate.
-        model.transcribe.side_effect = [
-            _decoded(" only one"),
-            _decoded(" alt one"),
-            _decoded(" alt two"),
-            _decoded(" alt three"),
-            _decoded(" alt four"),
-        ]
-        mocked_load.return_value = model
-        samples = np.ones(16000 * 2, dtype=np.float32) * 0.1
-        segments = [{
-            "meeting_id": "meeting_001",
-            "segment_id": "m1_seg_009",
-            "start_time": 0.0,
-            "end_time": 2.0,
-            "overlap_score": 0.78,
-            "processing_path": HIGH_OVERLAP_PATH,
+    def test_suspected_overlap_replaces_baseline_when_candidate_is_low_risk(self) -> None:
+        segment = self._high_overlap_segment()
+        segment.update({
+            "route_mode": "suspected_high_overlap",
+            "baseline_text": "We should test WhisperX first.",
+            "baseline_speaker": "SPEAKER_00",
+            "baseline_asr_confidence": 0.6,
+            "baseline_speaker_confidence": 0.9,
+        })
+        segment["candidates"] = [{
+            "candidate_id": "m1_seg_009_c1",
+            "speaker": "SPEAKER_01",
+            "text": "We should test WhisperX first",
+            "confidence": 0.82,
+            "uncertainty_note": "High-overlap segment.",
         }]
 
-        processed = process_high_overlap_segments(
-            samples,
-            segments,
-            separation_adapter=MockSpeechSeparationAdapter([samples * 0.5]),
-        )
+        resolved = resolve_high_overlap_segment(segment)
 
-        candidates = processed[0]["candidates"]
-        self.assertGreaterEqual(len(candidates), 2)
-        self.assertTrue(any(c["speaker"] == "SEPARATED_SOURCE_01" for c in candidates))
+        self.assertEqual(resolved["speaker"], "SPEAKER_01")
+        self.assertEqual(resolved["text"], "We should test WhisperX first")
+        self.assertEqual(resolved["source"], "fallback_resolved")
+        self.assertEqual(resolved["resolution_mode"], "selected")
 
-    @patch.dict("sys.modules", {"faster_whisper": MagicMock()})
-    @patch("src.candidates.generator._load_faster_whisper_model")
-    def test_same_text_different_speaker_is_preserved(self, mocked_load) -> None:
-        model = MagicMock()
-        # Separated source and multi-decode fallback yield the SAME text, but the
-        # fallback carries a diarization speaker hypothesis. Both must survive.
-        model.transcribe.side_effect = [_decoded(" same text")] * 5
-        mocked_load.return_value = model
-        samples = np.ones(16000 * 2, dtype=np.float32) * 0.1
-        segments = [{
-            "meeting_id": "meeting_001",
-            "segment_id": "m1_seg_009",
-            "start_time": 0.0,
-            "end_time": 2.0,
-            "overlap_score": 0.78,
-            "processing_path": HIGH_OVERLAP_PATH,
+    def test_resolver_marks_segment_unresolved_without_candidates(self) -> None:
+        segment = self._high_overlap_segment()
+        segment["candidates"] = []
+
+        resolved = resolve_high_overlap_segment(segment)
+
+        self.assertEqual(resolved["speaker"], "MIXED")
+        self.assertEqual(resolved["text"], "")
+        self.assertEqual(resolved["source"], "unresolved")
+        self.assertIn("No usable transcript candidates", resolved["decision_reason"])
+
+    def test_resolver_does_not_promote_placeholder_candidate_text(self) -> None:
+        segment = self._high_overlap_segment()
+        segment["candidates"] = [{
+            "candidate_id": "m1_seg_009_c1",
+            "speaker": "UNKNOWN",
+            "text": "[high-overlap transcript candidate pending ASR decode]",
+            "confidence": 0.0,
+            "uncertainty_note": "High-overlap segment.",
         }]
 
-        processed = process_high_overlap_segments(
-            samples,
-            segments,
-            diarization_turns=[{"speaker": "SPEAKER_00", "start_time": 0.0, "end_time": 2.0}],
-            separation_adapter=MockSpeechSeparationAdapter([samples * 0.5]),
-        )
+        resolved = resolve_high_overlap_segment(segment)
 
-        candidates = processed[0]["candidates"]
-        speakers = {c["speaker"] for c in candidates}
-        self.assertIn("SEPARATED_SOURCE_01", speakers)
-        self.assertIn("SPEAKER_00", speakers)
-        self.assertGreaterEqual(len(candidates), 2)
-
-    @patch(
-        "src.high_overlap.generate_high_overlap_candidates",
-        return_value=[{"candidate_id": "m1_seg_009_c1", "confidence": 0.5}],
-    )
-    @patch("src.high_overlap.generate_separated_source_candidates", return_value=[])
-    def test_empty_separation_candidates_keep_existing_fallback(
-        self,
-        mocked_separated,
-        mocked_fallback,
-    ) -> None:
-        samples = np.ones(16000, dtype=np.float32) * 0.1
-        segments = [{
-            "meeting_id": "meeting_001",
-            "segment_id": "m1_seg_009",
-            "start_time": 0.0,
-            "end_time": 1.0,
-            "overlap_score": 0.78,
-            "processing_path": HIGH_OVERLAP_PATH,
-        }]
-
-        processed = process_high_overlap_segments(
-            samples,
-            segments,
-            separation_adapter=MockSpeechSeparationAdapter(),
-        )
-
-        self.assertEqual(processed[0]["candidates"], mocked_fallback.return_value)
-        mocked_fallback.assert_called_once()
+        self.assertEqual(resolved["text"], "")
+        self.assertEqual(resolved["source"], "unresolved")
+        self.assertIn("No usable transcript candidates", resolved["decision_reason"])
 
 
 if __name__ == "__main__":

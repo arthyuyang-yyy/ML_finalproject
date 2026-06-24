@@ -1,340 +1,331 @@
-📢 【重要】机器学习大作业 GitHub 协作规范与工作要求
-各位组员，为了保证我们项目（ML_finalproject）的代码质量，防止覆盖彼此的代码，也为了让大家更好地分工，我们已经开通了 GitHub 的自动化分支保护机制与代码审查流程。
+# Overlap-aware Dual-path ASR with Episodic Memory
 
-以下是后续开发中所有人必须严格遵守的工作要求：
+中文名称：面向多人会议理解的重叠感知双路径语音处理与情景记忆系统
 
-1. 🛑 绝对禁止直接 Push 到 main 分支
-现在 main 分支已经完全锁死。任何人都无法（也禁止尝试）直接把代码推送到 main 分支。所有的日常开发和新功能编写，都必须在自己的本地分支上进行。
+本项目面向多人会议音频，目标是生成可追溯的结构化会议记录和 Episodic Memory。系统会识别说话人、估计语音重叠程度、对低重叠和高重叠片段走不同处理路径，并把后续问答绑定到 evidence segment、时间戳和原始音频片段。
 
-2. 💻 标准开发流程（每次写代码请遵循这 4 步）：
-第一步：同步主分支
-在本地切换到 main 分支并拉取最新代码，确保你的基础代码是最新的：
-git checkout main ➡️ git pull origin main
+当前工程目标是保留一条清晰、可运行、可演示的主流程，避免过度抽象和过度文档化。
 
-第二步：切出自己的功能分支
-根据你负责的模块，切出一个独立的特性分支（分支名用小写，可以用下划线或连字符，如 dev_data_preprocessing 或 feature_model_training）：
-git checkout -b 你的分支名
+## 项目目标
 
-第三步：在自己的分支上开发并提交
-在这个分支上写代码，完成后提交并推送到 GitHub：
-git add . ➡️ git commit -m "增加了XX模块/修复了XX问题" ➡️ git push origin 你的分支名
+系统输入一段会议音频，输出：
 
-第四步：在 GitHub 网页端发起 Pull Request (PR)
-登录 GitHub 网页，点击 Compare & pull request，请求将你的分支合并到 main 分支。
+- 带时间戳的会议片段；
+- 说话人标签；
+- 低/高重叠路由结果；
+- ASR 文本和置信度；
+- 高重叠片段的候选转写、最终解析文本和决策原因；
+- 统一的 `evidence_segments.json`；
+- 结构化会议事件；
+- 可检索的 `episodic_memory.json`；
+- 带 evidence 引用的问答结果。
 
-3. 🛡️ 代码终审权（PR 审批规则）
-为了严格把关代码质量，系统已经配置了 Code Owners（代码所有者） 自动化机制：
+核心思路不是把所有音频交给一个端到端模型，而是先根据重叠程度分流：
 
-任何组员提交 PR 之后，系统会自动指定 @arthuyuyang-yyy 以及另外两位负责人作为核心评审人（Reviewers）。
+- 低重叠片段：走稳定 ASR 和说话人归属路径；
+- 高重叠片段：保留多个候选转写，再由 LLM resolver 或 fallback resolver 选择最终结果。
 
-核心硬性规则：一个 PR 必须在 3 位负责人中拿到至少 2 个 Approve（通过），绿色的合并按钮才会解锁，代码才能合入 main。
+## Pipeline
 
-修改意见处理：负责人在 Code Review（代码审查）时如果对某行代码提出了修改意见，会在 PR 里留下一个讨论（Conversation）。在作者修改完代码并点击 “Resolve conversation” 之前，该 PR 将被系统强制锁死，无法合并。
+```text
+input audio
+-> preprocess audio
+-> VAD segmentation
+-> diarization
+-> overlap scoring
+-> route by overlap_score
+   -> low_overlap_cluster: ASR + speaker attribution
+   -> high_overlap_candidate: candidate generation + resolver
+-> evidence_segments.json
+-> meeting_events.json
+-> episodic_memory.json
+-> retrieval QA
+```
 
-4. 📝 良好的 Commit 习惯
-请不要在 commit 信息里写 “111”、“update” 这种模糊的字眼。请用简短的一句话说清楚你这次改了什么，方便大家以后回滚代码和写大作业的最终报告。
-
-请大家务必按照这个规范来提交代码，第一次走流程如果遇到 git 报错或者网络问题，随时在群里呼叫负责人协助，大家加油！🚀
-# Overlap-aware Dual-path ASR with Episodic Memory for Multi-speaker Meeting Understanding
-
-[English](#project-title) | [中文完整翻译](#中文完整翻译) | [独立中文版](README.zh-CN.md)
-
-## Project Title
-
-**Overlap-aware Dual-path ASR with Episodic Memory for Multi-speaker Meeting Understanding**
-
-Chinese title: 面向多人会议理解的重叠感知双路径语音处理与情景记忆系统
-
-## Motivation
-
-Meeting assistants often compress imperfect transcripts into fluent summaries. This can hide speaker-attribution errors, overlapping speech, and unsupported conclusions. This project is not only a meeting summarization system. It is a **verifiable meeting memory system** that retains uncertainty and links later answers, decisions, and action items back to timestamped evidence.
-
-## Difference from the Reference Thesis
-
-The reference thesis already combines ASR, speaker diarization, low-overlap clustering, high-overlap speech separation, LLM correction, and structured meeting summaries. This project extends that foundation instead of reproducing it.
-
-**Reference system**
-
-`ASR -> speaker diarization -> LLM correction -> structured summary`
-
-**Our system**
-
-`audio preprocessing -> overlap-aware dual paths -> Evidence -> structured events -> Episodic Memory -> traceable retrieval and QA`
-
-The key change is not merely adding an LLM. High-overlap speech is not forced into one confident transcript: candidates, confidence, and uncertainty remain available to structured events, memory, and final answers. LLMs are optional, replaceable components for event extraction and answer wording; the core pipeline remains runnable and testable without them.
-
-## Core Innovations
-
-1. **Uncertainty propagation for overlapped speech:** low-overlap segments produce stable transcripts, while high-overlap segments retain multiple transcript and speaker candidates with confidence. Later stages must not silently turn uncertain candidates into confirmed facts.
-2. **Traceable event-level meeting memory and RAG:** episodes bind meeting events to speakers, timestamps, confidence, evidence IDs, and playable audio clips. Retrieval and QA can trace claims back to exact evidence.
-3. **Trust-oriented evaluation:** evaluate routing, candidate usefulness, uncertainty preservation, evidence hits, content support, and unsupported claims in addition to WER and DER.
-
-LLM integration is not itself an innovation. It is an optional experimental variable for comparing deterministic rules, plain LLM extraction, and evidence-constrained LLM extraction.
-
-## System Pipeline
-
-1. Preprocess audio and create timestamped VAD segments.
-2. Estimate overlap scores and route segments to low- or high-overlap processing.
-3. Produce one stable ASR result for low-overlap segments and multiple confidence-bearing candidates for high-overlap segments.
-4. Build and validate the shared Evidence representation (17 required + 1 optional field).
-5. Extract structured events with deterministic rules or an optional evidence-constrained LLM.
-6. Convert events into persistent, traceable Episodic Memory.
-7. Retrieve episodes with BM25 + embeddings, then answer with templates or an optional LLM. Every supported answer must cite real evidence IDs and timestamps.
-
-See [docs/system_architecture.md](docs/system_architecture.md) for the module-level design.
-See [docs/future_work_guide.zh-CN.md](docs/future_work_guide.zh-CN.md) for the
-plain-language execution guide for the remaining work and formal experiments.
-
-## Repository Structure
+## 当前项目结构
 
 ```text
 .
-├── docs/                  # Bilingual research design and experiment plans
-├── data/
-│   ├── raw_audio/         # Raw meeting audio files
-│   └── processed_audio/   # Processed/derived audio
-├── outputs/               # Generated artifacts, ignored except placeholders
-├── src/                   # Modular pipeline implementation
-│   ├── audio/             # Audio preprocessing, normalization, export, and clipping
-│   ├── pipeline/          # End-to-end orchestration, configuration, and I/O helpers
-│   ├── overlap/           # Overlap detection facade
-│   ├── evidence/          # Metadata builder and validator facade
-│   ├── llm/               # LLM event extraction, validation, and prompt construction
-│   ├── memory/            # Episodic memory facade
-│   ├── qa/                # QA facade
-│   ├── candidates/        # Candidate generation facade
-│   ├── fallbacks/         # Deterministic lightweight fallback backends
-│   └── ui/                # Gradio interactive demo
-├── tests/                 # Unit and integration tests
-├── app.py                 # Gradio interactive demo entry point
-├── main.py                # CLI pipeline entry point
+├── app.py                         # Gradio demo entry point
+├── main.py                        # CLI pipeline entry point
+├── requirements.txt               # Unified dependency file
 ├── README.md
-└── README.zh-CN.md
+├── Project_task.md                 # Current task scope and acceptance notes
+├── TODO.md                         # Current follow-up tracker
+├── data/
+│   ├── raw_audio/                 # Raw meeting audio, ignored except placeholders
+│   ├── processed_audio/           # Processed audio, ignored except placeholders
+│   ├── fixtures/                  # Lightweight test/demo fixtures
+│   ├── annotations/               # Annotation templates
+│   └── manifests/                 # Dataset manifests, if used
+├── memory/
+│   └── episodic_memory.json       # Long-term memory store
+├── docs/                          # 精简参考说明；已删除过时 API 文档和历史提案
+├── outputs/                       # Generated pipeline artifacts
+├── scripts/                       # Optional dataset/benchmark helpers
+├── src/
+│   ├── audio/                     # Audio loading, preprocessing, VAD, clipping
+│   ├── asr/                       # ASR adapters and transcription helpers
+│   ├── candidates/                # High-overlap candidate generation
+│   ├── datasets/                  # Optional dataset manifest helpers
+│   ├── diarization/               # Speaker diarization adapters
+│   ├── evaluation/                # Lightweight objective metrics
+│   ├── evidence/                  # Evidence segment schema, builder, validator
+│   ├── fallbacks/                 # Deterministic fallback backends
+│   ├── llm/                       # Gemma client, event extraction, high-overlap resolver
+│   ├── memory/                    # Episodic memory store and retriever
+│   ├── overlap/                   # Overlap detection and routing
+│   ├── pipeline/                  # End-to-end orchestration
+│   ├── qa/                        # Evidence-backed QA
+│   └── ui/                        # Gradio app
+└── tests/                         # Unit and integration tests
 ```
 
-## Metadata Schema
+## 关键模块
 
-Each processed segment uses a shared schema:
+### Audio
+
+`src/audio/preprocess.py` 负责：
+
+- 读取音频；
+- 转单声道；
+- 重采样到 16 kHz；
+- 峰值归一化；
+- 基于 silero 的 VAD 分段。
+
+`src/audio/clipper.py` 会根据 evidence segment 的时间戳导出每段音频 clip。
+
+### Diarization and Overlap
+
+`src/diarization/` 负责说话人分离。优先使用 pyannote；没有模型或 token 时，代码保持可导入、可测试。
+
+`src/overlap/` 负责估计每个片段的 `overlap_score` 并做路由：
+
+```python
+if overlap_score < 0.5:
+    processing_path = "low_overlap_cluster"
+else:
+    processing_path = "high_overlap_candidate"
+```
+
+### Low-overlap Path
+
+低重叠片段进入 `src/low_overlap.py`：
+
+- 根据 diarization 结果分配 speaker；
+- 调用 ASR adapter 转写；
+- 输出文本、ASR 置信度、说话人置信度。
+
+### High-overlap Path
+
+高重叠片段进入 `src/high_overlap.py` 和 `src/candidates/generator.py`：
+
+- 生成多个候选转写；
+- 可选调用 speech separation adapter 生成 separated-source 候选；
+- 保留候选 speaker、文本、置信度和 decode 配置；
+- 不直接丢弃不确定性。
+
+随后进入 `src/llm/resolver.py`：
+
+- 如果配置了 Gemma/Ollama，则让 LLM 基于候选结果输出最终文本；
+- 如果没有 LLM，则选择最高置信候选作为 `fallback_resolved`；
+- 最终 evidence segment 会保留：
+  - `text`
+  - `speaker`
+  - `candidates`
+  - `source`
+  - `decision_reason`
+  - `uncertainty_note`
+
+Speech separation 当前是可选增强，不是默认主路径。`src/speech_separation.py` 保留 `none`、`mock`、`nmf` 和 `sepformer` adapter；pipeline 默认 `speech_separation_backend="none"`，需要时才为高重叠片段补充 separated-source candidates。resolver 不替代 speech separation，而是在候选生成之后负责最终选择或合并。
+
+### Evidence
+
+`src/evidence/` 统一低重叠和高重叠输出，生成 `evidence_segments.json`。
+
+核心字段包括：
 
 | Field | Meaning |
 | --- | --- |
-| `meeting_id` | Stable meeting identifier |
-| `segment_id` | Stable segment identifier |
-| `evidence_id` | Unique evidence record ID (usually mirrors segment_id) |
-| `speaker` | Speaker label or uncertain speaker hypothesis |
-| `start_time` | Evidence start time in seconds |
-| `end_time` | Evidence end time in seconds |
-| `text` | Current transcript |
+| `meeting_id` | Meeting identifier |
+| `segment_id` | Segment identifier |
+| `evidence_id` | Evidence identifier |
+| `speaker` | Speaker label or resolved speaker |
+| `start_time`, `end_time` | Segment timestamps |
+| `text` | Final transcript text |
 | `processing_path` | `low_overlap_cluster` or `high_overlap_candidate` |
-| `route_reason` | Human-readable routing decision explanation |
-| `overlap_score` | Estimated overlap likelihood [0, 1] |
-| `asr_confidence` | ASR confidence estimate [0, 1] |
-| `speaker_confidence` | Speaker-attribution confidence [0, 1] |
-| `audio_clip_path` | Path to exported audio clip file |
-| `source_audio_path` | Original input audio path |
-| `language` | Language code (default `"und"`) |
-| `candidates` | Alternative transcript/speaker interpretations |
-| `uncertainty_note` | Human-readable reason for uncertainty |
-| `cluster_similarity_distribution` | *Optional.* Relative, uncalibrated `{speaker: similarity}` distribution from the embedding-clustering fallback (defaults to `{}`) |
+| `route_reason` | Routing explanation |
+| `overlap_score` | Overlap score in `[0, 1]` |
+| `asr_confidence` | ASR / resolved confidence |
+| `speaker_confidence` | Speaker confidence |
+| `audio_clip_path` | Exported clip path |
+| `source_audio_path` | Original audio path |
+| `language` | Language code |
+| `candidates` | High-overlap candidates |
+| `uncertainty_note` | Uncertainty explanation |
+| `source` | Optional resolver source |
+| `decision_reason` | Optional resolver reason |
 
-## Episodic Memory Design
+### Episodic Memory and Retrieval
 
-An episode represents a meaningful meeting event or coherent segment group. Episodes inherit event IDs and topics from extracted meeting events, while uncovered segments fall back to time-gap grouping. Each episode preserves supporting evidence IDs, evidence segments, timestamps, speakers, confidence, overlap score, importance, and uncertainty.
+`src/memory/episodic_store.py` 把会议事件转成 episode，并写入：
 
-Episodes support:
+```text
+outputs/{meeting_id}/episodic_memory.json
+memory/episodic_memory.json
+```
 
-- evidence-backed meeting QA;
-- historical and cross-meeting recall;
-- action-item and decision retrieval;
-- semantic retrieval when `sentence-transformers` is available, with CJK-aware lexical fallback;
-- meeting-, speaker-, and time-filtered search;
-- relevance-gated ranking with importance, recency, and overlap-aware adjustments;
-- traceability from an answer to exact timestamps.
+`src/memory/retriever.py` 使用轻量检索：
 
-## Planned Experiments
+- 自定义 BLAKE2 character n-gram hash embedding；
+- 简单 keyword score；
+- 默认分数：`0.70 * embedding_similarity + 0.30 * keyword_score`；
+- 支持 meeting、speaker、time range 过滤。
 
-| Experiment | Goal | Status |
-| --- | --- | --- |
-| 1. Overlap routing | Compare predicted overlap routes with manual labels | Infrastructure ready; pyannote adapter and energy fallback implemented; annotation set pending |
-| 2. High-overlap candidates | Compare candidate generation with forced single-output transcription | NMF and optional SepFormer separation paths, candidate interface, and metrics implemented; formal real-audio comparison pending |
-| 3. Structured event extraction | Compare rules, plain LLMs, and Evidence-constrained LLMs | Step 16a standalone rule baseline and seed per-type evaluation complete; same-set LLM ablation pending |
-| 4. Episodic Memory QA | Compare summary QA, transcript RAG, and speaker-aware memory QA | Event-grouped storage, hybrid retrieval, filters, and baseline evidence-backed QA implemented; formal experiment pending |
-| 5. Evidence and uncertainty | Measure evidence hits, content support, unsupported claims, and uncertainty preservation | Core metrics and a seed experiment exist; annotated real pipeline outputs are pending |
+自定义 embedding 实现在：
 
-Full details are in [docs/experiment_plan.md](docs/experiment_plan.md).
+```text
+src/fallbacks/embeddings.py
+```
 
-## Current Status
+这是当前项目保留的轻量特色能力，不依赖 `sentence-transformers`。
 
-The project has reached **Phase 3 baseline implementation through Step 19 and is entering Phase 4 formal evaluation**. Phase 1 is complete; Phase 2 implementation is complete through Step 12 except Step 7b calibration; and Phase 3 has working event, memory, retrieval, and QA baselines, with Step 16b and Step 20 comparisons still pending. The lightweight pipeline validates software integration, but Mock ASR and deterministic fallbacks do not demonstrate real meeting quality.
+当前检索是 MVP 权衡：优先保证 deterministic、低依赖和可测试，不引入 transformer embedding、recency decay、importance prior 或跨会议个性化排序。QA 返回的 evidence IDs、timestamps 和 uncertainty 信息用于降低误答风险。`0.70 / 0.30` 是暂定 MVP 权重；后续如果有人工评估集，再基于 F1、NDCG 或 recall@k 重新校准权重并加入更复杂的排序信号。
 
-Implemented and runnable:
+默认相关性过滤也保持简单：没有 keyword 命中且 hash embedding 相似度低于 `0.35` 的 episode 会被丢弃；有 keyword 命中的 episode 即使 embedding 相似度低也会保留并进入最终分数比较。
 
-- bilingual research design, architecture, innovation points, and experiment plan;
-- shared evidence-packet metadata schema (17 required + 1 optional field), validation rules, and sample meeting fixture;
-- audio loading, mono conversion, polyphase resampling, peak normalization, and energy-based VAD segmentation (with merging and splitting);
-- audio clip export per evidence segment (`src/audio/clipper.py`);
-- controlled two-speaker overlap synthesis with SNR control and ground-truth overlap annotations;
-- objective WER, CER, overlap-routing classification, best-mapping speaker-attribution, citation-rate, and timestamp-citation-rate metrics;
-- configurable ASR adapters (auto/WhisperX/faster-whisper/Whisper/FunASR/mock) with calibrated confidence;
-- overlap scoring that fuses pyannote OSD, diarization overlap, speaker changes, optional ASR instability, and a conservative energy fallback;
-- dual-path routing (threshold 0.4), low-overlap ASR + speaker-attribution path, and high-overlap candidate generation without forcing one transcript;
-- optional high-overlap speech separation via replaceable adapters — a dependency-free from-scratch NMF baseline and an optional SpeechBrain SepFormer baseline — with per-source ASR candidates and the existing multi-decode fallback;
-- metadata construction, schema validation, evidence-only JSON prompts, LLM output repair/validation, and deterministic evidence-linked event fallback;
-- Step 16a standalone deterministic rule-based event extraction for decisions, action items, deadlines, open questions, and uncertainty, with per-type metrics and a reproducible seed experiment; the default no-LLM Pipeline still uses the generic evidence-linked fallback;
-- event-grouped episodic memory creation, atomic JSON persistence, semantic/lexical retrieval, relevance gating, and meeting/speaker/time filters;
-- baseline evidence-backed QA with evidence IDs, timestamps, confidence, uncertainty, and retrieval metadata;
-- a five-area Gradio workflow with selectable ASR/Gemma backends, timeline, candidates, long-term memory, and QA;
-- end-to-end pipeline orchestration (`src/pipeline/run_pipeline.py`);
-- automated tests covering the pipeline, runtime backends, retrieval filters, memory, QA, and evaluation.
+## Architecture Notes
 
-Current run capability:
+精简架构说明见 `docs/system_architecture.md`。该文档只保留当前主流程、关键契约和可选后端边界，避免恢复过多历史文档。
 
-- the lightweight dependency set can run the complete CLI pipeline from WAV input to per-meeting artifacts, episodic memory, and evidence-backed fallback QA;
-- without optional heavy models, `auto` ASR uses Mock ASR, diarization/overlap/event extraction/QA use deterministic fallbacks, and output is suitable for integration validation rather than recognition-quality claims;
-- real WhisperX/faster-whisper/Whisper/FunASR, pyannote, sentence-transformers, Ollama Gemma, and Gradio require their optional dependencies, model access, tokens, or services.
+### QA
 
-Pending before the project can claim full experimental completion:
+`src/qa/answerer.py` 只基于检索到的 episodes 回答问题，并返回 evidence IDs、timestamps、speakers 和 uncertainty 信息。
 
-- manually annotated evaluation split;
-- Step 7b overlap-threshold calibration on the same VAD segments and fused scores used by the production pipeline;
-- formal real-audio high-overlap and speech-separation quality comparison (NMF / SepFormer / direct multi-decode);
-- real heavy-model runs and accuracy comparisons for WhisperX, faster-whisper, Whisper, FunASR, pyannote, and Ollama Gemma;
-- Step 16b comparison of rule, plain-LLM, and full-Evidence constrained event extraction on the same annotated meetings;
-- Step 20 comparison of template QA, transcript RAG, and Episodic Memory RAG;
-- an annotated set built from real pipeline outputs for content support, uncertainty preservation, and candidate usefulness;
+## 输出目录
 
-Verified on June 15, 2026 with the lightweight virtual environment: all `424` unit/integration tests passed and `1` optional Gradio component test was skipped because Gradio was not installed; syntax compilation passed; and the Step 16a rule-event seed experiment reproduced overall precision/recall/F1 of `0.833 / 0.833 / 0.833`. Heavy-model quality claims and formal Phase 4 experiments remain pending.
+运行一次 pipeline 后会生成：
 
-## How to Run
+```text
+outputs/{meeting_id}/
+├── preprocessed.wav
+├── vad_segments.json
+├── diarization.json
+├── overlap.json
+├── low_overlap_segments.json
+├── high_overlap_candidates.json
+├── evidence_segments.json
+├── meeting_events.json
+├── episodic_memory.json
+└── clips/
+```
 
-Install the lightweight baseline dependencies and run the tests:
+## 安装
+
+所有依赖统一在一个文件：
 
 ```bash
 python -m pip install -r requirements.txt
-python -m unittest discover -s tests -v
 ```
 
-Run the end-to-end pipeline:
+云服务器部署、打包上传、后台运行和 Docker 方案见：
+
+```text
+docs/deployment.zh-CN.md
+```
+
+说明：
+
+- 只跑测试时，mock ASR 和 fallback backend 可以避免下载大型模型；
+- Whisper、WhisperX、pyannote、FunASR 等生产后端会在实际使用时按需加载；
+- 模型权重不要提交到仓库。
+
+## 运行测试
 
 ```bash
-python main.py data/raw_audio/meeting_001.wav --meeting-id meeting_001 --asr auto
-
-# Local Gemma through Ollama
-python main.py data/raw_audio/meeting_001.wav --gemma-backend ollama --gemma-model gemma3:4b
+python -m pytest -q
+python -m ruff check src tests main.py app.py
 ```
 
-Launch the Gradio interactive demo:
+当前验证状态：
+
+```text
+492 passed, 6 skipped, 2 warnings, 7 subtests passed
+ruff: All checks passed
+```
+
+## 运行 CLI Pipeline
+
+使用 mock ASR：
+
+```bash
+python main.py data/raw_audio/meeting_001.wav --meeting-id meeting_001 --asr mock
+```
+
+使用 faster-whisper 和本地 Ollama Gemma：
+
+```bash
+python main.py data/raw_audio/meeting_001.wav \
+  --meeting-id meeting_001 \
+  --asr faster-whisper \
+  --gemma-backend ollama \
+  --gemma-model gemma3:4b
+```
+
+## 启动可视化 Demo
 
 ```bash
 python app.py
 ```
 
-### Enable pyannote (optional, 3 steps)
+Gradio Demo 包含：
 
-Without this the pipeline still runs, but diarization and overlap detection use the lightweight fallbacks. To turn on the real pyannote models:
+- 音频上传；
+- pipeline 执行；
+- 时间线展示；
+- 高重叠候选展示；
+- Episodic Memory 展示；
+- 证据问答。
 
-1. **Install:** `pip install pyannote.audio`
-2. **Accept the terms** (one-time, per Hugging Face account) for [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1) and [pyannote/overlapped-speech-detection](https://huggingface.co/pyannote/overlapped-speech-detection).
-3. **Set your token** as an environment variable (never commit it):
+也可以启动 Streamlit 版本：
 
-   ```bash
-   export HF_TOKEN=hf_xxx          # Windows PowerShell: $env:HF_TOKEN="hf_xxx"
-   ```
+```bash
+streamlit run streamlit_app.py
+```
 
-The code reads `HF_TOKEN` (or `HUGGINGFACE_TOKEN`) at runtime; no token is stored in the repo.
+Streamlit 版本适合浏览结果：左侧配置参数，右侧用标签页查看时间线、高重叠候选、会议记忆、问答和输出文件。
 
-Keep large audio files, model weights, and generated outputs outside Git.
-
----
-
-# 中文完整翻译
-
-## 项目名称
-
-**面向多人会议理解的重叠感知双路径语音处理与情景记忆系统**
-
-## 项目背景
-
-常见的会议助手会将存在错误的转写压缩成流畅的摘要，这可能掩盖说话人归属错误、重叠语音和缺乏证据支持的结论。本项目不仅是一个会议摘要系统，更是一个**可验证的会议记忆系统**。系统会保留不确定性，并将后续回答、决策和行动项关联到带时间戳的原始证据。
-
-## 与参考论文的区别
-
-参考论文已经结合了 ASR、说话人日志、低重叠说话人聚类、高重叠语音分离、LLM 纠错和结构化会议摘要。本项目将在这一基础上进行扩展，而不是简单复现参考系统。
-
-## 系统流程
-
-1. 预处理音频并创建带时间戳的片段。
-2. 估计每个片段的重叠分数（优先 pyannote OSD，不可用时使用能量 fallback）。
-3. 对每个片段进行路由（阈值 0.4）：低重叠路径或高重叠候选路径。
-4. 为每个片段构建统一的元信息记录（17 必填字段 + 1 可选）。
-5. 导出每段音频 clip 并完成 schema 验证。
-6. 使用规则或可选的证据约束 LLM 提取结构化事件。
-7. 将事件转换为 Episodic Memory，并通过模板或可选 LLM 基于检索证据回答问题。
-
-## 元信息 Schema（17 必填字段 + 1 可选）
-
-| 字段 | 含义 |
-| --- | --- |
-| `meeting_id` | 稳定会议标识 |
-| `segment_id` | 稳定片段标识 |
-| `evidence_id` | 证据记录唯一 ID |
-| `speaker` | 说话人标签或假设 |
-| `start_time`, `end_time` | 以秒为单位的证据时间范围 |
-| `text` | 当前转写文本 |
-| `processing_path` | `low_overlap_cluster` 或 `high_overlap_candidate` |
-| `route_reason` | 路由决策说明 |
-| `overlap_score` | 估计的重叠概率 [0, 1] |
-| `asr_confidence` | ASR 置信度 [0, 1] |
-| `speaker_confidence` | 说话人归属置信度 [0, 1] |
-| `audio_clip_path` | 导出音频 clip 路径 |
-| `source_audio_path` | 原始输入音频路径 |
-| `language` | 语言代码 |
-| `candidates` | 备选转写和说话人解释 |
-| `uncertainty_note` | 对不确定原因的可读说明 |
-| `cluster_similarity_distribution` | *可选。* 聚类 fallback 的相对相似度分布（未校准信号，默认 `{}`） |
-
-## 当前进度
-
-项目已达到**阶段三基线实现至 Step 19，并进入阶段四正式评估**。阶段一已完成；阶段二的实现已到 Step 12，仅 Step 7b 正式阈值校准未完成；阶段三的事件、记忆、检索和问答基线已实现，仍需完成 Step 16b 与 Step 20 对比实验。轻量依赖环境可以完整验证软件流程，但尚未产生真实重模型与人工标注数据上的最终实验结论。
+## 当前状态
 
 已完成：
-- pipeline 编排、音频预处理、VAD、音频切片、重叠检测（pyannote OSD + 能量 fallback）、双路径路由、ASR 适配器、高重叠候选生成、元数据构建与 schema 验证；
-- NMF 与可选 SepFormer 高重叠语音分离、分轨 ASR 候选与多参数解码回退；
-- evidence-only JSON Prompt、LLM 输出修复与校验、确定性事件提取 fallback，以及独立的 Step 16a 规则事件基线与种子 per-type 评估；默认无 LLM Pipeline 当前仍使用通用证据关联 fallback；
-- 按事件分组的 Episodic Memory、原子 JSON 持久化、混合检索与会议/说话人/时间过滤；
-- 引用 evidence ID 与时间戳、保留不确定性并拒绝无证据回答的 QA；
-- 五区 Gradio 工作流和端到端 CLI Pipeline；
-- WER、CER、重叠路由、说话人归属、引用率和时间戳引用率等基础指标。
 
-当前可运行程度：
-- 仅安装轻量依赖时可以完整运行 Pipeline，但会使用 Mock ASR 与确定性 fallback，适合验证系统流程，不代表真实识别效果；
-- 配置可选依赖、模型、Hugging Face token 和 Ollama 服务后，可切换真实 ASR、pyannote、Gemma 与 Gradio。
+- 端到端 pipeline；
+- 音频预处理和 VAD；
+- diarization / overlap adapter；
+- 低重叠 ASR 路径；
+- 高重叠候选生成；
+- 高重叠 resolver；
+- evidence schema 和 validator；
+- Episodic Memory；
+- 自定义 BLAKE2 hash embedding 检索；
+- evidence-backed QA；
+- Gradio demo；
+- 自动化测试。
 
-下一阶段应优先构建人工标注评估集，并完成 Step 7b（按正式 Pipeline 的 VAD 片段与融合分数校准阈值）；随后完成真实高重叠/语音分离质量对比、Step 16b 事件抽取消融、Step 20 QA 对比和其余 Phase 4 实验。
+仍建议后续优先补：
 
-2026 年 6 月 15 日验证：轻量环境下全部 `424` 个测试通过，`1` 个可选 Gradio 组件测试因未安装 Gradio 跳过；语法编译通过；Step 16a 规则事件种子实验复现总体 precision/recall/F1 `0.833 / 0.833 / 0.833`。
+- 真实会议音频样例；
+- 人工标注的 overlap / speaker / transcript 评估集；
+- 高重叠 resolver 的质量评估；
+- WhisperX / faster-whisper / pyannote 在真实音频上的运行记录。
 
-## 运行方式
+## Git 注意事项
 
-```bash
-python -m pip install -r requirements.txt
-python -m unittest discover -s tests -v
-python main.py data/raw_audio/meeting_001.wav --meeting-id meeting_001
-python app.py
-```
+不要提交：
 
-### 启用 pyannote（可选，三步）
+- 大型音频文件；
+- 模型权重；
+- `outputs/` 下生成结果；
+- 本地环境文件。
 
-不做这三步也能运行，但 diarization 和重叠检测会走轻量 fallback。启用真实 pyannote 模型：
-
-1. **安装：** `pip install pyannote.audio`
-2. **接受模型条款**（每个 Hugging Face 账号一次）：[pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1) 与 [pyannote/overlapped-speech-detection](https://huggingface.co/pyannote/overlapped-speech-detection)。
-3. **设置 token** 为环境变量（切勿提交到 Git）：
-
-   ```bash
-   export HF_TOKEN=hf_xxx          # Windows PowerShell：$env:HF_TOKEN="hf_xxx"
-   ```
-
-代码运行时从 `HF_TOKEN`（或 `HUGGINGFACE_TOKEN`）读取；仓库内不保存任何 token。
-
-独立中文版详见 [README.zh-CN.md](README.zh-CN.md)。大型音频文件、模型权重和生成结果不应提交到 Git。
+仓库应优先保持主流程清楚、能运行、能演示。

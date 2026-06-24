@@ -15,10 +15,10 @@ from src.audio.preprocess import TARGET_SAMPLE_RATE
 from src.fallbacks.candidates import fallback_candidates
 
 DEFAULT_DECODE_CONFIGS: list[dict[str, Any]] = [
-    {"beam_size": 1, "temperature": 0.0, "language": None},
-    {"beam_size": 5, "temperature": 0.0, "language": None},
+    {"beam_size": 1, "temperature": 0.0, "language": "zh"},
+    {"beam_size": 5, "temperature": 0.0, "language": "zh"},
+    {"beam_size": 8, "temperature": 0.0, "language": "zh"},
     {"beam_size": 5, "temperature": 0.4, "language": "zh"},
-    {"beam_size": 5, "temperature": 0.8, "language": "en"},
 ]
 
 # Below this RMS a separated track carries no usable speech; transcribing it
@@ -63,7 +63,7 @@ def generate_high_overlap_candidates(
         speaker_hypotheses = [str(segment["speaker"])]
     if samples is not None and samples.size:
         candidates = _generate_with_faster_whisper(
-            segment, samples, sample_rate, configs, max_candidates, speaker_hypotheses, asr_config
+            segment, samples, sample_rate, configs, max_candidates, speaker_hypotheses, language, asr_config
         )
         if candidates:
             return candidates
@@ -107,11 +107,14 @@ def generate_separated_source_candidates(
                 beam_size=int(config["beam_size"]),
                 temperature=float(config["temperature"]),
                 language=config.get("language"),
+                condition_on_previous_text=False,
             )
             decoded = list(decoded_segments)
         except Exception:
             continue
         text = " ".join(str(item.text).strip() for item in decoded if str(item.text).strip()).strip()
+        if _reject_hallucinated_candidate(text, language):
+            continue
         normalized = " ".join(text.lower().split())
         # Drop empty transcripts and identical tracks: two duplicate sources
         # must not masquerade as two independent SEPARATED_SOURCE speakers.
@@ -133,6 +136,7 @@ def generate_separated_source_candidates(
                 "beam_size": int(config["beam_size"]),
                 "temperature": float(config["temperature"]),
                 "language": config.get("language") or "auto",
+                **_decode_window(segment),
             },
         })
     return candidates
@@ -145,6 +149,7 @@ def _generate_with_faster_whisper(
     decode_configs: list[dict[str, Any]],
     max_candidates: int,
     speaker_hypotheses: list[str] | None,
+    language: str | None,
     asr_config: dict[str, str] | None = None,
 ) -> list[dict]:
     """Run faster-whisper with multiple decode settings when available."""
@@ -170,12 +175,15 @@ def _generate_with_faster_whisper(
                 beam_size=int(config["beam_size"]),
                 temperature=float(config["temperature"]),
                 language=config.get("language"),
+                condition_on_previous_text=False,
             )
             decoded = list(decoded_segments)
         except Exception:
             continue
 
         text = " ".join(str(seg.text).strip() for seg in decoded if str(seg.text).strip()).strip()
+        if _reject_hallucinated_candidate(text, language):
+            continue
         normalized = " ".join(text.lower().split())
         if not normalized or normalized in seen_text:
             continue
@@ -193,6 +201,7 @@ def _generate_with_faster_whisper(
                 "beam_size": int(config["beam_size"]),
                 "temperature": float(config["temperature"]),
                 "language": config.get("language") or "auto",
+                **_decode_window(segment),
             },
         })
         if len(candidates) >= max_candidates:
@@ -223,12 +232,27 @@ def _confidence_from_decoded_segments(decoded_segments: list[Any]) -> float:
 
 
 def _with_language_override(configs: list[dict[str, Any]], language: str | None) -> list[dict[str, Any]]:
-    """Use requested language for the auto config while keeping zh/en probes."""
+    """Use the requested language for all high-overlap decodes."""
     if not language or language in {"und", "unknown", "auto"}:
         return configs
     updated = [dict(config) for config in configs]
-    updated[0]["language"] = language
+    for config in updated:
+        config["language"] = language
     return updated
+
+
+def _reject_hallucinated_candidate(text: str, language: str | None) -> bool:
+    """Drop obvious short non-Chinese hallucinations in Chinese meetings."""
+    if language not in {"zh", "zh-cn", "zh-CN", "cmn", "mandarin"}:
+        return False
+    stripped = "".join(text.split())
+    if not stripped:
+        return True
+    chinese_chars = sum(1 for char in stripped if "\u4e00" <= char <= "\u9fff")
+    ascii_letters = sum(1 for char in stripped if char.isascii() and char.isalpha())
+    if chinese_chars:
+        return False
+    return ascii_letters > 0 and len(stripped) <= 32
 
 
 def _speaker_hypothesis(index: int, speakers: list[str] | None = None) -> str:
@@ -237,6 +261,16 @@ def _speaker_hypothesis(index: int, speakers: list[str] | None = None) -> str:
     if not normalized:
         return "UNKNOWN"
     return normalized[(index - 1) % len(normalized)]
+
+
+def _decode_window(segment: dict[str, Any]) -> dict[str, float]:
+    """Expose local decode context without changing evidence timestamps."""
+    if "decode_start_time" not in segment or "decode_end_time" not in segment:
+        return {}
+    return {
+        "decode_start_time": round(float(segment["decode_start_time"]), 3),
+        "decode_end_time": round(float(segment["decode_end_time"]), 3),
+    }
 
 
 @lru_cache(maxsize=4)

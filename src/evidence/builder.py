@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from src.overlap.detector import DEFAULT_OVERLAP_THRESHOLD
 from src.overlap.router import route_segment
 from src.evidence.validator import validate_meeting, validate_metadata_segment
 from src.utils import required_text
@@ -11,20 +12,6 @@ from src.utils import required_text
 LOW_OVERLAP_PATH = "low_overlap_cluster"
 HIGH_OVERLAP_PATH = "high_overlap_candidate"
 VALID_PROCESSING_PATHS = {LOW_OVERLAP_PATH, HIGH_OVERLAP_PATH}
-
-
-def _coerce_str(value: Any, default: str = "") -> str:
-    """Return *default* when *value* is None, otherwise ``str(value)``.
-
-    Assumes *value* is either None or a type whose ``str()`` produces a
-    meaningful string representation (e.g. ``str``, ``int``).
-
-    Note: this helper is intended for *optional* string fields.  Required
-    fields such as ``segment_id`` or ``speaker`` should be validated
-    explicitly by the caller (e.g. with ``required_text()``) and should
-    not rely on this helper to convert ``None`` into an empty string.
-    """
-    return default if value is None else str(value)
 
 
 def build_metadata_segment(
@@ -45,7 +32,10 @@ def build_metadata_segment(
     source_audio_path: str = "",
     language: str = "und",
     route_reason: str = "",
-    cluster_similarity_distribution: dict[str, float] | None = None,
+    source: str = "",
+    decision_reason: str = "",
+    resolution_mode: str = "",
+    source_candidate_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Build and validate one canonical evidence segment."""
     normalized_candidates = _normalize_candidates(candidates or [], segment_id, uncertainty_note)
@@ -56,19 +46,26 @@ def build_metadata_segment(
         "speaker": required_text(speaker, "speaker"),
         "start_time": float(start_time),
         "end_time": float(end_time),
-        "text": _coerce_str(text),
+        "text": _optional_text(text),
         "processing_path": str(processing_path),
         "route_reason": route_reason or f"overlap_score routed to {processing_path}",
         "overlap_score": float(overlap_score),
         "asr_confidence": float(asr_confidence),
         "speaker_confidence": float(speaker_confidence),
-        "audio_clip_path": _coerce_str(audio_clip_path),
-        "source_audio_path": _coerce_str(source_audio_path),
-        "language": str(language or "und"),
+        "audio_clip_path": _optional_text(audio_clip_path),
+        "source_audio_path": _optional_text(source_audio_path),
+        "language": _optional_text(language, default="und") or "und",
         "candidates": normalized_candidates,
-        "uncertainty_note": _coerce_str(uncertainty_note),
-        "cluster_similarity_distribution": _normalize_distribution(cluster_similarity_distribution),
+        "uncertainty_note": _optional_text(uncertainty_note),
     }
+    if source:
+        record["source"] = str(source)
+    if decision_reason:
+        record["decision_reason"] = str(decision_reason)
+    if resolution_mode:
+        record["resolution_mode"] = str(resolution_mode)
+    if source_candidate_ids:
+        record["source_candidate_ids"] = list(source_candidate_ids)
     return validate_metadata_segment(record)
 
 
@@ -79,7 +76,7 @@ def build_evidence_segments(
     meeting_id: str | None = None,
     source_audio_path: str = "",
     language: str = "und",
-    overlap_threshold: float = 0.4,
+    overlap_threshold: float = DEFAULT_OVERLAP_THRESHOLD,
 ) -> list[dict[str, Any]]:
     """Merge low/high-overlap results into sorted canonical evidence records."""
     _require_segment_list(low_overlap_segments, "low_overlap_segments")
@@ -137,19 +134,9 @@ def _build_from_processed_segment(
     language: str,
     overlap_threshold: float,
 ) -> dict[str, Any]:
-    """Build one metadata record from a processed low- or high-overlap segment.
-
-    ``text`` and ``uncertainty_note`` are coerced through ``_coerce_str``,
-    so ``None`` becomes ``""``.  Whether an empty string is accepted or
-    rejected depends on the ``processing_path`` and is enforced later by
-    ``validate_metadata_segment``:
-
-    - ``low_overlap_cluster`` requires non-empty ``text``.
-    - ``high_overlap_candidate`` requires empty ``text`` and non-empty
-      ``uncertainty_note`` (via ``candidates`` and the segment-level note).
-    """
     if not isinstance(segment, dict):
         raise ValueError(f"{expected_path} entries must be dictionaries")
+    _validate_optional_distribution(segment)
 
     actual_path = str(segment.get("processing_path") or expected_path)
     if actual_path != expected_path:
@@ -160,66 +147,30 @@ def _build_from_processed_segment(
         raise ValueError(f"segment {segment.get('segment_id', '<unknown>')} is missing meeting_id")
 
     overlap_score = float(segment.get("overlap_score", 0.0))
-    generated_route_reason = _route_reason(overlap_score, overlap_threshold, expected_path)
-    route_reason = str(segment.get("route_reason") or generated_route_reason)
-
-    # Resolve segment-level overrides for optional fields.  Both ``None``
-    # and the empty string are treated as "not provided" so that upstream
-    # segments which use ``""`` to mean "missing" still fall back to the
-    # caller-supplied parameter rather than silently discarding it.
-    segment_source_audio = segment.get("source_audio_path")
-    resolved_source_audio = (
-        source_audio_path if segment_source_audio in (None, "") else segment_source_audio
-    )
-    segment_language = segment.get("language")
-    resolved_language = language if segment_language in (None, "") else segment_language
-
+    route_reason = str(segment.get("route_reason") or _route_reason(overlap_score, overlap_threshold, expected_path))
     return build_metadata_segment(
-        meeting_id=str(segment_meeting_id),
-        # Required fields: fall back to "" so ``required_text`` can give a
-        # single, clear error message for both missing keys and ``None``.
-        segment_id=segment.get("segment_id") or "",
+        meeting_id=segment_meeting_id,
+        segment_id=segment.get("segment_id"),
         evidence_id=segment.get("evidence_id"),
-        speaker=_coerce_str(segment.get("speaker") or ""),
+        speaker=segment.get("speaker"),
         start_time=float(segment.get("start_time", 0.0)),
         end_time=float(segment.get("end_time", 0.0)),
-        text=_coerce_str(segment.get("text")),
+        text=_segment_text(segment, expected_path),
         processing_path=expected_path,
         route_reason=route_reason,
         overlap_score=overlap_score,
         asr_confidence=float(segment.get("asr_confidence", 0.0)),
         speaker_confidence=float(segment.get("speaker_confidence", 0.0)),
         candidates=list(segment.get("candidates", [])),
-        uncertainty_note=_coerce_str(segment.get("uncertainty_note")),
-        audio_clip_path=_coerce_str(segment.get("audio_clip_path")),
-        source_audio_path=_coerce_str(resolved_source_audio),
-        language=_coerce_str(resolved_language),
-        cluster_similarity_distribution=segment.get("cluster_similarity_distribution"),
+        uncertainty_note=_optional_text(segment.get("uncertainty_note")),
+        audio_clip_path=_optional_text(segment.get("audio_clip_path")),
+        source_audio_path=_optional_text(segment.get("source_audio_path")) or _optional_text(source_audio_path),
+        language=_optional_text(segment.get("language")) or _optional_text(language, default="und") or "und",
+        source=_optional_text(segment.get("source")),
+        decision_reason=_optional_text(segment.get("decision_reason")),
+        resolution_mode=_optional_text(segment.get("resolution_mode")),
+        source_candidate_ids=list(segment.get("source_candidate_ids", [])),
     )
-
-
-def _normalize_distribution(distribution: dict[str, float] | None) -> dict[str, float]:
-    """Coerce a cluster-similarity distribution into a ``{label: value}`` map.
-
-    Validates that every key is a string to catch upstream data-format
-    errors (e.g. ``None`` or numeric keys produced by buggy JSON
-    deserialization or manual dict construction).
-    """
-    if not distribution:
-        return {}
-    if not isinstance(distribution, dict):
-        raise ValueError(
-            "cluster_similarity_distribution must be a mapping of speaker label to value"
-        )
-    normalized: dict[str, float] = {}
-    for label, value in distribution.items():
-        if not isinstance(label, str):
-            raise ValueError(
-                "cluster_similarity_distribution keys must be strings, "
-                f"got {type(label).__name__}"
-            )
-        normalized[label] = float(value)
-    return normalized
 
 
 def _normalize_candidates(
@@ -281,6 +232,29 @@ def _read_segment_list(path: str | Path) -> list[dict[str, Any]]:
     if not isinstance(payload, list):
         raise ValueError(f"{path} must contain a JSON list")
     return payload
+
+
+def _optional_text(value: Any, default: str = "") -> str:
+    if value is None:
+        return default
+    return str(value)
+
+
+def _segment_text(segment: dict[str, Any], expected_path: str) -> str:
+    value = segment.get("text")
+    if value is None and expected_path == HIGH_OVERLAP_PATH:
+        return ""
+    return _optional_text(value)
+
+
+def _validate_optional_distribution(segment: dict[str, Any]) -> None:
+    distribution = segment.get("cluster_similarity_distribution")
+    if distribution is None:
+        return
+    if not isinstance(distribution, dict):
+        raise ValueError("cluster_similarity_distribution must be a dictionary")
+    if any(not isinstance(key, str) for key in distribution):
+        raise ValueError("cluster_similarity_distribution keys must be strings")
 
 
 __all__ = [

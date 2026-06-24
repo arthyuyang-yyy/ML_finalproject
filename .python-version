@@ -1,0 +1,4 @@
+# Pin the Python version expected by .venv (matches Dockerfile python:3.11-slim
+# and pyproject.toml requires-python). Read by pyenv, asdf, VSCode Python
+# extension, and many CI tools.
+3.11

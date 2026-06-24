@@ -1,0 +1,104 @@
+{
+  // Debug configurations. Press F5 (or use the Run and Debug sidebar) to
+  // launch any of these without typing a CLI. Every config runs from the
+  // repo root so that ``src.*`` imports resolve as the production code
+  // expects, and loads ``.env`` so HF_TOKEN / API keys are in scope.
+
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run pipeline (single audio)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "args": [
+        "${workspaceFolder}/data/alimeeting/Eval_Ali/Eval_Ali_far/audio_dir/R8009_M8018_MS809.wav",
+        "--meeting-id", "R8009_M8018_MS809",
+        "--asr", "faster-whisper",
+        "--asr-device", "cuda",
+        "--asr-compute-type", "float16"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "Run pipeline (mock, no GPU)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/main.py",
+      "args": [
+        "${workspaceFolder}/data/alimeeting/Eval_Ali/Eval_Ali_far/audio_dir/R8009_M8018_MS809.wav",
+        "--meeting-id", "R8009_M8018_MS809",
+        "--asr", "mock"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "Debug run_one.py",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/experiments/scripts/run_one.py",
+      "args": [
+        "--cell-id", "asr=faster-whisper_osd=pyannote_resolver=none_sep=none",
+        "--meeting-id", "R8009_M8018_MS809",
+        "--audio", "${workspaceFolder}/data/alimeeting/Eval_Ali/Eval_Ali_far/audio_dir/R8009_M8018_MS809.wav",
+        "--cell-json", "{\"cell_id\":\"asr=faster-whisper_osd=pyannote_resolver=none_sep=none\",\"asr\":\"faster-whisper\",\"osd\":\"pyannote\",\"resolver\":\"none\",\"separation\":\"none\",\"language\":\"zh\",\"asr_device\":\"cuda\",\"asr_compute_type\":\"float16\",\"faster_whisper_model\":\"small\"}"
+      ],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "Debug evaluate_runs.py",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/experiments/scripts/evaluate_runs.py",
+      "args": ["--runs-root", "${workspaceFolder}/experiments/runs", "--force"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "Aggregate results",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/experiments/scripts/aggregate.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Pytest (current file)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["-q", "${file}"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "Pytest (full suite)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["-q", "tests"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "Setup models (download weights)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/setup_models.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "envFile": "${workspaceFolder}/.env"
+    }
+  ]
+}

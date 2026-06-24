@@ -5,12 +5,17 @@ import os
 from functools import lru_cache
 from typing import Any
 
+import numpy as np
+
 from src.errors import BackendExecutionError, BackendUnavailableError
 from src.fallbacks.diarization import cluster_speakers
 
 DEFAULT_SPEAKER_CONFIDENCE = 0.78
 MIN_SPEAKER_COVERAGE = 0.70
 MIXED_SPEAKER_COVERAGE = 0.20
+SHORT_SEGMENT_MAX_SECONDS = 2.0
+SHORT_SEGMENT_MIN_SPEAKER_COVERAGE = 0.35
+SHORT_SEGMENT_MIN_SPEAKER_SECONDS = 0.25
 PYANNOTE_DIARIZATION_MODEL = "pyannote/speaker-diarization-3.1"
 
 logger = logging.getLogger(__name__)
@@ -68,8 +73,10 @@ def assign_speakers_to_segments(
     assigned: list[dict[str, Any]] = []
     for segment in segments:
         coverage_by_speaker = _speaker_coverage(segment, diarization_turns)
+        covered_seconds_by_speaker = _speaker_covered_seconds(segment, diarization_turns)
         ordered = sorted(coverage_by_speaker.items(), key=lambda item: item[1], reverse=True)
         best_speaker, coverage = ordered[0] if ordered else (None, 0.0)
+        best_seconds = covered_seconds_by_speaker.get(best_speaker, 0.0) if best_speaker else 0.0
         significant = [speaker for speaker, value in ordered if value >= MIXED_SPEAKER_COVERAGE]
         if coverage >= MIN_SPEAKER_COVERAGE and best_speaker is not None:
             speaker = best_speaker
@@ -77,6 +84,16 @@ def assign_speakers_to_segments(
         elif len(significant) >= 2:
             speaker = "MIXED"
             confidence = min(1.0, sum(coverage_by_speaker.values()))
+        elif (
+            best_speaker is not None
+            and _segment_duration(segment) <= SHORT_SEGMENT_MAX_SECONDS
+            and (
+                coverage >= SHORT_SEGMENT_MIN_SPEAKER_COVERAGE
+                or best_seconds >= SHORT_SEGMENT_MIN_SPEAKER_SECONDS
+            )
+        ):
+            speaker = best_speaker
+            confidence = coverage
         else:
             speaker = "UNKNOWN"
             confidence = coverage
@@ -98,6 +115,13 @@ def diarize_with_pyannote(
     A missing token means the optional backend is disabled and returns
     ``None``. Once configured, dependency, model-loading, and inference
     failures are surfaced because diarization is then a required service.
+
+    The audio is loaded with the project's own :func:`load_audio` (soundfile
+    based, 16 kHz mono float32) and fed to the pipeline as an in-memory
+    waveform. This avoids pyannote.audio 4.x's hard dependency on
+    ``torchcodec``/FFmpeg for file decoding, which frequently breaks on
+    macOS where the system FFmpeg major version does not match the one
+    torchcodec was built against.
     """
     token = auth_token or os.environ.get("HUGGINGFACE_TOKEN") or os.environ.get("HF_TOKEN")
     if not token:
@@ -106,19 +130,64 @@ def diarize_with_pyannote(
 
     try:
         pipeline = load_pyannote_pipeline(model_name, token)
-        output = pipeline(audio_path)
     except ImportError as exc:
         raise BackendUnavailableError(
             "pyannote diarization is configured but pyannote.audio is unavailable"
         ) from exc
+    except (BackendUnavailableError, BackendExecutionError):
+        raise
     except Exception as exc:
         raise BackendExecutionError(
             f"pyannote diarization failed for model '{model_name}'"
         ) from exc
 
+    try:
+        import torch
+
+        from ..audio.preprocess import TARGET_SAMPLE_RATE, load_audio
+
+        samples, sample_rate = load_audio(audio_path)
+        if sample_rate != TARGET_SAMPLE_RATE:
+            from ..audio.preprocess import resample
+
+            samples = resample(samples, sample_rate, TARGET_SAMPLE_RATE)
+            sample_rate = TARGET_SAMPLE_RATE
+        waveform = torch.from_numpy(np.asarray(samples, dtype=np.float32)).unsqueeze(0)
+        output = pipeline({"waveform": waveform, "sample_rate": int(sample_rate)})
+    except ImportError as exc:
+        raise BackendUnavailableError(
+            "pyannote diarization is configured but pyannote.audio is unavailable"
+        ) from exc
+    except (BackendUnavailableError, BackendExecutionError):
+        raise
+    except Exception as exc:
+        raise BackendExecutionError(
+            f"pyannote diarization failed for model '{model_name}'"
+        ) from exc
+
+    return _pyannote_turns_to_dicts(_annotation_from_output(output))
+
+
+def _annotation_from_output(output: Any) -> Any:
+    """Return the pyannote ``Annotation`` from a pipeline output.
+
+    pyannote.audio 4.x returns a ``DiarizeOutput`` namedtuple whose
+    ``speaker_diarization`` field holds the classic :class:`Annotation`, while
+    older versions returned the ``Annotation`` (or timeline-like object)
+    directly. This normalises both so callers can rely on ``itertracks``.
+    """
+    for attr in ("speaker_diarization", "annotation"):
+        candidate = getattr(output, attr, None)
+        if candidate is not None and hasattr(candidate, "itertracks"):
+            return candidate
+    return output
+
+
+def _pyannote_turns_to_dicts(annotation: Any) -> list[dict[str, Any]]:
+    """Convert a pyannote ``Annotation`` into the project's turn dicts."""
     turns: list[dict[str, Any]] = []
-    if hasattr(output, "itertracks"):
-        for turn, _, speaker in output.itertracks(yield_label=True):
+    if hasattr(annotation, "itertracks"):
+        for turn, _, speaker in annotation.itertracks(yield_label=True):
             turns.append({
                 "speaker": str(speaker),
                 "start_time": round(float(turn.start), 3),
@@ -130,10 +199,31 @@ def diarize_with_pyannote(
 
 @lru_cache(maxsize=4)
 def load_pyannote_pipeline(model_name: str, token: str) -> Any:
-    """Load each pyannote model once per process."""
+    """Load each pyannote model once per process and move it to the best accelerator.
+
+    pyannote 3.x runs on CPU by default, which is prohibitively slow for long
+    meetings (tens of minutes of audio can take tens of minutes to diarize).
+    The pipeline is moved to CUDA/MPS when available so inference does not
+    appear to hang; failures here are non-fatal and fall back to CPU.
+    """
     from pyannote.audio import Pipeline
 
-    return Pipeline.from_pretrained(model_name, use_auth_token=token)
+    pipeline = Pipeline.from_pretrained(model_name, token=token)
+    _move_pipeline_to_accelerator(pipeline)
+    return pipeline
+
+
+def _move_pipeline_to_accelerator(pipeline: Any) -> None:
+    """Move a pyannote pipeline to CUDA/MPS when available, else keep CPU."""
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            pipeline.to(torch.device("cuda"))
+        elif torch.backends.mps.is_available():
+            pipeline.to(torch.device("mps"))
+    except Exception as exc:
+        logger.warning("could not move pyannote pipeline to accelerator; using CPU: %s", exc)
 
 
 def _best_speaker_for_segment(
@@ -159,10 +249,24 @@ def _speaker_coverage(
     diarization_turns: list[dict[str, Any]],
 ) -> dict[str, float]:
     """Return per-speaker fractions of the segment duration."""
+    duration = _segment_duration(segment)
+    if duration == 0.0:
+        return {}
+
+    return {
+        speaker: min(1.0, covered / duration)
+        for speaker, covered in _speaker_covered_seconds(segment, diarization_turns).items()
+    }
+
+
+def _speaker_covered_seconds(
+    segment: dict[str, Any],
+    diarization_turns: list[dict[str, Any]],
+) -> dict[str, float]:
+    """Return per-speaker covered seconds within one segment."""
     start = float(segment["start_time"])
     end = float(segment["end_time"])
-    duration = max(0.0, end - start)
-    if duration == 0.0:
+    if end <= start:
         return {}
 
     covered_seconds: dict[str, float] = {}
@@ -175,4 +279,8 @@ def _speaker_coverage(
             continue
         speaker = str(turn["speaker"])
         covered_seconds[speaker] = covered_seconds.get(speaker, 0.0) + (overlap_end - overlap_start)
-    return {speaker: min(1.0, covered / duration) for speaker, covered in covered_seconds.items()}
+    return covered_seconds
+
+
+def _segment_duration(segment: dict[str, Any]) -> float:
+    return max(0.0, float(segment["end_time"]) - float(segment["start_time"]))

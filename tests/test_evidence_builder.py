@@ -71,7 +71,7 @@ class EvidenceBuilderTests(unittest.TestCase):
         self.assertEqual(set(evidence[0]), set(EVIDENCE_SEGMENT_FIELDS))
         self.assertEqual(evidence[0]["evidence_id"], "m1_seg_012")
         self.assertEqual(evidence[0]["source_audio_path"], "data/raw/meeting_001.wav")
-        self.assertIn("threshold=0.400", evidence[0]["route_reason"])
+        self.assertIn("threshold=0.500", evidence[0]["route_reason"])
 
     def test_normalizes_document_candidate_shape(self) -> None:
         evidence = build_evidence_segments([], [_high_segment()])

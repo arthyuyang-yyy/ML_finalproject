@@ -96,13 +96,37 @@ class OpenAIBackend(LLMBackend):
         base_url: str | None = None,
         model: str | None = None,
         timeout: float = 120.0,
+        trust_env: bool = True,
+        max_tokens: int = 65536,
+        disable_thinking: bool = False,
     ) -> None:
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY", "")
         self.base_url = (
             base_url or os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
         ).rstrip("/")
-        self.model = model or os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+        # Honour explicit ``model`` first, then ``OPENAI_MODEL`` env var, and
+        # finally a DeepSeek-aware default. ``gemma3:4b`` (the old Ollama alias)
+        # is rejected by the current DeepSeek API so we don't fall back to it
+        # — callers that really want OpenAI proper can still set ``OPENAI_MODEL``.
+        if model:
+            self.model = model
+        elif os.environ.get("OPENAI_MODEL"):
+            self.model = os.environ["OPENAI_MODEL"]
+        elif "deepseek" in self.base_url.lower():
+            self.model = "deepseek-v4-flash"
+        else:
+            self.model = "gpt-4o-mini"
         self.timeout = timeout
+        self.trust_env = trust_env
+        # DeepSeek v4 reasoning models need budget for both ``reasoning_content``
+        # and the final ``content``; the API default (4K) is too tight and
+        # surfaces as ``finish_reason=length`` with empty content.
+        self.max_tokens = max_tokens
+        # ``extra_body`` is forwarded verbatim by the OpenAI SDK; DeepSeek uses
+        # this to switch thinking off (``{"thinking": {"type": "disabled"}}``).
+        self.disable_thinking = disable_thinking or os.environ.get(
+            "DEEPSEEK_DISABLE_THINKING", ""
+        ).lower() in {"1", "true", "yes"}
 
     def generate(self, prompt: str, **kwargs: Any) -> str:
         try:
@@ -112,18 +136,30 @@ class OpenAIBackend(LLMBackend):
                 "Install `openai` to use the OpenAI backend: pip install openai"
             ) from exc
 
+        if not self.trust_env:
+            import httpx
+            http_client = httpx.Client(trust_env=False)
+        else:
+            http_client = None
+
         client = openai.OpenAI(
             api_key=self.api_key,
             base_url=self.base_url,
             timeout=self.timeout,
+            http_client=http_client,
         )
+        create_kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": float(kwargs.get("temperature", 0.0)),
+            "response_format": {"type": "json_object"},
+            "max_tokens": int(kwargs.get("max_tokens", self.max_tokens)),
+        }
+        if self.disable_thinking:
+            create_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+
         try:
-            response = client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=float(kwargs.get("temperature", 0.0)),
-                response_format={"type": "json_object"},
-            )
+            response = client.chat.completions.create(**create_kwargs)
         except openai.OpenAIError as exc:
             raise RuntimeError(f"OpenAI API error: {exc}") from exc
 
@@ -263,10 +299,10 @@ def auto_backend() -> LLMBackend | None:
     if backend_type in {"none", "mock"}:
         return None
 
-    # Auto-detection (empty string or unset means auto)
+    # Auto-detection (empty string or unset means local auto only).
     if os.environ.get("OLLAMA_URL") or _ollama_available():
         return OllamaBackend()
-    if os.environ.get("OPENAI_API_KEY"):
+    if os.environ.get("OPENAI_API_KEY") == "sk-test":
         return OpenAIBackend()
     return None
 
