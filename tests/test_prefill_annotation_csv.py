@@ -95,6 +95,14 @@ class ClusterSegmentsTests(unittest.TestCase):
         segs = cluster_segments([_utt("A", 0.0, 2.0), _utt("A", 1.0, 3.0)])
         self.assertTrue(all(not s["is_overlap"] for s in segs))
 
+    def test_short_overlap_ignored_at_default_min_overlap(self) -> None:
+        # Ratified口径 (issue #63): min_overlap_seconds defaults to 1.0, so a 0.5s
+        # cross-speaker overlap is ignored and the segments stay low-overlap.
+        utts = [_utt("A", 0.0, 2.0), _utt("B", 1.5, 2.0)]  # overlap [1.5,2.0] = 0.5s
+        self.assertTrue(all(not s["is_overlap"] for s in cluster_segments(utts)))
+        # but with the threshold lowered to 0 it would count as high-overlap
+        self.assertTrue(any(s["is_overlap"] for s in cluster_segments(utts, min_overlap_seconds=0.0)))
+
 
 class CsvRowTests(unittest.TestCase):
     def test_high_overlap_rows_share_segment_id_and_blank_semantics(self) -> None:
